@@ -111,6 +111,19 @@ if(PMG_BUILD_TESTS)
     add_executable(test_registered_blending tests/test_registered_blending.cpp)
     target_link_libraries(test_registered_blending PRIVATE pmg_core)
     add_test(NAME test_registered_blending COMMAND test_registered_blending)
+
+    # CLI-level numeric validation on the real BVH corpus: the registered
+    # Walk(curvature) space must keep feet planted (contacts, slide) and vary
+    # smoothly across its parameter range, and must not regress the naive
+    # blend's contact metrics. Thresholds carry ~40% headroom over measured
+    # values so they catch regressions, not corpus noise.
+    add_test(NAME cli_space_sweep_walk
+        COMMAND pmg_cli --space-sweep ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec walk
+            --cycle-joint LeftAnkle
+            --min-contacts 2
+            --max-foot-slide 0.25
+            --max-adjacent-step 1.8
+            --assert-no-regression)
 endif()
 
 # ---------------------------------------------------------------------------

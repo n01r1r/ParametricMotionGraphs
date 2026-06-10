@@ -5,7 +5,7 @@
 namespace pmg {
 
 // Monotonic piecewise-linear mapping between two normalized phase domains,
-// pinned at (0, 0) and (1, 1). Built from matched interior anchor lists —
+// pinned at (0, 0) and (1, 1). Built from matched interior anchor lists,
 // e.g. foot-strike phases in a canonical domain mapped onto the phases where
 // the same strikes occur in one example clip. This is the registration
 // primitive that lets a motion space sample every example at the structurally

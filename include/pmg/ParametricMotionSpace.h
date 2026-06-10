@@ -44,6 +44,12 @@ public:
 
     Pose EvaluatePose(const ParameterVector& parameter, float normalized_phase) const;
 
+    // Generates a clip by blending joints/height per frame (EvaluatePose) but
+    // integrating the root's floor motion from blended per-frame root deltas
+    // expressed in each example's own heading frame. Blending absolute root
+    // positions would average arcs of different curvature into a distorted
+    // path and drag planted feet sideways; delta integration follows an
+    // intermediate arc instead.
     MotionClip GenerateClip(
         const ParameterVector& parameter,
         int frame_count,

@@ -85,4 +85,28 @@ void RegisterSpaceByContacts(
     space.SetExampleTimeWarps(BuildRegistrationWarps(example_anchor_phases));
 }
 
+MotionClip ExtractFirstCycle(
+    const Skeleton& skeleton,
+    const MotionClip& clip,
+    int cycle_joint,
+    const ContactDetectionSettings& settings) {
+    const std::vector<ContactInterval> intervals =
+        DetectContacts(skeleton, clip, {cycle_joint}, settings);
+    if (intervals.size() < 2) {
+        throw std::runtime_error(
+            "ExtractFirstCycle: need at least two contacts of the cycle joint, found " +
+            std::to_string(intervals.size()));
+    }
+
+    const int cycle_start = intervals[0].first_frame;
+    const int cycle_end = intervals[1].first_frame;  // next strike closes the cycle
+
+    MotionClip cycle;
+    cycle.name = clip.name + "_cycle";
+    cycle.frames_per_second = clip.frames_per_second;
+    cycle.frames.assign(clip.frames.begin() + cycle_start,
+                        clip.frames.begin() + cycle_end + 1);
+    return cycle;
+}
+
 }  // namespace pmg
