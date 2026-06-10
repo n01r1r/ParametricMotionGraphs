@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
 #include "pmg/MotionClip.h"
 #include "pmg/MotionDistance.h"
@@ -132,6 +133,9 @@ private:
     // --- Graph runtime (PMG streaming, paper Sec 4-5) ---------------------------
     // Builds a self-edge over the parametric space and drives a RuntimeController.
     pmg::ParametricMotionGraph graph_;
+    // Owns the alignment strategy injected into the controller; must outlive it,
+    // so it is declared first (members destroy in reverse order).
+    std::optional<pmg::PointCloudAlignment> graph_alignment_;
     std::optional<pmg::RuntimeController> graph_controller_;
     bool graph_ready_ = false;
     float graph_desired_parameter_ = 0.0f;

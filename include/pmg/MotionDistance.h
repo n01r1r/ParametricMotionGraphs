@@ -2,17 +2,12 @@
 
 #include "pmg/MathTypes.h"
 #include "pmg/MotionClip.h"
+#include "pmg/RigidTransform2D.h"
 #include "pmg/Skeleton.h"
 
 #include <vector>
 
 namespace pmg {
-
-struct TransitionMatch {
-    float distance = std::numeric_limits<float>::infinity();
-    float source_phase = 0.0f;
-    float target_phase = 0.0f;
-};
 
 // Point cloud sampled over a window of frames (Kovar et al. 2002 metric, paper
 // §3.1). One point per joint per windowed frame; weights are per-point and
@@ -33,18 +28,12 @@ struct PointCloudWeighting {
     bool add_velocity_weight = false;
 };
 
-// Optimal 2D rigid alignment that maps cloud B onto cloud A: rotate B by yaw
-// `theta` about +Y, then translate by (dx, 0, dz). Recovered in closed form
-// (Kovar et al. 2002).
-struct RigidAlignment2D {
-    float theta = 0.0f;  // radians, yaw about +Y applied to cloud B
-    float dx = 0.0f;
-    float dz = 0.0f;
-};
-
+// Optimal 2D rigid alignment that maps cloud B onto cloud A (rotate B by yaw
+// about +Y, then floor translate). Recovered in closed form (Kovar et al.
+// 2002) as a RigidTransform2D.
 struct AlignedDistanceResult {
     float distance = std::numeric_limits<float>::infinity();
-    RigidAlignment2D alignment;
+    RigidTransform2D alignment;
 };
 
 // Configuration for a frame-pair distance grid (paper §3.1, Fig 3).
@@ -69,7 +58,7 @@ struct DistanceGrid {
     std::vector<int> source_frames;
     std::vector<int> target_frames;
     std::vector<float> distances;
-    std::vector<RigidAlignment2D> alignments;
+    std::vector<RigidTransform2D> alignments;
 
     int SourceCount() const { return static_cast<int>(source_frames.size()); }
     int TargetCount() const { return static_cast<int>(target_frames.size()); }
@@ -85,24 +74,11 @@ struct OptimalTransition {
     float distance = std::numeric_limits<float>::infinity();
     float source_phase = 0.0f;  // normalized [0,1]
     float target_phase = 0.0f;  // normalized [0,1]
-    RigidAlignment2D alignment;
-};
-
-struct TransitionSearchConfig {
-    float source_phase_start = 0.70f;
-    float source_phase_end = 0.95f;
-    float target_phase_start = 0.05f;
-    float target_phase_end = 0.30f;
-    int samples_per_window = 8;
+    RigidTransform2D alignment;
 };
 
 class MotionDistance {
 public:
-    static float PoseDistance(
-        const Skeleton& skeleton,
-        const Pose& source_pose,
-        const Pose& target_pose);
-
     // Build a point cloud centered on `center_frame`, spanning `window_size`
     // frames (floor(window_size/2) on each side, clamped to the clip). Points
     // are joint world positions; weights follow `weighting`.
@@ -134,12 +110,6 @@ public:
         const MotionClip& target_clip,
         const DistanceGridConfig& config = {},
         float max_distance = std::numeric_limits<float>::infinity());
-
-    static TransitionMatch FindBestTransition(
-        const Skeleton& skeleton,
-        const MotionClip& source_clip,
-        const MotionClip& target_clip,
-        const TransitionSearchConfig& config);
 };
 
 }  // namespace pmg

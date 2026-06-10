@@ -7,31 +7,6 @@
 
 namespace pmg {
 
-float MotionDistance::PoseDistance(
-    const Skeleton& skeleton,
-    const Pose& source_pose,
-    const Pose& target_pose) {
-    source_pose.RequireJointCount(skeleton.NumJoints(), "MotionDistance::PoseDistance source");
-    target_pose.RequireJointCount(skeleton.NumJoints(), "MotionDistance::PoseDistance target");
-
-    const std::vector<Vec3> source_positions = ComputeJointWorldPositions(skeleton, source_pose);
-    const std::vector<Vec3> target_positions = ComputeJointWorldPositions(skeleton, target_pose);
-
-    if (source_positions.empty()) {
-        throw std::runtime_error("MotionDistance::PoseDistance: skeleton must contain at least one joint");
-    }
-
-    const Vec3 root_alignment_delta = source_positions.front() - target_positions.front();
-
-    float sum_squared_distance = 0.0f;
-    for (std::size_t joint_index = 0; joint_index < source_positions.size(); ++joint_index) {
-        const Vec3 aligned_target = target_positions[joint_index] + root_alignment_delta;
-        sum_squared_distance += (source_positions[joint_index] - aligned_target).SquaredNorm();
-    }
-
-    return sum_squared_distance / static_cast<float>(source_positions.size());
-}
-
 PointCloud MotionDistance::BuildPointCloud(
     const Skeleton& skeleton,
     const MotionClip& clip,
@@ -140,11 +115,11 @@ AlignedDistanceResult MotionDistance::AlignedPointCloudDistance(
     const float numerator = cross_term - inv_weight * (sum_ax * sum_bz - sum_az * sum_bx);
     const float denominator = dot_term - inv_weight * (sum_ax * sum_bx + sum_az * sum_bz);
 
-    RigidAlignment2D alignment;
-    alignment.theta = std::atan2(numerator, denominator);
+    RigidTransform2D alignment;
+    alignment.yaw = std::atan2(numerator, denominator);
 
-    const float cos_theta = std::cos(alignment.theta);
-    const float sin_theta = std::sin(alignment.theta);
+    const float cos_theta = std::cos(alignment.yaw);
+    const float sin_theta = std::sin(alignment.yaw);
 
     // Rotated cloud-B mean: Ry(theta) applied to (sum_bx, sum_bz).
     const float rotated_bx = cos_theta * sum_bx + sin_theta * sum_bz;
@@ -297,50 +272,6 @@ OptimalTransition MotionDistance::FindOptimalTransition(
     best.target_phase = FramePhase(best.target_frame, target_clip.NumFrames());
     best.valid = best.distance <= max_distance;
     return best;
-}
-
-TransitionMatch MotionDistance::FindBestTransition(
-    const Skeleton& skeleton,
-    const MotionClip& source_clip,
-    const MotionClip& target_clip,
-    const TransitionSearchConfig& config) {
-    source_clip.RequireNotEmpty("MotionDistance::FindBestTransition source");
-    target_clip.RequireNotEmpty("MotionDistance::FindBestTransition target");
-
-    if (config.samples_per_window <= 0) {
-        throw std::runtime_error("MotionDistance::FindBestTransition: samples_per_window must be positive");
-    }
-
-    TransitionMatch best_match;
-
-    for (int source_sample = 0; source_sample < config.samples_per_window; ++source_sample) {
-        const float source_alpha =
-            config.samples_per_window == 1
-                ? 0.0f
-                : static_cast<float>(source_sample) / static_cast<float>(config.samples_per_window - 1);
-        const float source_phase =
-            (1.0f - source_alpha) * config.source_phase_start + source_alpha * config.source_phase_end;
-        const Pose source_pose = source_clip.SampleNormalizedPhase(source_phase);
-
-        for (int target_sample = 0; target_sample < config.samples_per_window; ++target_sample) {
-            const float target_alpha =
-                config.samples_per_window == 1
-                    ? 0.0f
-                    : static_cast<float>(target_sample) / static_cast<float>(config.samples_per_window - 1);
-            const float target_phase =
-                (1.0f - target_alpha) * config.target_phase_start + target_alpha * config.target_phase_end;
-            const Pose target_pose = target_clip.SampleNormalizedPhase(target_phase);
-
-            const float distance = PoseDistance(skeleton, source_pose, target_pose);
-            if (distance < best_match.distance) {
-                best_match.distance = distance;
-                best_match.source_phase = source_phase;
-                best_match.target_phase = target_phase;
-            }
-        }
-    }
-
-    return best_match;
 }
 
 }  // namespace pmg

@@ -13,29 +13,6 @@ namespace {
 constexpr float kExactMatchDistance = 1.0e-6f;
 }  // namespace
 
-std::optional<TransitionSample> PmgEdge::LookupNearest(
-    const ParameterVector& source_parameter) const {
-    if (samples.empty()) {
-        return std::nullopt;
-    }
-
-    float best_distance = std::numeric_limits<float>::infinity();
-    const TransitionSample* best_sample = nullptr;
-
-    for (const TransitionSample& sample : samples) {
-        const float distance = SquaredDistance(source_parameter, sample.source_parameter);
-        if (distance < best_distance) {
-            best_distance = distance;
-            best_sample = &sample;
-        }
-    }
-
-    if (best_sample == nullptr) {
-        return std::nullopt;
-    }
-    return *best_sample;
-}
-
 std::optional<InterpolatedTransition> PmgEdge::LookupInterpolated(
     const ParameterVector& source_parameter) const {
     if (samples.empty()) {

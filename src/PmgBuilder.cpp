@@ -99,7 +99,7 @@ PmgEdge PmgBuilder::BuildEdge(
             if (distance <= config.good_transition_threshold) {
                 good_hits.push_back({target_samples[target_index],
                                      transition.source_phase, transition.target_phase,
-                                     transition.alignment.theta, transition.alignment.dx,
+                                     transition.alignment.yaw, transition.alignment.dx,
                                      transition.alignment.dz});
             } else if (distance >= config.bad_transition_threshold) {
                 bad_target_parameters.push_back(target_samples[target_index]);

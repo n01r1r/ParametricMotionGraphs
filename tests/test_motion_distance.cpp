@@ -86,7 +86,7 @@ int main() {
         const pmg::AlignedDistanceResult result =
             pmg::MotionDistance::AlignedPointCloudDistance(base_cloud, base_cloud);
         assert(result.distance < 1.0e-4f);
-        assert(std::abs(result.alignment.theta) < 1.0e-3f);
+        assert(std::abs(result.alignment.yaw) < 1.0e-3f);
         assert(std::abs(result.alignment.dx) < 1.0e-3f);
         assert(std::abs(result.alignment.dz) < 1.0e-3f);
     }
@@ -101,7 +101,7 @@ int main() {
         assert(result.distance < 1.0e-3f);
         assert(std::abs(result.alignment.dx - (-dx)) < 1.0e-3f);
         assert(std::abs(result.alignment.dz - (-dz)) < 1.0e-3f);
-        assert(std::abs(result.alignment.theta) < 1.0e-3f);
+        assert(std::abs(result.alignment.yaw) < 1.0e-3f);
     }
 
     // Rotated clip -> distance ~ 0, recovered yaw ~ -theta.
@@ -111,7 +111,7 @@ int main() {
         const pmg::AlignedDistanceResult result =
             pmg::MotionDistance::AlignedPointCloudDistance(base_cloud, rotated);
         assert(result.distance < 1.0e-3f);
-        assert(std::abs(result.alignment.theta - (-theta)) < 1.0e-3f);
+        assert(std::abs(result.alignment.yaw - (-theta)) < 1.0e-3f);
     }
 
     // Distinct poses -> distance > 0 and symmetric.

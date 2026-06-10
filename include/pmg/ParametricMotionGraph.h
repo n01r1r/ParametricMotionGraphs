@@ -29,9 +29,6 @@ struct PmgEdge {
     int target_node = -1;
     std::vector<TransitionSample> samples;
 
-    std::optional<TransitionSample> LookupNearest(
-        const ParameterVector& source_parameter) const;
-
     // k-nearest interpolation of the target box + transition phases (paper §4,
     // eqs 1-3). Uses k = ParameterDimension + 1 nearest source samples with
     // Allen 2002 weights w'_i = 1/d_i - 1/d_cutoff (cutoff = the (k+1)-th
