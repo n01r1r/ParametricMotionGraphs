@@ -14,9 +14,11 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -1529,6 +1531,546 @@ ValidateGraphOptions ParseValidateGraphOptions(int argc, char** argv) {
     return options;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 4: paper applications, validated numerically.
+//   --random-walk  random transitions through the PMG; popping metric
+//   --goto         goal-directed locomotion via semantic control
+//                  (target position -> desired heading -> curvature parameter)
+// ---------------------------------------------------------------------------
+
+struct RuntimeGraphBundle {
+    pmg::Skeleton skeleton;
+    pmg::ParametricMotionGraph graph;
+    int generated_frame_count = 30;
+    float frames_per_second = 30.0f;
+};
+
+// Build the full PMG from a spec with cycle-normalized, registered spaces.
+RuntimeGraphBundle BuildRegisteredGraph(
+    const std::string& spec_path,
+    const std::string& cycle_joint,
+    const std::string& contact_joints_csv,
+    int min_contact_frames,
+    const pmg::PmgBuilderConfig& builder_config) {
+    const pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
+
+    RuntimeGraphBundle bundle;
+    std::map<std::string, int> node_indices;
+    std::vector<pmg::ParametricMotionSpace> spaces;
+
+    for (const pmg::GraphSpecNode& node : spec.nodes) {
+        pmg::ParametricMotionSpace space =
+            BuildSpaceForSweep(spec, node.name, cycle_joint, bundle.skeleton);
+
+        const std::vector<int> contact_joints =
+            ResolveJointList(bundle.skeleton, contact_joints_csv);
+        pmg::ContactDetectionSettings settings = pmg::EstimateContactSettings(
+            bundle.skeleton, space.Examples().front().clip, contact_joints);
+        settings.min_contact_frames = min_contact_frames;
+        pmg::RegisterSpaceByContacts(space, bundle.skeleton, contact_joints, settings);
+
+        bundle.generated_frame_count = space.Examples().front().clip.NumFrames();
+        bundle.frames_per_second = space.Examples().front().clip.frames_per_second;
+
+        node_indices.emplace(node.name, bundle.graph.AddNode(node.name, space));
+        spaces.push_back(std::move(space));
+    }
+
+    for (const pmg::GraphSpecEdge& spec_edge : spec.edges) {
+        const int source_index = node_indices.at(spec_edge.source_node);
+        const int target_index = node_indices.at(spec_edge.target_node);
+        pmg::EdgeBuildResult result = pmg::PmgBuilder::BuildEdgeWithReport(
+            bundle.skeleton, source_index, target_index,
+            bundle.graph.Node(source_index).motion_space,
+            bundle.graph.Node(target_index).motion_space, builder_config);
+        if (!result.report.edge_created) {
+            throw std::runtime_error("edge " + spec_edge.source_node + " -> " +
+                                     spec_edge.target_node +
+                                     " rejected: " + result.report.reject_reason);
+        }
+        bundle.graph.AddEdge(std::move(result.edge));
+    }
+    return bundle;
+}
+
+float HeadingOfPose(const pmg::Pose& pose) {
+    if (pose.local_rotations.empty()) {
+        return 0.0f;
+    }
+    const pmg::Vec3 forward = pmg::Rotate(pose.local_rotations.front(), {0.0f, 0.0f, 1.0f});
+    return std::atan2(forward.x, forward.z);
+}
+
+float WrapPiCli(float angle_radians) {
+    return angle_radians -
+           2.0f * pmg::kPi * std::round(angle_radians / (2.0f * pmg::kPi));
+}
+
+// Constant angle from the root's +Z reference to the actual travel direction,
+// estimated as a displacement-weighted circular mean over a clip. BVH corpora
+// differ in which root axis faces travel (this one walks roughly along +X);
+// steering must aim the travel direction, not the reference axis.
+float EstimateTravelHeadingOffset(const pmg::MotionClip& clip) {
+    float sum_sin = 0.0f;
+    float sum_cos = 0.0f;
+    for (int frame = 0; frame + 1 < clip.NumFrames(); ++frame) {
+        const pmg::Vec3 step =
+            clip.frames[frame + 1].root_position - clip.frames[frame].root_position;
+        const float step_length = HorizontalLength(step);
+        if (step_length <= 1.0e-5f) {
+            continue;
+        }
+        const float travel_heading = std::atan2(step.x, step.z);
+        const float reference_heading = HeadingOfPose(clip.frames[frame]);
+        const float offset = WrapPiCli(travel_heading - reference_heading);
+        sum_sin += step_length * std::sin(offset);
+        sum_cos += step_length * std::cos(offset);
+    }
+    return std::atan2(sum_sin, sum_cos);
+}
+
+// Achieved world turn rate when streaming the graph at one held parameter.
+// This differs from the example clips' own turn rates: each self-transition
+// plays only the slice between the target transition phase and the next
+// source gate, so the net heading advance per hop is the heading change over
+// that slice (including sway), not the full-cycle turn. Steering must be
+// calibrated against these achieved rates.
+float MeasureAchievedTurnRate(
+    const RuntimeGraphBundle& bundle, float parameter, float seconds) {
+    pmg::PointCloudAlignment alignment(bundle.skeleton);
+    pmg::RuntimeController controller(bundle.graph, alignment);
+    controller.Start(0, {parameter}, bundle.generated_frame_count, bundle.frames_per_second);
+
+    pmg::RuntimeControlRequest request;
+    request.desired_node = 0;
+    request.desired_parameter = {parameter};
+
+    const float dt = 1.0f / bundle.frames_per_second;
+    const int total_frames = static_cast<int>(seconds * bundle.frames_per_second);
+    float unwrapped = 0.0f;
+    float previous_heading = HeadingOfPose(controller.CurrentPose());
+    for (int frame = 0; frame < total_frames; ++frame) {
+        controller.Update(dt, request);
+        const float heading = HeadingOfPose(controller.CurrentPose());
+        unwrapped += WrapPiCli(heading - previous_heading);
+        previous_heading = heading;
+    }
+    return unwrapped / (static_cast<float>(total_frames) * dt);
+}
+
+struct PopStats {
+    float median_step = 0.0f;
+    float max_step = 0.0f;
+    float Ratio() const {
+        return median_step > 1.0e-6f ? max_step / median_step : 0.0f;
+    }
+};
+
+PopStats MeasurePopping(const pmg::Skeleton& skeleton, const std::vector<pmg::Pose>& poses) {
+    PopStats stats;
+    std::vector<float> deltas;
+    deltas.reserve(poses.size());
+    for (std::size_t frame = 1; frame < poses.size(); ++frame) {
+        deltas.push_back(MeanJointDistance(skeleton, poses[frame - 1], poses[frame]));
+    }
+    if (deltas.empty()) {
+        return stats;
+    }
+    stats.max_step = *std::max_element(deltas.begin(), deltas.end());
+    stats.median_step = Percentile(deltas, 0.5f);
+    return stats;
+}
+
+struct RandomWalkOptions {
+    std::string spec_path;
+    std::string contact_joints_csv = "LeftAnkle,RightAnkle";
+    std::string cycle_joint;
+    int min_contact_frames = 3;
+    pmg::PmgBuilderConfig builder;
+    float seconds = 30.0f;
+    unsigned int seed = 99u;
+    // Hold one constant parameter instead of randomizing: calibration mode
+    // that reports the achieved world turn rate at that parameter.
+    float hold_parameter = std::numeric_limits<float>::quiet_NaN();
+    // Assert thresholds; negative = report only.
+    int min_transitions = -1;
+    float max_pop_ratio = -1.0f;
+};
+
+// Paper application A: stream random transitions through the graph and verify
+// no frame-to-frame popping (worst step vs the median walking step).
+int RandomWalkCommand(const RandomWalkOptions& options) {
+    const RuntimeGraphBundle bundle = BuildRegisteredGraph(
+        options.spec_path, options.cycle_joint, options.contact_joints_csv,
+        options.min_contact_frames, options.builder);
+
+    pmg::PointCloudAlignment alignment(bundle.skeleton);
+    pmg::RuntimeController controller(bundle.graph, alignment);
+
+    std::mt19937 rng(options.seed);
+    std::uniform_int_distribution<int> node_picker(0, bundle.graph.NumNodes() - 1);
+    const bool hold = !std::isnan(options.hold_parameter);
+
+    const pmg::ParameterDomain start_domain = bundle.graph.Node(0).motion_space.Domain();
+    controller.Start(0,
+                     hold ? pmg::ParameterVector{options.hold_parameter}
+                          : start_domain.SampleUniform(rng),
+                     bundle.generated_frame_count, bundle.frames_per_second);
+
+    pmg::RuntimeControlRequest request;
+    request.desired_node = hold ? 0 : node_picker(rng);
+    request.desired_parameter =
+        hold ? pmg::ParameterVector{options.hold_parameter}
+             : bundle.graph.Node(request.desired_node).motion_space.Domain().SampleUniform(rng);
+
+    const float dt = 1.0f / bundle.frames_per_second;
+    const int total_frames = static_cast<int>(options.seconds * bundle.frames_per_second);
+    int last_transition_count = 0;
+
+    std::vector<pmg::Pose> poses;
+    poses.reserve(static_cast<std::size_t>(total_frames));
+    poses.push_back(controller.CurrentPose());
+
+    for (int frame = 0; frame < total_frames; ++frame) {
+        controller.Update(dt, request);
+        poses.push_back(controller.CurrentPose());
+
+        if (!hold && controller.CompletedTransitions() != last_transition_count) {
+            last_transition_count = controller.CompletedTransitions();
+            request.desired_node = node_picker(rng);
+            request.desired_parameter = bundle.graph.Node(request.desired_node)
+                                            .motion_space.Domain()
+                                            .SampleUniform(rng);
+        }
+    }
+
+    if (hold) {
+        // Achieved world turn rate: unwrapped heading change over the run.
+        float unwrapped_heading = 0.0f;
+        float previous_heading = HeadingOfPose(poses.front());
+        for (std::size_t frame = 1; frame < poses.size(); ++frame) {
+            const float heading = HeadingOfPose(poses[frame]);
+            unwrapped_heading += WrapPiCli(heading - previous_heading);
+            previous_heading = heading;
+        }
+        const float elapsed = static_cast<float>(poses.size() - 1) / bundle.frames_per_second;
+        std::cout << "hold_parameter=" << options.hold_parameter << "\n";
+        std::cout << "achieved_turn_rate=" << unwrapped_heading / elapsed << " rad/s\n";
+    }
+
+    const PopStats stats = MeasurePopping(bundle.skeleton, poses);
+    std::cout << "frames=" << poses.size() << "\n";
+    std::cout << "transitions=" << controller.CompletedTransitions() << "\n";
+    std::cout << "median_step=" << stats.median_step << "\n";
+    std::cout << "max_step=" << stats.max_step << "\n";
+    std::cout << "pop_ratio=" << stats.Ratio() << "\n";
+
+    bool failed = false;
+    if (options.min_transitions >= 0 &&
+        controller.CompletedTransitions() < options.min_transitions) {
+        std::cout << "ASSERT FAIL: transitions=" << controller.CompletedTransitions()
+                  << " < " << options.min_transitions << "\n";
+        failed = true;
+    }
+    if (options.max_pop_ratio >= 0.0f && stats.Ratio() > options.max_pop_ratio) {
+        std::cout << "ASSERT FAIL: pop_ratio=" << stats.Ratio() << " > "
+                  << options.max_pop_ratio << "\n";
+        failed = true;
+    }
+    std::cout << (failed ? "RESULT=FAIL" : "RESULT=PASS") << "\n";
+    return failed ? 1 : 0;
+}
+
+struct GotoOptions {
+    std::string spec_path;
+    float target_x = 0.0f;
+    float target_z = 0.0f;
+    std::string contact_joints_csv = "LeftAnkle,RightAnkle";
+    std::string cycle_joint;
+    int min_contact_frames = 3;
+    pmg::PmgBuilderConfig builder;
+    float seconds = 60.0f;
+    bool trace = false;
+    // Assert thresholds; negative = report only.
+    float tolerance = -1.0f;
+    float max_pop_ratio = -1.0f;
+};
+
+// Paper application B/C: goal-directed locomotion through semantic control.
+// The user-level intent is a target position; it is converted to a desired
+// heading, the heading error to a turn rate, and the turn rate to the walk
+// space's curvature parameter via the examples' measured turn rates. The
+// raw parameter never appears in the interface.
+int GotoCommand(const GotoOptions& options) {
+    const RuntimeGraphBundle bundle = BuildRegisteredGraph(
+        options.spec_path, options.cycle_joint, options.contact_joints_csv,
+        options.min_contact_frames, options.builder);
+
+    const pmg::ParametricMotionSpace& walk_space = bundle.graph.Node(0).motion_space;
+    if (walk_space.ParameterDimension() != 1) {
+        throw std::runtime_error("--goto expects a 1-D (curvature) walk space");
+    }
+
+    // Calibrate "parameter -> achieved turn rate" by streaming the graph at a
+    // few held parameters. The achieved curve is generally nonlinear and can
+    // even change sign relative to the example clips' turn rates (see
+    // MeasureAchievedTurnRate), so steering inverts this measured table.
+    const float parameter_min = walk_space.MinParameter()[0];
+    const float parameter_max = walk_space.MaxParameter()[0];
+    constexpr int kCalibrationPoints = 5;
+    constexpr float kCalibrationSeconds = 8.0f;
+    std::vector<float> table_parameters;
+    std::vector<float> table_rates;
+    for (int point = 0; point < kCalibrationPoints; ++point) {
+        const float alpha =
+            static_cast<float>(point) / static_cast<float>(kCalibrationPoints - 1);
+        const float parameter = parameter_min + alpha * (parameter_max - parameter_min);
+        const float rate = MeasureAchievedTurnRate(bundle, parameter, kCalibrationSeconds);
+        table_parameters.push_back(parameter);
+        table_rates.push_back(rate);
+        std::cout << "achieved_turn_rate[param=" << parameter << "]=" << rate << " rad/s\n";
+    }
+    const float lowest_rate = *std::min_element(table_rates.begin(), table_rates.end());
+    const float highest_rate = *std::max_element(table_rates.begin(), table_rates.end());
+    if (highest_rate - lowest_rate < 1.0e-4f) {
+        throw std::runtime_error("--goto: graph has no achievable turn-rate variation");
+    }
+
+    // Invert the (possibly non-monotonic) table: prefer a bracketing segment,
+    // fall back to the closest calibrated rate.
+    const auto parameter_for_rate = [&](float desired_rate) {
+        const float clamped = std::clamp(desired_rate, lowest_rate, highest_rate);
+        for (std::size_t segment = 0; segment + 1 < table_rates.size(); ++segment) {
+            const float rate_a = table_rates[segment];
+            const float rate_b = table_rates[segment + 1];
+            if ((clamped - rate_a) * (clamped - rate_b) <= 0.0f &&
+                std::abs(rate_b - rate_a) > 1.0e-6f) {
+                const float alpha = (clamped - rate_a) / (rate_b - rate_a);
+                return table_parameters[segment] +
+                       alpha * (table_parameters[segment + 1] - table_parameters[segment]);
+            }
+        }
+        std::size_t best = 0;
+        for (std::size_t point = 1; point < table_rates.size(); ++point) {
+            if (std::abs(table_rates[point] - clamped) < std::abs(table_rates[best] - clamped)) {
+                best = point;
+            }
+        }
+        return table_parameters[best];
+    };
+
+    const float travel_offset =
+        EstimateTravelHeadingOffset(walk_space.Examples().front().clip);
+    std::cout << "travel_heading_offset_deg=" << travel_offset * 180.0f / pmg::kPi << "\n";
+
+    pmg::PointCloudAlignment alignment(bundle.skeleton);
+    pmg::RuntimeController controller(bundle.graph, alignment);
+    controller.Start(0, {0.5f * (parameter_min + parameter_max)},
+                     bundle.generated_frame_count, bundle.frames_per_second);
+
+    const float dt = 1.0f / bundle.frames_per_second;
+    const int total_frames = static_cast<int>(options.seconds * bundle.frames_per_second);
+    // Ask for the full heading correction within one gait cycle.
+    const float cycle_seconds =
+        static_cast<float>(bundle.generated_frame_count) / bundle.frames_per_second;
+
+    std::vector<pmg::Pose> poses;
+    poses.reserve(static_cast<std::size_t>(total_frames));
+    float min_distance = std::numeric_limits<float>::max();
+    float reached_at_seconds = -1.0f;
+    bool swinging = false;
+
+    pmg::RuntimeControlRequest request;
+    request.desired_node = 0;
+    request.desired_parameter = {0.5f * (parameter_min + parameter_max)};
+
+    for (int frame = 0; frame < total_frames; ++frame) {
+        const pmg::Pose pose = controller.CurrentPose();
+        poses.push_back(pose);
+
+        const float dx = options.target_x - pose.root_position.x;
+        const float dz = options.target_z - pose.root_position.z;
+        const float distance = std::sqrt(dx * dx + dz * dz);
+        min_distance = std::min(min_distance, distance);
+        if (options.tolerance >= 0.0f && distance <= options.tolerance &&
+            reached_at_seconds < 0.0f) {
+            reached_at_seconds = static_cast<float>(frame) * dt;
+            break;
+        }
+
+        const float desired_heading = std::atan2(dx, dz);
+        const float travel_heading = WrapPiCli(HeadingOfPose(pose) + travel_offset);
+        const float heading_error = WrapPiCli(desired_heading - travel_heading);
+        const float desired_rate = heading_error / cycle_seconds;
+
+        // When the demanded turn exceeds what its own direction offers (the
+        // target sits inside that branch's minimum turning radius), going the
+        // long way around with the tightest branch converges; the wide branch
+        // orbits forever. Hysteresis keeps the swing from chattering.
+        const float tightest_rate =
+            std::abs(lowest_rate) > std::abs(highest_rate) ? lowest_rate : highest_rate;
+        if (!swinging && std::abs(heading_error) > 0.5f &&
+            (desired_rate > highest_rate || desired_rate < lowest_rate) &&
+            std::abs(std::clamp(desired_rate, lowest_rate, highest_rate)) <
+                0.5f * std::abs(tightest_rate)) {
+            swinging = true;
+        }
+        if (swinging && std::abs(heading_error) < 0.2f) {
+            swinging = false;
+        }
+
+        const float commanded_rate =
+            swinging ? tightest_rate : std::clamp(desired_rate, lowest_rate, highest_rate);
+        request.desired_parameter = {std::clamp(
+            parameter_for_rate(commanded_rate), parameter_min, parameter_max)};
+
+        if (options.trace && frame % 30 == 0) {
+            std::cout << "t=" << static_cast<float>(frame) * dt
+                      << " pos=(" << pose.root_position.x << ", " << pose.root_position.z
+                      << ") dist=" << distance
+                      << " err_deg=" << heading_error * 180.0f / pmg::kPi
+                      << " rate=" << commanded_rate
+                      << " param=" << request.desired_parameter[0] << "\n";
+        }
+
+        controller.Update(dt, request);
+    }
+
+    const PopStats stats = MeasurePopping(bundle.skeleton, poses);
+    std::cout << "target=(" << options.target_x << ", " << options.target_z << ")\n";
+    std::cout << "min_distance=" << min_distance << "\n";
+    std::cout << "reached=" << (reached_at_seconds >= 0.0f ? 1 : 0) << "\n";
+    if (reached_at_seconds >= 0.0f) {
+        std::cout << "reached_at_seconds=" << reached_at_seconds << "\n";
+    }
+    std::cout << "transitions=" << controller.CompletedTransitions() << "\n";
+    std::cout << "median_step=" << stats.median_step << "\n";
+    std::cout << "max_step=" << stats.max_step << "\n";
+    std::cout << "pop_ratio=" << stats.Ratio() << "\n";
+
+    bool failed = false;
+    if (options.tolerance >= 0.0f && reached_at_seconds < 0.0f) {
+        std::cout << "ASSERT FAIL: target not reached within tolerance "
+                  << options.tolerance << " (min_distance=" << min_distance << ")\n";
+        failed = true;
+    }
+    if (options.max_pop_ratio >= 0.0f && stats.Ratio() > options.max_pop_ratio) {
+        std::cout << "ASSERT FAIL: pop_ratio=" << stats.Ratio() << " > "
+                  << options.max_pop_ratio << "\n";
+        failed = true;
+    }
+    std::cout << (failed ? "RESULT=FAIL" : "RESULT=PASS") << "\n";
+    return failed ? 1 : 0;
+}
+
+void ParseSharedRuntimeOption(
+    const std::string& option,
+    const std::function<std::string(const char*)>& require_value,
+    std::string& contact_joints_csv,
+    std::string& cycle_joint,
+    int& min_contact_frames,
+    pmg::PmgBuilderConfig& builder,
+    bool& handled) {
+    handled = true;
+    if (option == "--contact-joints") {
+        contact_joints_csv = require_value("--contact-joints");
+    } else if (option == "--cycle-joint") {
+        cycle_joint = require_value("--cycle-joint");
+    } else if (option == "--min-contact-frames") {
+        min_contact_frames = std::stoi(require_value("--min-contact-frames"));
+    } else if (option == "--tgood") {
+        builder.good_transition_threshold = std::stof(require_value("--tgood"));
+    } else if (option == "--tbad") {
+        builder.bad_transition_threshold = std::stof(require_value("--tbad"));
+    } else if (option == "--source-samples") {
+        builder.source_sample_count = std::stoi(require_value("--source-samples"));
+    } else if (option == "--target-samples") {
+        builder.target_sample_count = std::stoi(require_value("--target-samples"));
+    } else if (option == "--seed") {
+        builder.seed = static_cast<unsigned int>(std::stoul(require_value("--seed")));
+    } else {
+        handled = false;
+    }
+}
+
+RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error("--random-walk needs <spec>");
+    }
+    RandomWalkOptions options;
+    options.spec_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        bool handled = false;
+        ParseSharedRuntimeOption(option, require_value, options.contact_joints_csv,
+                                 options.cycle_joint, options.min_contact_frames,
+                                 options.builder, handled);
+        if (handled) {
+            continue;
+        }
+        if (option == "--seconds") {
+            options.seconds = std::stof(require_value("--seconds"));
+        } else if (option == "--walk-seed") {
+            options.seed = static_cast<unsigned int>(std::stoul(require_value("--walk-seed")));
+        } else if (option == "--hold-param") {
+            options.hold_parameter = std::stof(require_value("--hold-param"));
+        } else if (option == "--min-transitions") {
+            options.min_transitions = std::stoi(require_value("--min-transitions"));
+        } else if (option == "--max-pop-ratio") {
+            options.max_pop_ratio = std::stof(require_value("--max-pop-ratio"));
+        } else {
+            throw std::runtime_error("unknown random-walk option '" + option + "'");
+        }
+    }
+    return options;
+}
+
+GotoOptions ParseGotoOptions(int argc, char** argv) {
+    if (argc < 5) {
+        throw std::runtime_error("--goto needs <spec> <x> <z>");
+    }
+    GotoOptions options;
+    options.spec_path = argv[2];
+    options.target_x = std::stof(argv[3]);
+    options.target_z = std::stof(argv[4]);
+    for (int index = 5; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        bool handled = false;
+        ParseSharedRuntimeOption(option, require_value, options.contact_joints_csv,
+                                 options.cycle_joint, options.min_contact_frames,
+                                 options.builder, handled);
+        if (handled) {
+            continue;
+        }
+        if (option == "--seconds") {
+            options.seconds = std::stof(require_value("--seconds"));
+        } else if (option == "--tolerance") {
+            options.tolerance = std::stof(require_value("--tolerance"));
+        } else if (option == "--max-pop-ratio") {
+            options.max_pop_ratio = std::stof(require_value("--max-pop-ratio"));
+        } else if (option == "--trace") {
+            options.trace = true;
+        } else {
+            throw std::runtime_error("unknown goto option '" + option + "'");
+        }
+    }
+    return options;
+}
+
 SpaceSweepOptions ParseSpaceSweepOptions(int argc, char** argv) {
     if (argc < 4) {
         throw std::runtime_error("--space-sweep needs <spec> <node>");
@@ -1589,7 +2131,11 @@ void PrintUsage() {
               << "      [--max-foot-slide X] [--max-adjacent-step X] [--assert-no-regression]\n"
               << "  pmg_cli --validate-graph graph_spec.txt [--cycle-joint name]\n"
               << "      [--tgood X --tbad Y --source-samples N --target-samples N --seed S]\n"
-              << "      [--min-edge-samples N] [--min-good-fraction F] [--assert-no-regression]\n";
+              << "      [--min-edge-samples N] [--min-good-fraction F] [--assert-no-regression]\n"
+              << "  pmg_cli --random-walk graph_spec.txt [--seconds S] [--walk-seed N]\n"
+              << "      [--min-transitions N] [--max-pop-ratio X] [builder/registration opts]\n"
+              << "  pmg_cli --goto graph_spec.txt x z [--seconds S] [--tolerance D]\n"
+              << "      [--max-pop-ratio X] [builder/registration opts]\n";
 }
 
 }  // namespace
@@ -1664,6 +2210,14 @@ int main(int argc, char** argv) {
 
         if (argc >= 3 && std::string(argv[1]) == "--validate-graph") {
             return ValidateGraphCommand(ParseValidateGraphOptions(argc, argv));
+        }
+
+        if (argc >= 3 && std::string(argv[1]) == "--random-walk") {
+            return RandomWalkCommand(ParseRandomWalkOptions(argc, argv));
+        }
+
+        if (argc >= 5 && std::string(argv[1]) == "--goto") {
+            return GotoCommand(ParseGotoOptions(argc, argv));
         }
 
         PrintUsage();

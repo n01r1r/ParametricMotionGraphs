@@ -138,6 +138,38 @@ if(PMG_BUILD_TESTS)
             --min-edge-samples 10
             --min-good-fraction 0.9
             --assert-no-regression)
+
+    # Paper application A: 30 seconds of random transitions through the PMG.
+    # The worst frame-to-frame step must stay within 3x the median walking
+    # step (popping shows up as 5-20x spikes), and transitions must actually
+    # happen so the metric is not vacuous.
+    add_test(NAME cli_random_walk_walk
+        COMMAND pmg_cli --random-walk ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
+            --cycle-joint LeftAnkle
+            --source-samples 6 --target-samples 30
+            --tgood 1.0 --tbad 1.4
+            --seconds 30
+            --min-transitions 20
+            --max-pop-ratio 3.0)
+
+    # Paper application B/C: goal-directed locomotion through semantic control
+    # (target position -> heading -> curvature). One target ahead, one behind
+    # (the behind case exercises the swing-through steering branch). Measured
+    # reach times are 3-10 s; 60 s leaves headroom.
+    add_test(NAME cli_goto_walk_ahead
+        COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec 10 10
+            --cycle-joint LeftAnkle
+            --source-samples 6 --target-samples 30
+            --tgood 1.0 --tbad 1.4
+            --seconds 60 --tolerance 3
+            --max-pop-ratio 3.0)
+    add_test(NAME cli_goto_walk_behind
+        COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec 0 -20
+            --cycle-joint LeftAnkle
+            --source-samples 6 --target-samples 30
+            --tgood 1.0 --tbad 1.4
+            --seconds 60 --tolerance 3
+            --max-pop-ratio 3.0)
 endif()
 
 # ---------------------------------------------------------------------------
