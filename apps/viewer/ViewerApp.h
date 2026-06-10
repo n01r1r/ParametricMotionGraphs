@@ -67,17 +67,20 @@ private:
     static float ComputeGroundOffset(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip);
     float ActiveReferenceDuration() const;
 
-    void BuildPlaybackPanel();
-    void BuildClipPanel();
-    void BuildCameraPanel();
-    void BuildPmgPanel();
-    void BuildHeatmapPanel();
+    void BuildWorkflowPanel();
+    void BuildTransportPanel();
+    void BuildClipsPanel();
+    void BuildViewPanel();
+    void BuildBlendPanel();
+    void BuildDistanceGridPanel();
     void BuildGraphPanel();
 
     void RecomputeHeatmap();
     void SaveHeatmapCsv();
     void BuildGraphRuntime();
 
+    void HandleShortcuts();
+    void StepFrame(int direction);  // +1 / -1 frame; clip & blend modes only
     void ResetPlayback();
     bool ParametricBlendActive() const;
     bool GraphRuntimeActive() const;
@@ -85,6 +88,7 @@ private:
 
     std::vector<std::filesystem::path> bvh_files_;
     int selected_file_index_ = -1;
+    char clip_filter_[64] = "";  // case-insensitive substring filter for the clip list
     std::string status_message_ = "No clip loaded.";
 
     pmg::Skeleton skeleton_;
@@ -118,8 +122,10 @@ private:
     int heatmap_target_index_ = -1;
     pmg::MotionClip heatmap_target_clip_;
     pmg::DistanceGridConfig heatmap_config_{5, 2, 2, 0.70f, 0.95f, 0.05f, 0.30f, {}};
-    float heatmap_tgood_ = 0.5f;
-    float heatmap_tbad_ = 0.7f;
+    // GOOD/BAD transition thresholds. One source of truth shared by the heatmap
+    // classification and the graph edge build (native units; paper 0.5 / 0.7).
+    float tgood_ = 0.5f;
+    float tbad_ = 0.7f;
     pmg::DistanceGrid heatmap_grid_;
     bool heatmap_ready_ = false;
     float heatmap_min_distance_ = 0.0f;
@@ -139,8 +145,6 @@ private:
     std::optional<pmg::RuntimeController> graph_controller_;
     bool graph_ready_ = false;
     float graph_desired_parameter_ = 0.0f;
-    float graph_tgood_ = 0.5f;   // self-edge thresholds (native units; paper 0.5/0.7)
-    float graph_tbad_ = 0.7f;
     int graph_frame_count_ = 48;
     float graph_fps_ = 30.0f;
     std::string graph_status_ = "Build a parametric space, then Build Graph.";
