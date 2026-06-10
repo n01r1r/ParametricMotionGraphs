@@ -1297,6 +1297,238 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
     return failed ? 1 : 0;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3 diagnostic: rebuild PMG edges on registered motion spaces and check,
+// numerically, that registration does not degrade edge quality (and report
+// GOOD fractions / boxes / distances so threshold drift is visible).
+// ---------------------------------------------------------------------------
+
+struct ValidateGraphOptions {
+    std::string spec_path;
+    std::string contact_joints_csv = "LeftAnkle,RightAnkle";
+    std::string cycle_joint;
+    int min_contact_frames = 3;
+    pmg::PmgBuilderConfig builder;
+    // Assert thresholds on the registered build; negative = report only.
+    int min_edge_samples = -1;
+    float min_good_fraction = -1.0f;
+    bool assert_no_regression = false;
+};
+
+struct EdgeQuality {
+    bool created = false;
+    int samples = 0;
+    float mean_good_fraction = 0.0f;
+    float mean_min_distance = 0.0f;
+    float mean_p25_distance = 0.0f;
+    float mean_median_distance = 0.0f;
+    float mean_box_volume_fraction = 0.0f;
+};
+
+EdgeQuality MeasureEdgeQuality(
+    const pmg::EdgeBuildResult& result,
+    const pmg::ParametricMotionSpace& target_space) {
+    EdgeQuality quality;
+    quality.created = result.report.edge_created;
+    quality.samples = static_cast<int>(result.edge.samples.size());
+
+    float good_fraction_sum = 0.0f;
+    float min_distance_sum = 0.0f;
+    float p25_distance_sum = 0.0f;
+    float median_distance_sum = 0.0f;
+    int report_count = 0;
+    for (const pmg::SourceSampleBuildReport& report : result.report.source_reports) {
+        const int total = report.good_count + report.neutral_count + report.bad_count;
+        if (total > 0) {
+            good_fraction_sum += static_cast<float>(report.good_count) / static_cast<float>(total);
+        }
+        min_distance_sum += report.min_distance;
+        p25_distance_sum += report.p25_distance;
+        median_distance_sum += report.median_distance;
+        ++report_count;
+    }
+    if (report_count > 0) {
+        quality.mean_good_fraction = good_fraction_sum / static_cast<float>(report_count);
+        quality.mean_min_distance = min_distance_sum / static_cast<float>(report_count);
+        quality.mean_p25_distance = p25_distance_sum / static_cast<float>(report_count);
+        quality.mean_median_distance = median_distance_sum / static_cast<float>(report_count);
+    }
+
+    const std::vector<float> domain_min = target_space.MinParameter();
+    const std::vector<float> domain_max = target_space.MaxParameter();
+    float volume_sum = 0.0f;
+    for (const pmg::TransitionSample& sample : result.edge.samples) {
+        float volume = 1.0f;
+        for (std::size_t dim = 0; dim < domain_min.size(); ++dim) {
+            const float domain_extent = std::max(domain_max[dim] - domain_min[dim], 1.0e-6f);
+            const float box_extent =
+                sample.target_parameter_box.max_corner[dim] -
+                sample.target_parameter_box.min_corner[dim];
+            volume *= std::clamp(box_extent / domain_extent, 0.0f, 1.0f);
+        }
+        volume_sum += volume;
+    }
+    if (quality.samples > 0) {
+        quality.mean_box_volume_fraction = volume_sum / static_cast<float>(quality.samples);
+    }
+    return quality;
+}
+
+void PrintEdgeQuality(const char* label, const EdgeQuality& quality) {
+    std::cout << label << "_edge_created=" << (quality.created ? 1 : 0) << "\n";
+    std::cout << label << "_samples=" << quality.samples << "\n";
+    std::cout << label << "_mean_good_fraction=" << quality.mean_good_fraction << "\n";
+    std::cout << label << "_mean_min_distance=" << quality.mean_min_distance << "\n";
+    std::cout << label << "_mean_p25_distance=" << quality.mean_p25_distance << "\n";
+    std::cout << label << "_mean_median_distance=" << quality.mean_median_distance << "\n";
+    std::cout << label << "_mean_box_volume_fraction=" << quality.mean_box_volume_fraction << "\n";
+}
+
+int ValidateGraphCommand(const ValidateGraphOptions& options) {
+    const pmg::GraphSpec spec = pmg::LoadGraphSpec(options.spec_path);
+
+    // Build every node's space twice: as-authored (naive) and registered.
+    std::map<std::string, pmg::ParametricMotionSpace> naive_spaces;
+    std::map<std::string, pmg::ParametricMotionSpace> registered_spaces;
+    pmg::Skeleton skeleton;
+    for (const pmg::GraphSpecNode& node : spec.nodes) {
+        pmg::ParametricMotionSpace space =
+            BuildSpaceForSweep(spec, node.name, options.cycle_joint, skeleton);
+
+        const std::vector<int> contact_joints =
+            ResolveJointList(skeleton, options.contact_joints_csv);
+        pmg::ContactDetectionSettings settings = pmg::EstimateContactSettings(
+            skeleton, space.Examples().front().clip, contact_joints);
+        settings.min_contact_frames = options.min_contact_frames;
+
+        pmg::ParametricMotionSpace registered = space;
+        pmg::RegisterSpaceByContacts(registered, skeleton, contact_joints, settings);
+
+        naive_spaces.emplace(node.name, std::move(space));
+        registered_spaces.emplace(node.name, std::move(registered));
+    }
+
+    std::cout << "builder: TGOOD=" << options.builder.good_transition_threshold
+              << " TBAD=" << options.builder.bad_transition_threshold
+              << " source_samples=" << options.builder.source_sample_count
+              << " target_samples=" << options.builder.target_sample_count
+              << " seed=" << options.builder.seed << "\n";
+
+    bool failed = false;
+    auto fail_if = [&failed](bool condition, const std::string& message) {
+        if (condition) {
+            std::cout << "ASSERT FAIL: " << message << "\n";
+            failed = true;
+        }
+    };
+
+    for (const pmg::GraphSpecEdge& edge : spec.edges) {
+        std::cout << "=== edge " << edge.source_node << " -> " << edge.target_node << " ===\n";
+
+        const pmg::EdgeBuildResult naive_result = pmg::PmgBuilder::BuildEdgeWithReport(
+            skeleton, 0, 0, naive_spaces.at(edge.source_node),
+            naive_spaces.at(edge.target_node), options.builder);
+        const pmg::EdgeBuildResult registered_result = pmg::PmgBuilder::BuildEdgeWithReport(
+            skeleton, 0, 0, registered_spaces.at(edge.source_node),
+            registered_spaces.at(edge.target_node), options.builder);
+
+        const EdgeQuality naive = MeasureEdgeQuality(
+            naive_result, naive_spaces.at(edge.target_node));
+        const EdgeQuality registered = MeasureEdgeQuality(
+            registered_result, registered_spaces.at(edge.target_node));
+
+        PrintEdgeQuality("naive", naive);
+        PrintEdgeQuality("registered", registered);
+        if (!registered_result.report.edge_created) {
+            std::cout << "registered_reject_reason=" << registered_result.report.reject_reason
+                      << "\n";
+        }
+
+        fail_if(!registered.created, "registered edge not created");
+        if (options.min_edge_samples >= 0) {
+            fail_if(registered.samples < options.min_edge_samples,
+                    "registered_samples=" + std::to_string(registered.samples) + " < " +
+                        std::to_string(options.min_edge_samples));
+        }
+        if (options.min_good_fraction >= 0.0f) {
+            fail_if(registered.mean_good_fraction < options.min_good_fraction,
+                    "registered_mean_good_fraction=" +
+                        std::to_string(registered.mean_good_fraction) + " < " +
+                        std::to_string(options.min_good_fraction));
+        }
+        // Distribution comparisons are only meaningful when both builds
+        // covered the same source samples (a rejected build aborts early).
+        if (options.assert_no_regression) {
+            fail_if(!naive.created || !registered.created,
+                    "no-regression comparison needs both builds to complete; "
+                    "loosen --tgood/--tbad");
+            if (naive.created && registered.created) {
+                fail_if(registered.mean_good_fraction < naive.mean_good_fraction * 0.95f,
+                        "registration shrank GOOD fraction: " +
+                            std::to_string(registered.mean_good_fraction) + " < " +
+                            std::to_string(naive.mean_good_fraction));
+                // Gate only on the BEST transition per source sample: that is
+                // what the runtime schedules. Median/p25 are reported but not
+                // gated: registration de-smears the targets' timing, so far
+                // parameters legitimately become more distant while the best
+                // transition improves.
+                fail_if(registered.mean_min_distance > naive.mean_min_distance * 1.05f,
+                        "registration worsened best transition distance: " +
+                            std::to_string(registered.mean_min_distance) + " > " +
+                            std::to_string(naive.mean_min_distance));
+            }
+        }
+    }
+
+    std::cout << (failed ? "RESULT=FAIL" : "RESULT=PASS") << "\n";
+    return failed ? 1 : 0;
+}
+
+ValidateGraphOptions ParseValidateGraphOptions(int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error("--validate-graph needs <spec>");
+    }
+    ValidateGraphOptions options;
+    options.spec_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--contact-joints") {
+            options.contact_joints_csv = require_value("--contact-joints");
+        } else if (option == "--cycle-joint") {
+            options.cycle_joint = require_value("--cycle-joint");
+        } else if (option == "--min-contact-frames") {
+            options.min_contact_frames = std::stoi(require_value("--min-contact-frames"));
+        } else if (option == "--tgood") {
+            options.builder.good_transition_threshold = std::stof(require_value("--tgood"));
+        } else if (option == "--tbad") {
+            options.builder.bad_transition_threshold = std::stof(require_value("--tbad"));
+        } else if (option == "--source-samples") {
+            options.builder.source_sample_count = std::stoi(require_value("--source-samples"));
+        } else if (option == "--target-samples") {
+            options.builder.target_sample_count = std::stoi(require_value("--target-samples"));
+        } else if (option == "--seed") {
+            options.builder.seed =
+                static_cast<unsigned int>(std::stoul(require_value("--seed")));
+        } else if (option == "--min-edge-samples") {
+            options.min_edge_samples = std::stoi(require_value("--min-edge-samples"));
+        } else if (option == "--min-good-fraction") {
+            options.min_good_fraction = std::stof(require_value("--min-good-fraction"));
+        } else if (option == "--assert-no-regression") {
+            options.assert_no_regression = true;
+        } else {
+            throw std::runtime_error("unknown validate-graph option '" + option + "'");
+        }
+    }
+    return options;
+}
+
 SpaceSweepOptions ParseSpaceSweepOptions(int argc, char** argv) {
     if (argc < 4) {
         throw std::runtime_error("--space-sweep needs <spec> <node>");
@@ -1354,7 +1586,10 @@ void PrintUsage() {
               << "  pmg_cli --inspect-contacts path/to/file.bvh LeftAnkle,RightAnkle\n"
               << "  pmg_cli --space-sweep graph_spec.txt node [--contact-joints a,b]\n"
               << "      [--cycle-joint name] [--sweep-steps N] [--min-contacts N]\n"
-              << "      [--max-foot-slide X] [--max-adjacent-step X] [--assert-no-regression]\n";
+              << "      [--max-foot-slide X] [--max-adjacent-step X] [--assert-no-regression]\n"
+              << "  pmg_cli --validate-graph graph_spec.txt [--cycle-joint name]\n"
+              << "      [--tgood X --tbad Y --source-samples N --target-samples N --seed S]\n"
+              << "      [--min-edge-samples N] [--min-good-fraction F] [--assert-no-regression]\n";
 }
 
 }  // namespace
@@ -1425,6 +1660,10 @@ int main(int argc, char** argv) {
 
         if (argc >= 4 && std::string(argv[1]) == "--space-sweep") {
             return SpaceSweepCommand(ParseSpaceSweepOptions(argc, argv));
+        }
+
+        if (argc >= 3 && std::string(argv[1]) == "--validate-graph") {
+            return ValidateGraphCommand(ParseValidateGraphOptions(argc, argv));
         }
 
         PrintUsage();
