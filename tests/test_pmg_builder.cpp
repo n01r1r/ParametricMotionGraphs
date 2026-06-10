@@ -114,6 +114,21 @@ int main() {
         assert(unit.min_corner[0] == 0.0f && unit.max_corner[0] == 1.0f);
     }
 
+    // ShrinkToExclude must also exclude centered BAD points and degenerate boxes.
+    {
+        pmg::ParameterAabb centered;
+        centered.ExpandToInclude({0.0f});
+        centered.ExpandToInclude({1.0f});
+        const pmg::ParameterVector bad = {0.5f};
+        centered.ShrinkToExclude(bad, 0.01f);
+        assert(!centered.Contains(bad));
+
+        pmg::ParameterAabb degenerate;
+        degenerate.ExpandToInclude({0.5f});
+        degenerate.ShrinkToExclude({0.5f}, 0.01f);
+        assert(degenerate.IsEmpty() || !degenerate.Contains({0.5f}));
+    }
+
     // Self-edge on a smooth space: non-empty, every stored box valid.
     {
         pmg::PmgBuilderConfig config = SmallConfig();
@@ -142,15 +157,24 @@ int main() {
         }
     }
 
-    // Disconnected spaces (no good transition) yield an empty edge.
+    // Disconnected spaces (no good transition) yield an empty edge and report
+    // the no-GOOD-target failure.
     {
-        const pmg::ParametricMotionSpace other_space = MakeSpace('Z', 70.0f);
+        pmg::MotionClip far_clip = MakeLoopClip(0.0f, 'X', 20.0f);
+        for (pmg::Pose& pose : far_clip.frames) {
+            pose.root_position.y += 100.0f;
+        }
+        pmg::ParametricMotionSpace other_space("far", 1);
+        other_space.AddExample({0.0f}, far_clip);
         pmg::PmgBuilderConfig config = SmallConfig();
-        config.good_transition_threshold = 1.0e-6f;  // essentially require identity
+        config.good_transition_threshold = 1.0e-6f;
         config.bad_transition_threshold = 1.0e-3f;
-        const pmg::PmgEdge edge =
-            pmg::PmgBuilder::BuildEdge(skeleton, 0, 1, space, other_space, config);
-        assert(edge.samples.empty());
+        const pmg::EdgeBuildResult result =
+            pmg::PmgBuilder::BuildEdgeWithReport(skeleton, 0, 1, space, other_space, config);
+        assert(result.edge.samples.empty());
+        assert(!result.report.edge_created);
+        assert(!result.report.source_reports.empty());
+        assert(result.report.source_reports.front().good_count == 0);
     }
 
     // D1 (paper Sec 3.2 / Sec 6): an edge exists only if EVERY source sample can

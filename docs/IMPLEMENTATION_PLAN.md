@@ -12,9 +12,9 @@ Reference map to paper sections is in `docs/IMPLEMENTATION_PLAN.md` gap table
 
 > **Progress:**
 > A ✅ · B ✅ · C ✅ (paper-faithful: empty-box reject, in-box average) ·
-> D ✅ · E ✅ (point-cloud runtime alignment, C¹ blend, centered window) ·
-> F 🟡 partial · G 🟡 partial · H ✅ viewer (heatmap + graph runtime) · I ⏸ deferred.
-> `ctest` 9/9. D4/D6 documented intentional deviations. BVH loads in native units
+> D ✅ (paper literal k-th cutoff) · E ✅ (runtime point-cloud alignment, no baked alignment, C¹ blend, centered window) ·
+> F0 ✅ graph diagnostics + V2 graph IO · G ⏸ blocked · H ✅ viewer (heatmap + graph runtime) · I ⏸ deferred.
+> `ctest` 14/14. D6 remains a known limitation: current motion spaces are not time-registered. BVH loads in native units
 > (display scale render-only).
 
 ---
@@ -112,6 +112,8 @@ interpolation of target boxes and transition points.
 
 ### D.2 Allen 2002 weights (eq 1–2)
 - `w'_i = 1/d(query, l_i) − 1/d(query, l_k)`, normalized `w_i = w'_i / Σ w'_j`.
+- Exact matches are handled before reciprocal weights; duplicate exact samples are averaged.
+- The cutoff is the paper literal k-th nearest sample, not a k+1 support-radius extension.
 
 ### D.3 Interpolated bounding box + transition point (eq 3)
 - `B(Ns,Nt) = Σ w_i · box_i` (component-wise on center+extent or min/max).
@@ -131,8 +133,9 @@ interpolation of target boxes and transition points.
 and uses interpolated transition points instead of fixed durations.
 
 ### E.1 Align before blend
-- Before transitioning, align the target clip to the current clip using the
-  stored/interpolated yaw+translation so the character does not pop.
+- Before transitioning, align the target clip to the current clip by recomputing
+  the point-cloud floor-plane yaw+translation at the selected source/target phases.
+- Alignment is not stored on graph samples, matching the PMG storage design.
 - Accumulate a running world transform on the controller (root drift across
   repeated transitions must be continuous).
 
@@ -167,10 +170,13 @@ not just synthetic data.
   show foot-skate from phase misalignment, add timewarp/registration
   (Kovar-Gleicher'04) — tracked as G9, low priority.
 
+### F.0 Graph-build diagnostics and paper-contract validation
+- `pmg_cli --validate-graph-spec <spec>`: load BVHs, validate skeletons, report node/example ranges.
+- `pmg_cli --diagnose-graph-edge <spec> <source> <target>`: report per-source-sample distances, GOOD/NEUTRAL/BAD counts, pre/post-shrink AABBs, and rejection reason.
+- `BuildGraphFromSpec` must not silently add empty edges.
+
 ### F.3 Graph assembly CLI
-- `pmg_cli --build <spec>`: read a small text/JSON spec (nodes = clip groups +
-  params, edges = node pairs + thresholds), build graph, report node/edge counts
-  and edge box coverage. Persist graph to the paper's "<50KB plain text" format.
+- `pmg_cli --build-graph <spec> <out.pmg> [--tgood X --tbad Y]`: read a small text spec (nodes = clip groups + params, edges = node pairs), build graph, and persist graph to text format V2 without baked alignment.
 
 ### Tests `test_bvh_pipeline.cpp`
 - Load two real BVH clips from `BVH/`, build a 1-node space, generate a clip,

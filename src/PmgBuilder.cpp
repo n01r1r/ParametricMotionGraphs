@@ -1,5 +1,7 @@
 #include "pmg/PmgBuilder.h"
 
+#include <algorithm>
+#include <cmath>
 #include <random>
 #include <stdexcept>
 #include <vector>
@@ -8,35 +10,89 @@ namespace pmg {
 
 namespace {
 
-// Uniform random samples of a space's parameter axis-aligned range.
 std::vector<ParameterVector> RandomParameterSamples(
     const ParametricMotionSpace& space,
     int sample_count,
     std::mt19937& rng) {
-    const ParameterVector min_parameter = space.MinParameter();
-    const ParameterVector max_parameter = space.MaxParameter();
-
-    std::vector<std::uniform_real_distribution<float>> axis_distributions;
-    axis_distributions.reserve(min_parameter.size());
-    for (std::size_t dimension = 0; dimension < min_parameter.size(); ++dimension) {
-        axis_distributions.emplace_back(min_parameter[dimension], max_parameter[dimension]);
-    }
+    const ParameterDomain domain = space.Domain();
 
     std::vector<ParameterVector> samples;
     samples.reserve(static_cast<std::size_t>(sample_count));
     for (int sample_index = 0; sample_index < sample_count; ++sample_index) {
-        ParameterVector parameter(min_parameter.size());
-        for (std::size_t dimension = 0; dimension < parameter.size(); ++dimension) {
-            parameter[dimension] = axis_distributions[dimension](rng);
-        }
-        samples.push_back(std::move(parameter));
+        samples.push_back(domain.SampleUniform(rng));
     }
     return samples;
+}
+
+bool SameParameterVector(const ParameterVector& a, const ParameterVector& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (std::abs(a[i] - b[i]) > 1.0e-6f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void AppendUniqueParameter(std::vector<ParameterVector>& samples,
+                           const ParameterVector& candidate) {
+    for (const ParameterVector& existing : samples) {
+        if (SameParameterVector(existing, candidate)) {
+            return;
+        }
+    }
+    samples.push_back(candidate);
+}
+
+std::vector<ParameterVector> BuildParameterSamples(
+    const ParametricMotionSpace& space,
+    int random_sample_count,
+    bool include_example_parameters,
+    std::mt19937& rng) {
+    std::vector<ParameterVector> samples;
+    if (include_example_parameters) {
+        for (const ParameterVector& example_parameter : space.ExampleParameters()) {
+            AppendUniqueParameter(samples, example_parameter);
+        }
+    }
+    for (const ParameterVector& random_parameter :
+         RandomParameterSamples(space, random_sample_count, rng)) {
+        AppendUniqueParameter(samples, random_parameter);
+    }
+    return samples;
+}
+
+float PercentileSorted(const std::vector<float>& sorted, float percentile) {
+    if (sorted.empty()) {
+        return std::numeric_limits<float>::infinity();
+    }
+    const float clamped = std::clamp(percentile, 0.0f, 1.0f);
+    const float position = clamped * static_cast<float>(sorted.size() - 1);
+    const std::size_t lower = static_cast<std::size_t>(std::floor(position));
+    const std::size_t upper = static_cast<std::size_t>(std::ceil(position));
+    if (lower == upper) {
+        return sorted[lower];
+    }
+    const float alpha = position - static_cast<float>(lower);
+    return (1.0f - alpha) * sorted[lower] + alpha * sorted[upper];
 }
 
 }  // namespace
 
 PmgEdge PmgBuilder::BuildEdge(
+    const Skeleton& skeleton,
+    int source_node_index,
+    int target_node_index,
+    const ParametricMotionSpace& source_space,
+    const ParametricMotionSpace& target_space,
+    const PmgBuilderConfig& config) {
+    return BuildEdgeWithReport(
+        skeleton, source_node_index, target_node_index, source_space, target_space, config).edge;
+}
+
+EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
     const Skeleton& skeleton,
     int source_node_index,
     int target_node_index,
@@ -50,13 +106,18 @@ PmgEdge PmgBuilder::BuildEdge(
         throw std::runtime_error("PmgBuilder::BuildEdge: bad threshold must be >= good threshold");
     }
 
-    std::mt19937 rng(config.seed);
-    const std::vector<ParameterVector> source_samples =
-        RandomParameterSamples(source_space, config.source_sample_count, rng);
-    const std::vector<ParameterVector> target_samples =
-        RandomParameterSamples(target_space, config.target_sample_count, rng);
+    EdgeBuildResult result;
+    result.edge.source_node = source_node_index;
+    result.edge.target_node = target_node_index;
+    result.report.source_node = source_node_index;
+    result.report.target_node = target_node_index;
 
-    // Generate each target motion once; reused across all source samples.
+    std::mt19937 rng(config.seed);
+    const std::vector<ParameterVector> source_samples = BuildParameterSamples(
+        source_space, config.source_sample_count, config.include_example_parameters, rng);
+    const std::vector<ParameterVector> target_samples = BuildParameterSamples(
+        target_space, config.target_sample_count, config.include_example_parameters, rng);
+
     std::vector<MotionClip> target_clips;
     target_clips.reserve(target_samples.size());
     for (const ParameterVector& target_parameter : target_samples) {
@@ -66,23 +127,20 @@ PmgEdge PmgBuilder::BuildEdge(
             config.generated_frames_per_second));
     }
 
-    PmgEdge edge;
-    edge.source_node = source_node_index;
-    edge.target_node = target_node_index;
-
-    // Per-GOOD record. The transition point/alignment must be averaged over only
-    // the GOOD samples that remain inside the *adjusted* bounding box (paper
-    // §3.2), so each GOOD hit's phases are kept until the box is finalized.
     struct GoodHit {
         ParameterVector parameter;
         float source_phase;
         float target_phase;
-        float alignment_yaw;
-        float alignment_dx;
-        float alignment_dz;
     };
 
     for (const ParameterVector& source_parameter : source_samples) {
+        SourceSampleBuildReport sample_report;
+        sample_report.source_parameter = source_parameter;
+        sample_report.target_box_before_shrink =
+            ParameterAabb::Empty(target_space.ParameterDimension());
+        sample_report.target_box_after_shrink =
+            ParameterAabb::Empty(target_space.ParameterDimension());
+
         const MotionClip source_clip = source_space.GenerateClip(
             source_parameter,
             config.generated_frame_count,
@@ -90,49 +148,71 @@ PmgEdge PmgBuilder::BuildEdge(
 
         std::vector<GoodHit> good_hits;
         std::vector<ParameterVector> bad_target_parameters;
+        std::vector<float> distances;
+        distances.reserve(target_samples.size());
 
         for (std::size_t target_index = 0; target_index < target_samples.size(); ++target_index) {
             const OptimalTransition transition = MotionDistance::FindOptimalTransition(
                 skeleton, source_clip, target_clips[target_index], config.distance_grid);
             const float distance = transition.distance;
+            distances.push_back(distance);
 
             if (distance <= config.good_transition_threshold) {
+                ++sample_report.good_count;
                 good_hits.push_back({target_samples[target_index],
-                                     transition.source_phase, transition.target_phase,
-                                     transition.alignment.yaw, transition.alignment.dx,
-                                     transition.alignment.dz});
+                                     transition.source_phase, transition.target_phase});
             } else if (distance >= config.bad_transition_threshold) {
+                ++sample_report.bad_count;
                 bad_target_parameters.push_back(target_samples[target_index]);
+            } else {
+                ++sample_report.neutral_count;
             }
-            // NEUTRAL (between thresholds): not used to build the box; allowed
-            // implicitly if it falls inside it (paper §3.2).
         }
 
-        // Paper §3.2 / §6: an edge exists iff *every* source sample can reach some
-        // target subspace. A source sample with no GOOD target => empty box =>
-        // the whole edge cannot be created.
+        std::sort(distances.begin(), distances.end());
+        if (!distances.empty()) {
+            sample_report.min_distance = distances.front();
+            sample_report.p25_distance = PercentileSorted(distances, 0.25f);
+            sample_report.median_distance = PercentileSorted(distances, 0.50f);
+            sample_report.max_distance = distances.back();
+        }
+
         if (good_hits.empty()) {
-            return PmgEdge{source_node_index, target_node_index, {}};
+            sample_report.accepted = false;
+            sample_report.reject_reason = "no GOOD target samples";
+            result.report.source_reports.push_back(sample_report);
+            result.report.edge_created = false;
+            result.report.reject_reason = "source sample has no GOOD target samples";
+            return result;
         }
 
         ParameterAabb target_box;
         for (const GoodHit& hit : good_hits) {
             target_box.ExpandToInclude(hit.parameter);
         }
-        // Conservative double-threshold shrink: push every BAD sample at least
-        // epsilon outside the box (paper Fig 4c).
+        sample_report.target_box_before_shrink = target_box;
+
         for (const ParameterVector& bad_parameter : bad_target_parameters) {
             target_box.ShrinkToExclude(bad_parameter, config.box_shrink_epsilon);
         }
+        sample_report.target_box_after_shrink = target_box;
 
-        // Average the normalized transition point (and alignment) over only the
-        // GOOD samples still inside the adjusted box (paper §3.2).
+        if (!target_box.IsEmpty()) {
+            for (const ParameterVector& bad_parameter : bad_target_parameters) {
+                if (target_box.Contains(bad_parameter)) {
+                    sample_report.accepted = false;
+                    sample_report.reject_reason = "BAD target sample remained inside adjusted box";
+                    result.report.source_reports.push_back(sample_report);
+                    result.report.edge_created = false;
+                    result.report.reject_reason = "BAD target sample remained inside adjusted box";
+                    return result;
+                }
+            }
+        }
+
         int in_box_count = 0;
         float sum_source_phase = 0.0f;
         float sum_target_phase = 0.0f;
-        float sum_alignment_yaw = 0.0f;
-        float sum_alignment_dx = 0.0f;
-        float sum_alignment_dz = 0.0f;
         for (const GoodHit& hit : good_hits) {
             if (!target_box.Contains(hit.parameter)) {
                 continue;
@@ -140,30 +220,36 @@ PmgEdge PmgBuilder::BuildEdge(
             ++in_box_count;
             sum_source_phase += hit.source_phase;
             sum_target_phase += hit.target_phase;
-            sum_alignment_yaw += hit.alignment_yaw;
-            sum_alignment_dx += hit.alignment_dx;
-            sum_alignment_dz += hit.alignment_dz;
         }
 
-        // Adjusted box empty (collapsed by shrink, or no GOOD left inside) =>
-        // this source sample cannot transition => no edge (paper §3.2 / §6).
         if (target_box.IsEmpty() || in_box_count == 0) {
-            return PmgEdge{source_node_index, target_node_index, {}};
+            sample_report.accepted = false;
+            sample_report.reject_reason = target_box.IsEmpty()
+                                              ? "adjusted target box is empty"
+                                              : "no GOOD samples remain inside adjusted box";
+            result.report.source_reports.push_back(sample_report);
+            result.report.edge_created = false;
+            result.report.reject_reason = sample_report.reject_reason;
+            return result;
         }
 
         const float inv_count = 1.0f / static_cast<float>(in_box_count);
-        edge.samples.push_back({
+        result.edge.samples.push_back({
             source_parameter,
             target_box,
             sum_source_phase * inv_count,
             sum_target_phase * inv_count,
-            sum_alignment_yaw * inv_count,
-            sum_alignment_dx * inv_count,
-            sum_alignment_dz * inv_count,
         });
+
+        sample_report.accepted = true;
+        result.report.source_reports.push_back(sample_report);
     }
 
-    return edge;
+    result.report.edge_created = !result.edge.samples.empty();
+    if (!result.report.edge_created) {
+        result.report.reject_reason = "edge has no transition samples";
+    }
+    return result;
 }
 
 }  // namespace pmg

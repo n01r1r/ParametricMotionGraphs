@@ -7,7 +7,6 @@
 
 #include <cassert>
 #include <cmath>
-#include <cstdio>
 #include <vector>
 
 namespace {
@@ -100,7 +99,7 @@ int main() {
         graph.Edge(0).LookupInterpolated({0.5f})->source_transition_phase;
 
     // Paper-faithful path: recompute the exact point-cloud alignment per
-    // transition (paper Sec 3.2 / Sec 5.2.1) instead of the stored/root-only one.
+    // transition (paper Sec 3.2 / Sec 5.2.1) instead of a root-only debug fallback.
     pmg::PointCloudAlignment alignment(skeleton);
     pmg::RuntimeController controller(graph, alignment);
     controller.Start(node, {0.5f}, kRuntimeFrameCount, kFramesPerSecond);
@@ -149,22 +148,6 @@ int main() {
         max_step = std::max(max_step, step);
     }
     const float mean_step = total_step / static_cast<float>(world_positions.size() - 1);
-
-    // TEMP debug: locate the worst step.
-    {
-        std::size_t worst = 0;
-        float worst_step = 0.0f;
-        for (std::size_t i = 1; i < world_positions.size(); ++i) {
-            const float step = (world_positions[i] - world_positions[i - 1]).Norm();
-            if (step > worst_step) { worst_step = step; worst = i; }
-        }
-        std::fprintf(stderr, "mean_step=%.4f max_step=%.4f worst_idx=%zu transitions=%d\n",
-                     mean_step, max_step, worst, controller.CompletedTransitions());
-        for (std::size_t i = (worst >= 3 ? worst - 3 : 0); i <= worst + 2 && i < world_positions.size(); ++i) {
-            std::fprintf(stderr, "  [%zu] x=%.3f y=%.3f z=%.3f\n", i,
-                         world_positions[i].x, world_positions[i].y, world_positions[i].z);
-        }
-    }
 
     assert(mean_step > 1.0e-4f);          // the character actually moved
     assert(max_step < 6.0f * mean_step);  // a pop would be ~one stride (>> mean)

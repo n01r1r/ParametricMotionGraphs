@@ -2,6 +2,7 @@
 
 #include "pmg/MathTypes.h"
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 

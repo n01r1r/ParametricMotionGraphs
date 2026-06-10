@@ -25,12 +25,39 @@ _Avoid_: time, t, progress.
 
 **ParametricMotionSpace**:
 One action (e.g. "walk") as a set of example clips keyed by a parameter vector;
-evaluates an interpolated pose for any parameter via inverse-distance weights.
-_Avoid_: blend tree, blendspace, motion set.
+evaluates an interpolated pose for any parameter via local k-nearest blend
+weights, sampling each example at its registered (time-warped) phase.
+_Avoid_: blend tree, blendspace, motion set, inverse-distance weighting (the
+old global scheme, replaced by the local stencil).
 
 **ParameterVector**:
 The control coordinates of a motion space (e.g. turn rate, speed).
 _Avoid_: feature, input, control vector.
+
+### Registration
+
+**ContactInterval**:
+A maximal run of frames where one joint is planted on the floor (low height,
+low world speed). Its strike and lift phases are the anchors of registration.
+_Avoid_: footstep event, lock window.
+
+**TimeWarp**:
+A monotonic piecewise-linear phase-to-phase map pinned at 0 and 1, built from
+matched anchor lists. One per example, mapping canonical phase onto that
+example's own phase.
+_Avoid_: time scaling, retiming curve.
+
+**Canonical phase**:
+The shared phase domain of a registered motion space; each contact anchor sits
+at the mean of the examples' anchor phases. `EvaluatePose` takes canonical
+phase and warps it per example before sampling.
+_Avoid_: master clock, reference time.
+
+**Registration**:
+Detecting contacts on every example of a space, matching their anchor
+structure, and installing per-example TimeWarps so blends combine structurally
+corresponding moments (strike with strike, swing with swing).
+_Avoid_: alignment (reserved for the rigid floor transform at transitions).
 
 ### Graph
 
@@ -57,7 +84,7 @@ The seam for how the runtime aligns a chosen target clip onto the current clip
 at a transition. Resolves a `RigidTransform2D` from an `AlignmentContext`.
 _Avoid_: alignment mode, alignment flag.
 
-**PointCloudAlignment / StoredAlignment / RootOnlyAlignment**:
+**PointCloudAlignment / RootOnlyAlignment**:
 The three adapters behind `AlignmentStrategy`: recompute the exact point-cloud
 alignment (paper-faithful), reuse the alignment baked on the edge, or recompute
 from the root pose alone (legacy/debug).

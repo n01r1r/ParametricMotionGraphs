@@ -12,6 +12,13 @@ struct RuntimeControlRequest {
     ParameterVector desired_parameter;
 };
 
+struct RuntimeControllerConfig {
+    // Blend length as a fraction of the target clip duration. Paper-style PMG
+    // transitions are windowed; exposing this makes phase/window calibration an
+    // explicit runtime policy instead of a hidden constant.
+    float blend_window_phase = 0.20f;
+};
+
 // The runtime's clip-local -> world placement is a RigidTransform2D, accumulated
 // across transitions so the streamed motion is continuous (no root pop, no
 // facing jump).
@@ -22,10 +29,11 @@ struct RuntimeControlRequest {
 class RuntimeController {
 public:
     // The alignment strategy is the seam for how transitions align the target
-    // clip onto the current one (point-cloud, stored, or root-only). It must
+    // clip onto the current one (paper path: point-cloud; debug path: root-only). It must
     // outlive the controller.
     RuntimeController(const ParametricMotionGraph& graph,
-                      const AlignmentStrategy& alignment);
+                      const AlignmentStrategy& alignment,
+                      RuntimeControllerConfig config = {});
 
     void Start(
         int node_index,
@@ -55,9 +63,7 @@ private:
     const AlignmentStrategy& alignment_;
     int generated_frame_count_ = 60;
     float frames_per_second_ = 30.0f;
-    // Blend length as a fraction of the target clip's duration (phase-driven
-    // window, replacing a fixed seconds value).
-    float blend_window_phase_ = 0.20f;
+    RuntimeControllerConfig config_;
 
     int current_node_ = -1;
     ParameterVector current_parameter_;

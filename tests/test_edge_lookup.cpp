@@ -21,6 +21,8 @@ pmg::TransitionSample MakeSample(float source_param, float box_min, float box_ma
 
 int main() {
     pmg::PmgEdge edge;
+    edge.source_node = 0;
+    edge.target_node = 0;
     edge.samples.push_back(MakeSample(0.0f, 0.0f, 1.0f, 0.80f, 0.10f));
     edge.samples.push_back(MakeSample(1.0f, 1.0f, 2.0f, 0.90f, 0.20f));
     edge.samples.push_back(MakeSample(2.0f, 2.0f, 3.0f, 0.70f, 0.30f));
@@ -34,27 +36,39 @@ int main() {
         assert(std::abs(result->source_transition_phase - 0.90f) < 1.0e-6f);
     }
 
-    // Midpoint query: equal weights on samples 0 and 1 (cutoff = sample 2).
-    // Box = 0.5*[0,1] + 0.5*[1,2] = [0.5, 1.5]; phases = 0.5*(0.80,0.10)+0.5*(0.90,0.20).
-    {
-        const auto result = edge.LookupInterpolated({0.5f});
-        assert(result.has_value());
-        assert(std::abs(result->target_parameter_box.min_corner[0] - 0.5f) < 1.0e-5f);
-        assert(std::abs(result->target_parameter_box.max_corner[0] - 1.5f) < 1.0e-5f);
-        assert(std::abs(result->source_transition_phase - 0.85f) < 1.0e-5f);
-        assert(std::abs(result->target_transition_phase - 0.15f) < 1.0e-5f);
-        assert(result->target_parameter_box.IsValid());
-    }
-
-    // Interpolated box lies strictly between the two bracketing sample boxes.
+    // Paper Eq. (2) k-th cutoff: in 1D, k=2. The second nearest neighbor is the
+    // cutoff and receives zero unnormalized weight. A query closer to sample 0
+    // therefore reproduces sample 0 rather than using the former k+1 support.
     {
         const auto result = edge.LookupInterpolated({0.25f});
         assert(result.has_value());
-        const float min_corner = result->target_parameter_box.min_corner[0];
-        const float max_corner = result->target_parameter_box.max_corner[0];
-        assert(min_corner > 0.0f && min_corner < 1.0f);
-        assert(max_corner > 1.0f && max_corner < 2.0f);
+        assert(std::abs(result->target_parameter_box.min_corner[0] - 0.0f) < 1.0e-5f);
+        assert(std::abs(result->target_parameter_box.max_corner[0] - 1.0f) < 1.0e-5f);
+        assert(std::abs(result->source_transition_phase - 0.80f) < 1.0e-5f);
         assert(result->target_parameter_box.IsValid());
+    }
+
+    // Degenerate equidistant k-th weights fall back to nearest rather than using
+    // a k+1 neighbor cutoff.
+    {
+        const auto result = edge.LookupInterpolated({0.5f});
+        assert(result.has_value());
+        assert(std::abs(result->target_parameter_box.min_corner[0] - 0.0f) < 1.0e-5f);
+        assert(std::abs(result->target_parameter_box.max_corner[0] - 1.0f) < 1.0e-5f);
+    }
+
+    // Duplicate exact samples are averaged explicitly.
+    {
+        pmg::PmgEdge duplicate_edge;
+        duplicate_edge.source_node = 0;
+        duplicate_edge.target_node = 0;
+        duplicate_edge.samples.push_back(MakeSample(0.0f, 0.0f, 1.0f, 0.80f, 0.10f));
+        duplicate_edge.samples.push_back(MakeSample(0.0f, 2.0f, 4.0f, 0.60f, 0.30f));
+        const auto result = duplicate_edge.LookupInterpolated({0.0f});
+        assert(result.has_value());
+        assert(std::abs(result->target_parameter_box.min_corner[0] - 1.0f) < 1.0e-5f);
+        assert(std::abs(result->target_parameter_box.max_corner[0] - 2.5f) < 1.0e-5f);
+        assert(std::abs(result->source_transition_phase - 0.70f) < 1.0e-5f);
     }
 
     // Empty edge -> no interpolation.

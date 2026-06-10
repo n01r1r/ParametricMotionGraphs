@@ -1,0 +1,4 @@
+node walk 1
+example walk 0.0 BVH/WalkLoopA.bvh
+example walk 1.0 BVH/walkCurve.bvh
+edge walk walk

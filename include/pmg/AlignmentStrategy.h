@@ -9,8 +9,9 @@ namespace pmg {
 
 // Everything a strategy needs to resolve the target->source rigid floor
 // transform at a scheduled transition. `live_source_phase` is the controller's
-// CurrentPhase() at schedule time; `transition` carries the (interpolated)
-// source/target transition phases and the stored alignment.
+// CurrentPhase() at schedule time; `transition` carries the interpolated
+// source/target transition phases. Alignment is intentionally recomputed at
+// runtime and is not stored on PMG edge samples.
 struct AlignmentContext {
     const MotionClip& source_clip;
     const MotionClip& target_clip;
@@ -19,15 +20,15 @@ struct AlignmentContext {
 };
 
 // Seam: how a RuntimeController aligns the chosen target clip onto the current
-// clip at a transition. Three adapters live behind it; pass one at construction.
+// clip at a transition.
 class AlignmentStrategy {
 public:
     virtual ~AlignmentStrategy() = default;
     virtual RigidTransform2D Resolve(const AlignmentContext& context) const = 0;
 };
 
-// Paper-faithful (paper Sec 3.2 / Sec 5.2.1): recompute the exact point-cloud
-// alignment between the current and chosen target clips at the transition point.
+// Paper-faithful (PMG §3.2 / §5.2.1): recompute the point-cloud alignment
+// between the current and chosen target clips at the selected transition phases.
 class PointCloudAlignment : public AlignmentStrategy {
 public:
     explicit PointCloudAlignment(const Skeleton& skeleton, int window = 5)
@@ -39,13 +40,8 @@ private:
     int window_;
 };
 
-// Use the (averaged) alignment baked onto the edge sample at build time.
-class StoredAlignment : public AlignmentStrategy {
-public:
-    RigidTransform2D Resolve(const AlignmentContext& context) const override;
-};
-
-// Legacy/debug: root-only alignment recomputed from the root pose alone.
+// Legacy/debug: root-only alignment recomputed from the root pose alone. This is
+// not the paper path; it remains useful for synthetic tests with no Skeleton.
 class RootOnlyAlignment : public AlignmentStrategy {
 public:
     RigidTransform2D Resolve(const AlignmentContext& context) const override;
