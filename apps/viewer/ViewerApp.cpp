@@ -665,11 +665,11 @@ void ViewerApp::BuildHeatmapPanel() {
     print_cell("selected", heatmap_selected_source_index_, heatmap_selected_target_index_);
 
     if (heatmap_selected_source_index_ >= 0) {
-        const pmg::RigidAlignment2D& alignment = heatmap_grid_.alignments[
+        const pmg::RigidTransform2D& alignment = heatmap_grid_.alignments[
             static_cast<std::size_t>(heatmap_selected_source_index_) * target_count +
             heatmap_selected_target_index_];
         ImGui::Text("selected alignment: yaw %.3f rad  dx %.2f  dz %.2f",
-                    alignment.theta, alignment.dx, alignment.dz);
+                    alignment.yaw, alignment.dx, alignment.dz);
     }
 
     ImGui::End();
@@ -710,8 +710,10 @@ void ViewerApp::BuildGraphRuntime() {
         }
         graph_.AddEdge(edge);
 
-        graph_controller_.emplace(graph_);
-        graph_controller_->SetSkeleton(pmg_skeleton_);  // paper-faithful runtime align
+        // Paper-faithful runtime align: inject the point-cloud strategy. It holds
+        // a reference to pmg_skeleton_ (a stable member), so build it first.
+        graph_alignment_.emplace(pmg_skeleton_);
+        graph_controller_.emplace(graph_, *graph_alignment_);
         graph_desired_parameter_ =
             std::clamp(graph_desired_parameter_, pmg_parameter_min_, pmg_parameter_max_);
         graph_controller_->Start(node, {graph_desired_parameter_}, graph_frame_count_, graph_fps_);

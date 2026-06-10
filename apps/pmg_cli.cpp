@@ -1,3 +1,4 @@
+#include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/MotionDistance.h"
@@ -60,7 +61,8 @@ int RunSyntheticDemo() {
     self_edge.samples.push_back({{0.0f}, target_box, 0.80f, 0.10f});
     graph.AddEdge(self_edge);
 
-    pmg::RuntimeController controller(graph);
+    pmg::StoredAlignment alignment;
+    pmg::RuntimeController controller(graph, alignment);
     controller.Start(walk_node, {0.0f}, 30, 30.0f);
 
     pmg::RuntimeControlRequest request;
@@ -464,7 +466,7 @@ int InspectTransition(const std::string& source_path, const std::string& target_
     std::cout << "distance=" << transition.distance << "\n";
     std::cout << "TGOOD=" << kGoodThreshold << " TBAD=" << kBadThreshold << "\n";
     std::cout << "classification=" << classification << "\n";
-    std::cout << "alignment_yaw=" << transition.alignment.theta << "\n";
+    std::cout << "alignment_yaw=" << transition.alignment.yaw << "\n";
     std::cout << "alignment_dx=" << transition.alignment.dx << "\n";
     std::cout << "alignment_dz=" << transition.alignment.dz << "\n";
     std::cout << "NOTE: distance is unnormalized mean-squared per point in the BVH's "

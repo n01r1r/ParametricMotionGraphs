@@ -9,6 +9,7 @@ option(PMG_BUILD_TESTS "Build ParametricMotionGraphs tests" ON)
 option(PMG_BUILD_VIEWER "Build the OpenGL BVH viewer (pulls GLFW/GLEW/GLM/ImGui)" ON)
 
 add_library(pmg_core
+    src/AlignmentStrategy.cpp
     src/BvhLoader.cpp
     src/ForwardKinematics.cpp
     src/MotionClip.cpp
@@ -36,6 +37,10 @@ if(PMG_BUILD_TESTS)
     add_executable(test_pose_blend tests/test_pose_blend.cpp)
     target_link_libraries(test_pose_blend PRIVATE pmg_core)
     add_test(NAME test_pose_blend COMMAND test_pose_blend)
+
+    add_executable(test_rigid_transform tests/test_rigid_transform.cpp)
+    target_link_libraries(test_rigid_transform PRIVATE pmg_core)
+    add_test(NAME test_rigid_transform COMMAND test_rigid_transform)
 
     add_executable(test_motion_clip tests/test_motion_clip.cpp)
     target_link_libraries(test_motion_clip PRIVATE pmg_core)
@@ -68,6 +73,10 @@ if(PMG_BUILD_TESTS)
     add_executable(test_runtime_controller tests/test_runtime_controller.cpp)
     target_link_libraries(test_runtime_controller PRIVATE pmg_core)
     add_test(NAME test_runtime_controller COMMAND test_runtime_controller)
+
+    add_executable(test_alignment_strategy tests/test_alignment_strategy.cpp)
+    target_link_libraries(test_alignment_strategy PRIVATE pmg_core)
+    add_test(NAME test_alignment_strategy COMMAND test_alignment_strategy)
 endif()
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+#include "pmg/AlignmentStrategy.h"
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/ParametricMotionSpace.h"
 #include "pmg/PmgBuilder.h"
@@ -98,10 +99,10 @@ int main() {
     const float source_phase_gate =
         graph.Edge(0).LookupInterpolated({0.5f})->source_transition_phase;
 
-    pmg::RuntimeController controller(graph);
     // Paper-faithful path: recompute the exact point-cloud alignment per
     // transition (paper Sec 3.2 / Sec 5.2.1) instead of the stored/root-only one.
-    controller.SetSkeleton(skeleton);
+    pmg::PointCloudAlignment alignment(skeleton);
+    pmg::RuntimeController controller(graph, alignment);
     controller.Start(node, {0.5f}, kRuntimeFrameCount, kFramesPerSecond);
 
     pmg::RuntimeControlRequest request;
