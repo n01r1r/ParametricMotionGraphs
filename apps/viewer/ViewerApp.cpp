@@ -190,20 +190,25 @@ void ViewerApp::RebuildScene(const pmg::Pose& pose) {
         horizontal_center /= static_cast<float>(world_positions.size());
     }
 
-    // Pass 2: apply the render scale = display_scale_ (native->display, replaces
-    // the old loader x10) times the user skeleton_scale_. Horizontal scaling
-    // pivots on the centroid; vertical scaling anchors at y = 0 so the feet stay
-    // on the floor.
+    // Pass 2: two distinct scales with different pivots.
+    //   display_scale_  (native -> display): applies to the WHOLE world about the
+    //     origin, so the root translation scales together with the skeleton.
+    //     Pivoting this on the per-frame centroid is what made locomotion look
+    //     like a treadmill -- the body was display-sized while the root motion
+    //     stayed native-sized, pinning the character at the centre.
+    //   skeleton_scale_ (user size tweak): pivots on the horizontal centroid and
+    //     anchors vertically at y = 0, so resizing the body neither slides it
+    //     across the floor nor lifts the feet.
     const float render_scale = display_scale_ * skeleton_scale_;
     glm::vec3 centroid(0.0f);
     scene_.joints.clear();
     scene_.joints.reserve(positions.size());
     for (std::size_t i = 0; i < positions.size(); ++i) {
         glm::vec3& world_position = world_positions[i];
-        world_position.x =
-            horizontal_center.x + (world_position.x - horizontal_center.x) * render_scale;
-        world_position.z =
-            horizontal_center.y + (world_position.z - horizontal_center.y) * render_scale;
+        world_position.x = display_scale_ *
+            (horizontal_center.x + (world_position.x - horizontal_center.x) * skeleton_scale_);
+        world_position.z = display_scale_ *
+            (horizontal_center.y + (world_position.z - horizontal_center.y) * skeleton_scale_);
         world_position.y *= render_scale;
         centroid += world_position;
         scene_.joints.push_back(world_position);
