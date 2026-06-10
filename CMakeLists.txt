@@ -124,6 +124,20 @@ if(PMG_BUILD_TESTS)
             --max-foot-slide 0.25
             --max-adjacent-step 1.8
             --assert-no-regression)
+
+    # PMG edge construction on the registered Walk(curvature) space: the edge
+    # must build with full sample coverage, keep its GOOD fraction at the
+    # corpus-calibrated thresholds (TGOOD/TBAD from --calibrate-thresholds
+    # scale), and the best transition per source sample must not be worse
+    # than the naive build's.
+    add_test(NAME cli_validate_graph_walk
+        COMMAND pmg_cli --validate-graph ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
+            --cycle-joint LeftAnkle
+            --source-samples 12 --target-samples 60 --seed 7
+            --tgood 1.0 --tbad 1.4
+            --min-edge-samples 10
+            --min-good-fraction 0.9
+            --assert-no-regression)
 endif()
 
 # ---------------------------------------------------------------------------
