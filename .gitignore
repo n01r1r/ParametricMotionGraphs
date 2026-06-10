@@ -1,0 +1,63 @@
+# Build directories (CMake out-of-source; build/ pulls FetchContent deps ~500MB)
+/build/
+/build_*/
+build/
+build*/
+cmake-build-*/
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+*.cmake.stamp
+Testing/
+
+# Compiled objects / binaries / libs
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exe
+*.lib
+*.a
+*.dll
+*.so
+*.dylib
+
+# Visual Studio / MSBuild
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+*.user
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Viewer runtime output (layout + exported data)
+imgui.ini
+distance_grid.csv
+
+# Backups / scratch
+*.bak
+
+# Claude Code / agent-local (machine-specific, not for the repo)
+.claude/
+
+# Source paper (copyright) + agent-local extract — kept locally, not tracked
+PMGFullPaper.pdf
+PMGFullPaper.txt
+
+# Agent-local status / handoff doc — local working notes, not tracked
+docs/STATUS.md
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
