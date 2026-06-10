@@ -2,6 +2,8 @@
 
 #include "pmg/MotionClip.h"
 #include "pmg/ParameterVector.h"
+#include "pmg/ParameterDomain.h"
+#include "pmg/TimeWarp.h"
 
 #include <string>
 #include <vector>
@@ -24,6 +26,19 @@ public:
 
     void AddExample(const ParameterVector& parameter, MotionClip clip);
 
+    // Registration warps, one per example, mapping the space's canonical
+    // phase onto each example's own phase (see MotionRegistration). When set,
+    // EvaluatePose samples example i at warps[i](phase) so blends combine
+    // structurally corresponding moments instead of the same raw phase.
+    void SetExampleTimeWarps(std::vector<TimeWarp> warps);
+    void ClearExampleTimeWarps();
+    bool HasExampleTimeWarps() const;
+
+    std::vector<float> ComputeLocalBlendWeights(
+        const ParameterVector& parameter) const;
+
+    // Backward-compatible alias retained for old tests/callers. The
+    // implementation is now local k-nearest interpolation rather than global IDW.
     std::vector<float> ComputeInverseDistanceWeights(
         const ParameterVector& parameter) const;
 
@@ -35,13 +50,18 @@ public:
         float frames_per_second) const;
 
     std::vector<ParameterVector> ExampleParameters() const;
+    const std::vector<ExampleMotion>& Examples() const;
     std::vector<float> MinParameter() const;
     std::vector<float> MaxParameter() const;
+    ParameterDomain Domain() const;
+    ParameterVector ClampToDomain(const ParameterVector& parameter) const;
 
 private:
     std::string name_ = "unnamed_space";
     int parameter_dimension_ = 0;
     std::vector<ExampleMotion> examples_;
+    // Empty = unregistered (every example sampled at the raw phase).
+    std::vector<TimeWarp> example_time_warps_;
 };
 
 }  // namespace pmg

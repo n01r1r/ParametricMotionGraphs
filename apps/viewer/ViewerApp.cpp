@@ -10,6 +10,7 @@
 #include <string>
 
 #include "pmg/ForwardKinematics.h"
+#include "pmg/SkeletonCompatibility.h"
 
 #ifndef PMG_BVH_DIRECTORY
 #define PMG_BVH_DIRECTORY "BVH"
@@ -259,10 +260,13 @@ void ViewerApp::AddCurrentClipToSpace(float parameter) {
         status_message_ = "Load a clip before adding it to the PMG space.";
         return;
     }
-    if (!pmg_examples_.empty() &&
-        skeleton_.NumJoints() != pmg_skeleton_.NumJoints()) {
-        status_message_ = "Incompatible skeleton: PMG space needs matching joints.";
-        return;
+    if (!pmg_examples_.empty()) {
+        const pmg::SkeletonCompatibilityResult compatibility =
+            pmg::CheckSkeletonCompatibility(pmg_skeleton_, skeleton_);
+        if (!compatibility.compatible) {
+            status_message_ = "Incompatible skeleton: " + compatibility.reason;
+            return;
+        }
     }
     if (pmg_examples_.empty()) {
         pmg_skeleton_ = skeleton_;
@@ -592,8 +596,10 @@ void ViewerApp::RecomputeHeatmap() {
     try {
         const pmg::BvhData target =
             pmg::BvhLoader::Load(bvh_files_[heatmap_target_index_].string());
-        if (target.skeleton.NumJoints() != skeleton_.NumJoints()) {
-            heatmap_status_ = "Target skeleton joint count differs from source.";
+        const pmg::SkeletonCompatibilityResult compatibility =
+            pmg::CheckSkeletonCompatibility(skeleton_, target.skeleton);
+        if (!compatibility.compatible) {
+            heatmap_status_ = "Target skeleton differs from source: " + compatibility.reason;
             return;
         }
         heatmap_target_clip_ = target.clip;

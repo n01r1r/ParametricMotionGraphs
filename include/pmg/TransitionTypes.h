@@ -87,18 +87,19 @@ struct ParameterAabb {
         }
     }
 
-    // Minimally shrink the box so `point` falls just outside it (paper §3.2,
-    // Fig 4c). Picks the single dimension/face whose inward distance is smallest
-    // (least volume lost) and pulls that face `epsilon` past the point. No-op if
-    // the point is already outside. A face is never pulled past the opposite
-    // face: the box may collapse to zero width on a dimension but stays valid.
+    // Minimally shrink the box so `point` falls just outside it (PMG paper §3.2,
+    // Fig. 4c). Picks the single dimension/face whose inward distance is
+    // smallest (least volume lost) and pulls that face `epsilon` past the point.
+    // If the point cannot be excluded while preserving a non-empty box, the
+    // chosen face is allowed to cross the opposite face; the caller must handle
+    // the resulting empty box.
     void ShrinkToExclude(const ParameterVector& point, float epsilon) {
         if (!Contains(point)) {
             return;
         }
 
         std::size_t best_dimension = 0;
-        bool cut_min_face = true;       // true: raise min above point; false: lower max
+        bool cut_min_face = true;  // true: raise min above point; false: lower max
         float best_inward_distance = std::numeric_limits<float>::infinity();
         for (std::size_t index = 0; index < point.size(); ++index) {
             const float distance_to_min_face = point[index] - min_corner[index];
@@ -117,26 +118,23 @@ struct ParameterAabb {
         }
 
         if (cut_min_face) {
-            min_corner[best_dimension] =
-                std::min(point[best_dimension] + epsilon, max_corner[best_dimension]);
+            min_corner[best_dimension] = point[best_dimension] + epsilon;
         } else {
-            max_corner[best_dimension] =
-                std::max(point[best_dimension] - epsilon, min_corner[best_dimension]);
+            max_corner[best_dimension] = point[best_dimension] - epsilon;
         }
     }
 };
 
+// A PMG edge sample stores only the paper's compact graph information:
+// source parameter sample, target reachable parameter box, and averaged source
+// / target transition phases. The floor-plane alignment transform is intentionally
+// not stored; RuntimeController recomputes it from point clouds at scheduling time
+// following Heck & Gleicher §3.2.
 struct TransitionSample {
     ParameterVector source_parameter;
     ParameterAabb target_parameter_box;
     float source_transition_phase = 0.85f;
     float target_transition_phase = 0.15f;
-    // Rigid alignment mapping the target clip onto the source clip at the
-    // transition: yaw about +Y (radians) then floor-plane translation. Recovered
-    // at build time and applied at runtime so transitions do not pop.
-    float alignment_yaw = 0.0f;
-    float alignment_dx = 0.0f;
-    float alignment_dz = 0.0f;
 };
 
 }  // namespace pmg

@@ -6,19 +6,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(PMG_BUILD_TESTS "Build ParametricMotionGraphs tests" ON)
-option(PMG_BUILD_VIEWER "Build the OpenGL BVH viewer (pulls GLFW/GLEW/GLM/ImGui)" ON)
+option(PMG_BUILD_VIEWER "Build the OpenGL BVH viewer (pulls GLFW/GLEW/GLM/ImGui)" OFF)
 
 add_library(pmg_core
     src/AlignmentStrategy.cpp
     src/BvhLoader.cpp
+    src/ContactDetection.cpp
     src/ForwardKinematics.cpp
+    src/GraphIo.cpp
+    src/GraphSpec.cpp
     src/MotionClip.cpp
     src/MotionDistance.cpp
+    src/MotionRegistration.cpp
     src/ParametricMotionGraph.cpp
     src/ParametricMotionSpace.cpp
     src/PmgBuilder.cpp
     src/PoseBlend.cpp
     src/RuntimeController.cpp
+    src/SkeletonCompatibility.cpp
+    src/TimeWarp.cpp
 )
 
 target_include_directories(pmg_core PUBLIC include)
@@ -77,6 +83,34 @@ if(PMG_BUILD_TESTS)
     add_executable(test_alignment_strategy tests/test_alignment_strategy.cpp)
     target_link_libraries(test_alignment_strategy PRIVATE pmg_core)
     add_test(NAME test_alignment_strategy COMMAND test_alignment_strategy)
+
+    add_executable(test_skeleton_compatibility tests/test_skeleton_compatibility.cpp)
+    target_link_libraries(test_skeleton_compatibility PRIVATE pmg_core)
+    add_test(NAME test_skeleton_compatibility COMMAND test_skeleton_compatibility)
+
+    add_executable(test_graph_io tests/test_graph_io.cpp)
+    target_link_libraries(test_graph_io PRIVATE pmg_core)
+    add_test(NAME test_graph_io COMMAND test_graph_io)
+
+    add_executable(test_graph_spec tests/test_graph_spec.cpp)
+    target_link_libraries(test_graph_spec PRIVATE pmg_core)
+    add_test(NAME test_graph_spec COMMAND test_graph_spec)
+
+    add_executable(test_time_warp tests/test_time_warp.cpp)
+    target_link_libraries(test_time_warp PRIVATE pmg_core)
+    add_test(NAME test_time_warp COMMAND test_time_warp)
+
+    add_executable(test_contact_detection tests/test_contact_detection.cpp)
+    target_link_libraries(test_contact_detection PRIVATE pmg_core)
+    add_test(NAME test_contact_detection COMMAND test_contact_detection)
+
+    add_executable(test_motion_registration tests/test_motion_registration.cpp)
+    target_link_libraries(test_motion_registration PRIVATE pmg_core)
+    add_test(NAME test_motion_registration COMMAND test_motion_registration)
+
+    add_executable(test_registered_blending tests/test_registered_blending.cpp)
+    target_link_libraries(test_registered_blending PRIVATE pmg_core)
+    add_test(NAME test_registered_blending COMMAND test_registered_blending)
 endif()
 
 # ---------------------------------------------------------------------------

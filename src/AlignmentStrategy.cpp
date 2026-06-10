@@ -9,7 +9,6 @@ namespace pmg {
 
 namespace {
 
-// Facing yaw of a pose's root about +Y (used by the root-only adapter).
 float RootFacingYaw(const Pose& pose) {
     if (pose.local_rotations.empty()) {
         return 0.0f;
@@ -34,14 +33,6 @@ RigidTransform2D PointCloudAlignment::Resolve(const AlignmentContext& context) c
         *skeleton_, context.target_clip, target_center, window_);
 
     return MotionDistance::AlignedPointCloudDistance(source_cloud, target_cloud).alignment;
-}
-
-RigidTransform2D StoredAlignment::Resolve(const AlignmentContext& context) const {
-    RigidTransform2D alignment;
-    alignment.yaw = context.transition.alignment_yaw;
-    alignment.dx = context.transition.alignment_dx;
-    alignment.dz = context.transition.alignment_dz;
-    return alignment;
 }
 
 RigidTransform2D RootOnlyAlignment::Resolve(const AlignmentContext& context) const {

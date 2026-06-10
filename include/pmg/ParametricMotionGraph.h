@@ -14,14 +14,13 @@ struct PmgNode {
     ParametricMotionSpace motion_space;
 };
 
-// Result of interpolating an edge's stored samples at a query parameter.
+// Result of interpolating an edge's stored samples at a query source parameter.
+// Contains no alignment transform: runtime alignment is recomputed from the
+// selected source/target phases and generated clips.
 struct InterpolatedTransition {
     ParameterAabb target_parameter_box;
     float source_transition_phase = 0.0f;
     float target_transition_phase = 0.0f;
-    float alignment_yaw = 0.0f;  // target->source yaw about +Y (radians)
-    float alignment_dx = 0.0f;
-    float alignment_dz = 0.0f;
 };
 
 struct PmgEdge {
@@ -29,12 +28,11 @@ struct PmgEdge {
     int target_node = -1;
     std::vector<TransitionSample> samples;
 
-    // k-nearest interpolation of the target box + transition phases (paper §4,
-    // eqs 1-3). Uses k = ParameterDimension + 1 nearest source samples with
-    // Allen 2002 weights w'_i = 1/d_i - 1/d_cutoff (cutoff = the (k+1)-th
-    // nearest distance, or +inf when fewer samples exist), normalized to sum 1.
-    // An exact parameter match returns that sample directly. Returns nullopt
-    // only for an empty (no-edge) edge.
+    // k-nearest interpolation of the target box + transition phases (PMG paper
+    // §4, eqs. 1-3). Uses k = parameter_dimension + 1 nearest source samples
+    // and cutoff = distance to the k-th nearest neighbor. Exact matches are
+    // handled before reciprocal-weight evaluation. Returns nullopt only for an
+    // empty (no-edge) edge.
     std::optional<InterpolatedTransition> LookupInterpolated(
         const ParameterVector& source_parameter) const;
 };

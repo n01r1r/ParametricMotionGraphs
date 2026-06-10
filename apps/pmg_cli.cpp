@@ -1,9 +1,12 @@
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
 #include "pmg/ForwardKinematics.h"
+#include "pmg/GraphIo.h"
+#include "pmg/GraphSpec.h"
 #include "pmg/MotionDistance.h"
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/RuntimeController.h"
+#include "pmg/SkeletonCompatibility.h"
 
 #include <algorithm>
 #include <cctype>
@@ -11,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -61,7 +65,7 @@ int RunSyntheticDemo() {
     self_edge.samples.push_back({{0.0f}, target_box, 0.80f, 0.10f});
     graph.AddEdge(self_edge);
 
-    pmg::StoredAlignment alignment;
+    pmg::RootOnlyAlignment alignment;
     pmg::RuntimeController controller(graph, alignment);
     controller.Start(walk_node, {0.0f}, 30, 30.0f);
 
@@ -554,8 +558,8 @@ std::vector<ManifestEntry> ReadManifest(const std::string& manifest_path) {
 // Sweep BVH clips, measure optimal transition distances for every clip pair
 // (self / same-action / different-action), report the distribution, and suggest
 // TGOOD/TBAD. Pure analysis; calibrates the paper's thresholds to this corpus's
-// distance scale (BVH offsets are x10, so distances are not the paper's literal
-// numbers). Additive: no core/runtime change.
+// distance scale. BVH values are loaded in native units, but absolute distances
+// remain skeleton/window/corpus dependent. Additive: no core/runtime change.
 //
 // directory_path: folder holding the .bvh files.
 // manifest_path:  optional. When non-empty, only the listed clips are used and
@@ -707,6 +711,245 @@ int CalibrateThresholds(const std::string& directory_path,
     return 0;
 }
 
+
+struct GraphSpecBuildInputs {
+    pmg::Skeleton skeleton;
+    std::map<std::string, pmg::ParametricMotionSpace> spaces;
+};
+
+void PrintParameterVector(const pmg::ParameterVector& parameter) {
+    std::cout << "[";
+    for (std::size_t i = 0; i < parameter.size(); ++i) {
+        if (i > 0) {
+            std::cout << ", ";
+        }
+        std::cout << parameter[i];
+    }
+    std::cout << "]";
+}
+
+void PrintAabb(const pmg::ParameterAabb& box) {
+    if (box.IsEmpty()) {
+        std::cout << "<empty>";
+        return;
+    }
+    std::cout << "min=";
+    PrintParameterVector(box.min_corner);
+    std::cout << " max=";
+    PrintParameterVector(box.max_corner);
+}
+
+const pmg::GraphSpecNode& FindSpecNodeForCli(
+    const pmg::GraphSpec& spec,
+    const std::string& name) {
+    for (const pmg::GraphSpecNode& node : spec.nodes) {
+        if (node.name == name) {
+            return node;
+        }
+    }
+    throw std::runtime_error("GraphSpec CLI: unknown node '" + name + "'");
+}
+
+GraphSpecBuildInputs LoadSpecInputsForCli(
+    const pmg::GraphSpec& spec,
+    float skeleton_offset_tolerance = 1.0e-4f) {
+    if (spec.nodes.empty()) {
+        throw std::runtime_error("GraphSpec CLI: spec contains no nodes");
+    }
+
+    GraphSpecBuildInputs inputs;
+    for (const pmg::GraphSpecNode& node : spec.nodes) {
+        inputs.spaces.emplace(node.name,
+                              pmg::ParametricMotionSpace(node.name, node.parameter_dimension));
+    }
+
+    std::optional<pmg::Skeleton> reference_skeleton;
+    for (const pmg::GraphSpecExample& example : spec.examples) {
+        const auto space_it = inputs.spaces.find(example.node_name);
+        if (space_it == inputs.spaces.end()) {
+            throw std::runtime_error("GraphSpec CLI: example references unknown node '" +
+                                     example.node_name + "'");
+        }
+
+        const pmg::BvhData data = pmg::BvhLoader::Load(example.bvh_path);
+        if (!reference_skeleton.has_value()) {
+            reference_skeleton = data.skeleton;
+        } else {
+            pmg::RequireSkeletonCompatible(*reference_skeleton, data.skeleton,
+                                           "GraphSpec CLI", skeleton_offset_tolerance);
+        }
+        space_it->second.AddExample(example.parameter, data.clip);
+    }
+
+    if (!reference_skeleton.has_value()) {
+        throw std::runtime_error("GraphSpec CLI: spec contains no examples");
+    }
+    inputs.skeleton = *reference_skeleton;
+    return inputs;
+}
+
+int ValidateGraphSpecCommand(const std::string& spec_path) {
+    const pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
+    std::cout << "graph spec: " << spec_path << "\n";
+    std::cout << "nodes: " << spec.nodes.size() << "\n";
+    for (const pmg::GraphSpecNode& node : spec.nodes) {
+        int example_count = 0;
+        for (const pmg::GraphSpecExample& example : spec.examples) {
+            if (example.node_name == node.name) {
+                ++example_count;
+            }
+        }
+        std::cout << "  " << node.name << " dim=" << node.parameter_dimension
+                  << " examples=" << example_count << "\n";
+    }
+
+    const GraphSpecBuildInputs inputs = LoadSpecInputsForCli(spec);
+    std::cout << "skeleton: joints=" << inputs.skeleton.NumJoints()
+              << " compatible=yes\n";
+    for (const auto& item : inputs.spaces) {
+        const pmg::ParametricMotionSpace& space = item.second;
+        std::cout << "space " << item.first
+                  << ": dim=" << space.ParameterDimension()
+                  << " examples=" << space.NumExamples();
+        if (space.NumExamples() > 0) {
+            std::cout << " min=";
+            PrintParameterVector(space.MinParameter());
+            std::cout << " max=";
+            PrintParameterVector(space.MaxParameter());
+        }
+        std::cout << "\n";
+    }
+    std::cout << "edges requested: " << spec.edges.size() << "\n";
+    for (const pmg::GraphSpecEdge& edge : spec.edges) {
+        (void)FindSpecNodeForCli(spec, edge.source_node);
+        (void)FindSpecNodeForCli(spec, edge.target_node);
+        std::cout << "  " << edge.source_node << " -> " << edge.target_node << "\n";
+    }
+    return 0;
+}
+
+void PrintEdgeBuildReport(const pmg::EdgeBuildReport& report) {
+    std::cout << "edge_created=" << (report.edge_created ? "yes" : "no") << "\n";
+    if (!report.edge_created) {
+        std::cout << "reject_reason=" << report.reject_reason << "\n";
+    }
+    std::cout << "source sample reports: " << report.source_reports.size() << "\n";
+    for (std::size_t i = 0; i < report.source_reports.size(); ++i) {
+        const pmg::SourceSampleBuildReport& source = report.source_reports[i];
+        std::cout << "  [" << i << "] source=";
+        PrintParameterVector(source.source_parameter);
+        std::cout << " accepted=" << (source.accepted ? "yes" : "no") << "\n";
+        std::cout << "      D min=" << source.min_distance
+                  << " p25=" << source.p25_distance
+                  << " median=" << source.median_distance
+                  << " max=" << source.max_distance << "\n";
+        std::cout << "      counts GOOD=" << source.good_count
+                  << " NEUTRAL=" << source.neutral_count
+                  << " BAD=" << source.bad_count << "\n";
+        std::cout << "      box before: ";
+        PrintAabb(source.target_box_before_shrink);
+        std::cout << "\n      box after : ";
+        PrintAabb(source.target_box_after_shrink);
+        std::cout << "\n";
+        if (!source.accepted) {
+            std::cout << "      reject_reason=" << source.reject_reason << "\n";
+        }
+    }
+}
+
+int DiagnoseGraphEdgeCommand(
+    const std::string& spec_path,
+    const std::string& source_node,
+    const std::string& target_node,
+    const pmg::PmgBuilderConfig& config) {
+    const pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
+    const GraphSpecBuildInputs inputs = LoadSpecInputsForCli(spec);
+
+    const auto source_it = inputs.spaces.find(source_node);
+    const auto target_it = inputs.spaces.find(target_node);
+    if (source_it == inputs.spaces.end()) {
+        throw std::runtime_error("--diagnose-graph-edge: unknown source node '" + source_node + "'");
+    }
+    if (target_it == inputs.spaces.end()) {
+        throw std::runtime_error("--diagnose-graph-edge: unknown target node '" + target_node + "'");
+    }
+
+    std::cout << "diagnose edge: " << source_node << " -> " << target_node << "\n";
+    std::cout << "config: TGOOD=" << config.good_transition_threshold
+              << " TBAD=" << config.bad_transition_threshold
+              << " source_samples=" << config.source_sample_count
+              << " target_samples=" << config.target_sample_count << "\n";
+
+    const pmg::EdgeBuildResult result = pmg::PmgBuilder::BuildEdgeWithReport(
+        inputs.skeleton, 0, 1, source_it->second, target_it->second, config);
+    std::cout << "transition_samples=" << result.edge.samples.size() << "\n";
+    PrintEdgeBuildReport(result.report);
+    return result.edge.samples.empty() ? 1 : 0;
+}
+
+pmg::PmgBuilderConfig ParseBuilderConfigOptions(int argc, char** argv, int first_option_index) {
+    pmg::PmgBuilderConfig config;
+    for (int index = first_option_index; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--tgood") {
+            config.good_transition_threshold = std::stof(require_value("--tgood"));
+        } else if (option == "--tbad") {
+            config.bad_transition_threshold = std::stof(require_value("--tbad"));
+        } else if (option == "--source-samples") {
+            config.source_sample_count = std::stoi(require_value("--source-samples"));
+        } else if (option == "--target-samples") {
+            config.target_sample_count = std::stoi(require_value("--target-samples"));
+        } else if (option == "--seed") {
+            config.seed = static_cast<unsigned int>(std::stoul(require_value("--seed")));
+        } else {
+            throw std::runtime_error("unknown builder option '" + option + "'");
+        }
+    }
+    return config;
+}
+
+
+int BuildGraphCommand(const std::string& spec_path,
+                      const std::string& output_path,
+                      const pmg::PmgBuilderConfig& config) {
+    // Keep CLI defaults conservative and paper-like; production thresholds should
+    // still be calibrated with --calibrate-thresholds for the target corpus.
+    const pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
+    const pmg::ParametricMotionGraph graph = pmg::BuildGraphFromSpec(spec, config);
+    pmg::SaveGraphText(graph, output_path);
+    std::cout << "wrote graph: " << output_path << "\n";
+    std::cout << "nodes=" << graph.NumNodes()
+              << " edges=" << graph.NumEdges() << "\n";
+    return 0;
+}
+
+int InspectGraphCommand(const std::string& graph_path) {
+    const pmg::ParametricMotionGraph graph = pmg::LoadGraphText(graph_path);
+    std::cout << "graph: " << graph_path << "\n";
+    std::cout << "nodes: " << graph.NumNodes() << "\n";
+    for (int node_index = 0; node_index < graph.NumNodes(); ++node_index) {
+        const pmg::PmgNode& node = graph.Node(node_index);
+        std::cout << "  [" << node_index << "] " << node.name
+                  << " dim=" << node.motion_space.ParameterDimension()
+                  << " examples=" << node.motion_space.NumExamples() << "\n";
+    }
+    std::cout << "edges: " << graph.NumEdges() << "\n";
+    for (int edge_index = 0; edge_index < graph.NumEdges(); ++edge_index) {
+        const pmg::PmgEdge& edge = graph.Edge(edge_index);
+        std::cout << "  [" << edge_index << "] "
+                  << edge.source_node << " -> " << edge.target_node
+                  << " samples=" << edge.samples.size() << "\n";
+    }
+    return 0;
+}
+
 void PrintUsage() {
     std::cerr << "Usage:\n"
               << "  pmg_cli --synthetic\n"
@@ -717,7 +960,11 @@ void PrintUsage() {
               << "  pmg_cli --debug-bvh-pair path/to/file.bvh LeftHip RightHip\n"
               << "  pmg_cli --inspect-transition source.bvh target.bvh\n"
               << "  pmg_cli --dump-distance-grid source.bvh target.bvh out.csv\n"
-              << "  pmg_cli --calibrate-thresholds bvh_directory [manifest.txt]\n";
+              << "  pmg_cli --calibrate-thresholds bvh_directory [manifest.txt]\n"
+              << "  pmg_cli --validate-graph-spec graph_spec.txt\n"
+              << "  pmg_cli --diagnose-graph-edge graph_spec.txt source_node target_node [--tgood X --tbad Y]\n"
+              << "  pmg_cli --build-graph graph_spec.txt out.pmg [--tgood X --tbad Y]\n"
+              << "  pmg_cli --inspect-graph graph.pmg\n";
 }
 
 }  // namespace
@@ -762,6 +1009,24 @@ int main(int argc, char** argv) {
 
         if (argc == 4 && std::string(argv[1]) == "--calibrate-thresholds") {
             return CalibrateThresholds(argv[2], argv[3]);
+        }
+
+        if (argc >= 4 && std::string(argv[1]) == "--build-graph") {
+            const pmg::PmgBuilderConfig config = ParseBuilderConfigOptions(argc, argv, 4);
+            return BuildGraphCommand(argv[2], argv[3], config);
+        }
+
+        if (argc == 3 && std::string(argv[1]) == "--validate-graph-spec") {
+            return ValidateGraphSpecCommand(argv[2]);
+        }
+
+        if (argc >= 5 && std::string(argv[1]) == "--diagnose-graph-edge") {
+            const pmg::PmgBuilderConfig config = ParseBuilderConfigOptions(argc, argv, 5);
+            return DiagnoseGraphEdgeCommand(argv[2], argv[3], argv[4], config);
+        }
+
+        if (argc == 3 && std::string(argv[1]) == "--inspect-graph") {
+            return InspectGraphCommand(argv[2]);
         }
 
         PrintUsage();

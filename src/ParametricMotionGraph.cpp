@@ -11,6 +11,41 @@ namespace pmg {
 
 namespace {
 constexpr float kExactMatchDistance = 1.0e-6f;
+
+InterpolatedTransition AverageSamples(
+    const std::vector<const TransitionSample*>& selected_samples,
+    const std::vector<float>& weights) {
+    if (selected_samples.empty() || selected_samples.size() != weights.size()) {
+        throw std::runtime_error("AverageSamples: invalid sample/weight count");
+    }
+
+    const int dimension = static_cast<int>(selected_samples.front()->source_parameter.size());
+    InterpolatedTransition result;
+    result.target_parameter_box.min_corner.assign(static_cast<std::size_t>(dimension), 0.0f);
+    result.target_parameter_box.max_corner.assign(static_cast<std::size_t>(dimension), 0.0f);
+
+    for (std::size_t sample_index = 0; sample_index < selected_samples.size(); ++sample_index) {
+        const TransitionSample& sample = *selected_samples[sample_index];
+        const float weight = weights[sample_index];
+        for (int d = 0; d < dimension; ++d) {
+            result.target_parameter_box.min_corner[d] +=
+                weight * sample.target_parameter_box.min_corner[d];
+            result.target_parameter_box.max_corner[d] +=
+                weight * sample.target_parameter_box.max_corner[d];
+        }
+        result.source_transition_phase += weight * sample.source_transition_phase;
+        result.target_transition_phase += weight * sample.target_transition_phase;
+    }
+    return result;
+}
+
+InterpolatedTransition AsResult(const TransitionSample& sample) {
+    InterpolatedTransition result;
+    result.target_parameter_box = sample.target_parameter_box;
+    result.source_transition_phase = sample.source_transition_phase;
+    result.target_transition_phase = sample.target_transition_phase;
+    return result;
+}
 }  // namespace
 
 std::optional<InterpolatedTransition> PmgEdge::LookupInterpolated(
@@ -19,7 +54,6 @@ std::optional<InterpolatedTransition> PmgEdge::LookupInterpolated(
         return std::nullopt;
     }
 
-    // Order sample indices by parameter distance to the query.
     std::vector<float> distances(samples.size());
     std::vector<std::size_t> order(samples.size());
     std::iota(order.begin(), order.end(), std::size_t{0});
@@ -29,66 +63,59 @@ std::optional<InterpolatedTransition> PmgEdge::LookupInterpolated(
     std::sort(order.begin(), order.end(),
               [&](std::size_t a, std::size_t b) { return distances[a] < distances[b]; });
 
-    auto as_result = [](const TransitionSample& sample) {
-        InterpolatedTransition result;
-        result.target_parameter_box = sample.target_parameter_box;
-        result.source_transition_phase = sample.source_transition_phase;
-        result.target_transition_phase = sample.target_transition_phase;
-        result.alignment_yaw = sample.alignment_yaw;
-        result.alignment_dx = sample.alignment_dx;
-        result.alignment_dz = sample.alignment_dz;
-        return result;
-    };
-
-    // Exact match: return that sample directly (weights would degenerate).
-    if (distances[order.front()] <= kExactMatchDistance) {
-        return as_result(samples[order.front()]);
+    // Exact matches: if duplicated source samples exist, average all exact
+    // matches uniformly rather than arbitrarily picking one.
+    std::vector<const TransitionSample*> exact_samples;
+    for (const std::size_t sample_index : order) {
+        if (distances[sample_index] > kExactMatchDistance) {
+            break;
+        }
+        exact_samples.push_back(&samples[sample_index]);
+    }
+    if (!exact_samples.empty()) {
+        if (exact_samples.size() == 1) {
+            return AsResult(*exact_samples.front());
+        }
+        const float inv_count = 1.0f / static_cast<float>(exact_samples.size());
+        return AverageSamples(exact_samples, std::vector<float>(exact_samples.size(), inv_count));
     }
 
     const int dimension = static_cast<int>(source_parameter.size());
     const std::size_t neighbor_count =
         std::min<std::size_t>(static_cast<std::size_t>(dimension) + 1, samples.size());
 
-    // Falloff cutoff = distance to the (k+1)-th nearest sample, if one exists.
-    const float cutoff_distance = neighbor_count < samples.size()
-                                      ? distances[order[neighbor_count]]
-                                      : std::numeric_limits<float>::infinity();
-    const float inverse_cutoff =
-        std::isfinite(cutoff_distance) ? 1.0f / cutoff_distance : 0.0f;
+    // PMG Eq. (2): cutoff is the k-th nearest neighbor, not k+1. The farthest
+    // selected neighbor therefore receives zero unnormalized weight.
+    const float cutoff_distance = distances[order[neighbor_count - 1]];
+    if (cutoff_distance <= kExactMatchDistance || !std::isfinite(cutoff_distance)) {
+        return AsResult(samples[order.front()]);
+    }
+    const float inverse_cutoff = 1.0f / cutoff_distance;
 
     std::vector<float> weights(neighbor_count, 0.0f);
     float weight_sum = 0.0f;
     for (std::size_t n = 0; n < neighbor_count; ++n) {
         const float distance = distances[order[n]];
+        if (distance <= kExactMatchDistance) {
+            // Should have been caught above, but keep the singularity guarded.
+            return AsResult(samples[order[n]]);
+        }
         const float weight = 1.0f / distance - inverse_cutoff;
         weights[n] = weight > 0.0f ? weight : 0.0f;
         weight_sum += weights[n];
     }
 
-    // Degenerate weights (e.g. coincident neighbors): fall back to nearest.
     if (weight_sum <= kSmallEpsilon) {
-        return as_result(samples[order.front()]);
+        return AsResult(samples[order.front()]);
     }
 
-    InterpolatedTransition result;
-    result.target_parameter_box.min_corner.assign(static_cast<std::size_t>(dimension), 0.0f);
-    result.target_parameter_box.max_corner.assign(static_cast<std::size_t>(dimension), 0.0f);
+    std::vector<const TransitionSample*> selected_samples;
+    selected_samples.reserve(neighbor_count);
     for (std::size_t n = 0; n < neighbor_count; ++n) {
-        const float weight = weights[n] / weight_sum;
-        const TransitionSample& sample = samples[order[n]];
-        for (int d = 0; d < dimension; ++d) {
-            result.target_parameter_box.min_corner[d] +=
-                weight * sample.target_parameter_box.min_corner[d];
-            result.target_parameter_box.max_corner[d] +=
-                weight * sample.target_parameter_box.max_corner[d];
-        }
-        result.source_transition_phase += weight * sample.source_transition_phase;
-        result.target_transition_phase += weight * sample.target_transition_phase;
-        result.alignment_yaw += weight * sample.alignment_yaw;
-        result.alignment_dx += weight * sample.alignment_dx;
-        result.alignment_dz += weight * sample.alignment_dz;
+        selected_samples.push_back(&samples[order[n]]);
+        weights[n] /= weight_sum;
     }
-    return result;
+    return AverageSamples(selected_samples, weights);
 }
 
 int ParametricMotionGraph::AddNode(std::string node_name, ParametricMotionSpace motion_space) {
@@ -103,6 +130,9 @@ int ParametricMotionGraph::AddEdge(PmgEdge edge) {
     }
     if (edge.target_node < 0 || edge.target_node >= NumNodes()) {
         throw std::runtime_error("ParametricMotionGraph::AddEdge: invalid target node");
+    }
+    if (edge.samples.empty()) {
+        throw std::runtime_error("ParametricMotionGraph::AddEdge: empty edge is not a valid PMG edge");
     }
 
     const int edge_index = static_cast<int>(edges_.size());

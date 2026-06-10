@@ -46,6 +46,7 @@ distance_grid.csv
 
 # Backups / scratch
 *.bak
+*.zip
 
 # Claude Code / agent-local (machine-specific, not for the repo)
 .claude/

@@ -5,15 +5,15 @@
 The Phase-1 implementation reproduces the original Parametric Motion Graph concept with minimal moving parts.
 
 > Status note: this file is the original design sketch. The implementation has
-> since reached a paper-faithful core (Phases A–E); see
+> since reached a Phase-F0 paper-conformance/diagnostics milestone; see
 > `docs/IMPLEMENTATION_PLAN.md` for current progress and known deviations.
 
 The central representation is:
 
 ```text
-ParametricMotionSpace: parameter p, phase φ → pose (blending-based synthesis)
+ParametricMotionSpace: parameter p, phase φ → pose (minimal placeholder synthesis)
 MotionDistance:        Kovar'02 point-cloud metric + closed-form 2D rigid align
-ParametricEdge:        source parameter p_s → target AABB + transition phases (+ optional alignment)
+ParametricEdge:        source parameter p_s → target AABB + transition phases
 ParametricMotionGraph: nodes + directed parametric edges; k-NN edge interpolation
 RuntimeController:      current state + control request → aligned, C¹-blended transition
 ```
@@ -52,13 +52,11 @@ The code throws `std::runtime_error` when:
 
 ## Current Limitations
 
-- Transition distance is the faithful Kovar'02 point-cloud metric (yaw + floor
-  translation aligned) — no longer simplified. Remaining metric gaps: no
-  foot-contact term; clip blending is not time-registered (deviation D6).
+- Transition distance is the Kovar'02 point-cloud metric (yaw + floor
+  translation aligned). Remaining gaps: no foot-contact term; motion-space blending is not time-registered (D6).
 - AABB shrinking is conservative, single-dimension, minimal (Fig 4c).
-- k-NN falloff cutoff uses the (k+1)-th neighbor (Allen'02 intent), not the paper's
-  literal `lₖ` (deviation D4).
-- Graph persistence (Phase F) and the control applications (Phase G) are not built.
+- k-NN falloff cutoff uses the paper literal k-th neighbor; exact/degenerate cases are guarded.
+- Graph persistence and diagnostics are built (Phase F0); the control applications (Phase G) are not built.
 - Rendering lives only in the optional `pmg_viewer` target; `pmg_core` is dependency-free.
 
 ## Extension Boundary

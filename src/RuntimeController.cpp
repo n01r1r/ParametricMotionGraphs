@@ -7,8 +7,14 @@
 namespace pmg {
 
 RuntimeController::RuntimeController(const ParametricMotionGraph& graph,
-                                    const AlignmentStrategy& alignment)
-    : graph_(graph), alignment_(alignment) {}
+                                    const AlignmentStrategy& alignment,
+                                    RuntimeControllerConfig config)
+    : graph_(graph), alignment_(alignment), config_(config) {
+    if (config_.blend_window_phase <= 0.0f || config_.blend_window_phase > 1.0f) {
+        throw std::runtime_error(
+            "RuntimeController: blend_window_phase must be in the interval (0, 1]");
+    }
+}
 
 void RuntimeController::Start(
     int node_index,
@@ -167,11 +173,14 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
 
         // Center the blend window on the optimal transition point (paper Sec 3.1
         // / Sec 5.2.1: "a short window centered at these frames"). The window
-        // spans blend_window_phase_; gate half a window early so the window's
+        // spans config_.blend_window_phase; gate half a window early so the window's
         // midpoint (alpha = 0.5, max weight) lands on the optimal point where the
         // two motions are most similar.
-        const float half_window_phase = 0.5f * blend_window_phase_;
+        const float half_window_phase = 0.5f * config_.blend_window_phase;
         if (phase < transition->source_transition_phase - half_window_phase) {
+            continue;
+        }
+        if (phase > transition->source_transition_phase + half_window_phase) {
             continue;
         }
 
@@ -197,8 +206,8 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
 
         // Alignment maps the target clip onto the source clip (target->source:
         // yaw about +Y then floor translation), then composes with the source's
-        // accumulated world transform. How it is resolved (point-cloud / stored
-        // / root-only) lives behind the AlignmentStrategy seam.
+        // accumulated world transform. How it is resolved (paper path: point-cloud; debug path: root-only)
+        // lives behind the AlignmentStrategy seam.
         const AlignmentContext alignment_context{
             current_clip_, next_clip_, CurrentPhase(), *transition};
         const RigidTransform2D alignment = alignment_.Resolve(alignment_context);
@@ -213,7 +222,7 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
         // remaining time from its (centered) start so it does not overrun its clip.
         const float target_remaining_seconds =
             std::max(kSmallEpsilon, target_duration - next_time_seconds_);
-        const float requested_blend_seconds = blend_window_phase_ * target_duration;
+        const float requested_blend_seconds = config_.blend_window_phase * target_duration;
         transition_duration_seconds_ =
             std::max(kSmallEpsilon, std::min(requested_blend_seconds, target_remaining_seconds));
         return;

@@ -69,20 +69,6 @@ struct CountingAlignment : pmg::AlignmentStrategy {
 }  // namespace
 
 int main() {
-    // StoredAlignment returns exactly the alignment baked on the transition.
-    {
-        pmg::InterpolatedTransition transition;
-        transition.alignment_yaw = 0.42f;
-        transition.alignment_dx = -1.3f;
-        transition.alignment_dz = 2.7f;
-        const pmg::MotionClip clip = SingleFramePose({0.0f, 0.0f, 0.0f});
-        const pmg::AlignmentContext context{clip, clip, 0.0f, transition};
-
-        const pmg::StoredAlignment strategy;
-        const pmg::RigidTransform2D out = strategy.Resolve(context);
-        assert(Near(out.yaw, 0.42f) && Near(out.dx, -1.3f) && Near(out.dz, 2.7f));
-    }
-
     // RootOnlyAlignment: identity-facing roots -> yaw 0, translation = src - tgt.
     {
         const pmg::MotionClip source = SingleFramePose({2.0f, 0.5f, 3.0f});

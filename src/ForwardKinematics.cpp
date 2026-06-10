@@ -22,7 +22,9 @@ std::vector<JointWorldState> ComputeForwardKinematics(
             continue;
         }
 
-        skeleton.RequireValidJointIndex(joint.parent_index, "ComputeForwardKinematics");
+        if (joint.parent_index < 0 || joint.parent_index >= skeleton.NumJoints()) {
+            throw std::runtime_error("ComputeForwardKinematics: invalid parent joint index");
+        }
         const JointWorldState& parent = world_states[joint.parent_index];
         world_states[joint_index].position = parent.position + Rotate(parent.rotation, joint.offset);
         world_states[joint_index].rotation = parent.rotation * local_rotation;
