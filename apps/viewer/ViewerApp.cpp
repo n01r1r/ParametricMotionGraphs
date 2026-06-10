@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -308,135 +309,252 @@ void ViewerApp::RebuildPmgSpace() {
 // --- ImGui panels ----------------------------------------------------------
 
 void ViewerApp::BuildUi() {
-    BuildPlaybackPanel();
-    BuildClipPanel();
-    BuildCameraPanel();
-    BuildPmgPanel();
-    BuildHeatmapPanel();
+    HandleShortcuts();
+    BuildWorkflowPanel();
+    BuildTransportPanel();
+    BuildClipsPanel();
+    BuildViewPanel();
+    BuildBlendPanel();
+    BuildDistanceGridPanel();
     BuildGraphPanel();
 }
 
-void ViewerApp::BuildPlaybackPanel() {
-    ImGui::Begin("Playback");
+void ViewerApp::HandleShortcuts() {
+    const ImGuiIO& io = ImGui::GetIO();
+    if (io.WantTextInput) {
+        return;  // don't steal keys while the user types into an input
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Space, /*repeat=*/false)) {
+        playing_ = !playing_;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_R, /*repeat=*/false)) {
+        ResetPlayback();
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, /*repeat=*/true)) {
+        StepFrame(-1);
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, /*repeat=*/true)) {
+        StepFrame(1);
+    }
+}
+
+void ViewerApp::StepFrame(int direction) {
+    if (GraphRuntimeActive()) {
+        return;  // graph runtime is controller-driven; stepping is for clip/blend
+    }
+    const float duration = ActiveReferenceDuration();
+    if (duration <= kEpsilon) {
+        return;
+    }
+    const int frame_count = (ParametricBlendActive() && !pmg_examples_.empty())
+                                ? pmg_examples_.front().clip.NumFrames()
+                                : clip_.NumFrames();
+    const float fps = (clip_.NumFrames() > 0) ? clip_.frames_per_second : 30.0f;
+    const float frame_seconds =
+        frame_count > 1 ? duration / static_cast<float>(frame_count - 1) : 1.0f / fps;
+
+    playing_ = false;
+    current_time_seconds_ = std::clamp(
+        current_time_seconds_ + static_cast<float>(direction) * frame_seconds, 0.0f, duration);
+}
+
+void ViewerApp::BuildWorkflowPanel() {
+    ImGui::Begin("Workflow");
+
     ImGui::TextWrapped("%s", status_message_.c_str());
     ImGui::Separator();
 
-    ImGui::Text("Mode: %s", ModeName(mode_));
-    if (selected_file_index_ >= 0 &&
-        selected_file_index_ < static_cast<int>(bvh_files_.size())) {
-        ImGui::TextWrapped("Clip: %s",
-                           bvh_files_[selected_file_index_].string().c_str());
-    } else {
-        ImGui::TextDisabled("Clip: none");
-    }
-    if (clip_.NumFrames() > 0) {
-        ImGui::Text("Frames: %d   FPS: %.1f", clip_.NumFrames(), clip_.frames_per_second);
-        ImGui::Text("Joints: %d", skeleton_.NumJoints());
-    }
+    // Numbered workflow so the order (clip -> blend space -> graph) is
+    // discoverable. Each step reports done / locked / available.
+    const bool clip_loaded = clip_.NumFrames() > 0;
+    const bool has_examples = !pmg_examples_.empty();
+
+    auto step = [](int number, const char* title, bool done, bool locked, const char* hint) {
+        if (locked) {
+            ImGui::TextDisabled("%d. %s  (%s)", number, title, hint);
+        } else if (done) {
+            ImGui::TextColored(ImVec4(0.40f, 0.80f, 0.45f, 1.0f), "%d. %s  [done]", number, title);
+        } else {
+            ImGui::Text("%d. %s  (%s)", number, title, hint);
+        }
+    };
+    step(1, "Load a clip", clip_loaded, false, "pick one in Clips");
+    step(2, "Add clips to blend space", has_examples, !clip_loaded, "needs a clip");
+    step(3, "Build graph", graph_ready_, !pmg_space_ready_, "needs blend space");
+
     ImGui::Separator();
+    ImGui::TextDisabled("Mode");
 
-    ImGui::Checkbox("Playing", &playing_);
-    ImGui::SliderFloat("Speed", &playback_speed_, 0.1f, 3.0f, "%.2fx");
-    ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
+    // Mode lives only here. Clip playback is always available; parametric blend
+    // unlocks with a space; graph runtime unlocks once a graph is built.
+    int mode_int = static_cast<int>(mode_);
+    ImGui::RadioButton("Clip playback", &mode_int,
+                       static_cast<int>(ViewerPlaybackMode::ClipPlayback));
 
-    const float duration = ActiveReferenceDuration();
-    float phase = NormalizedPhase(current_time_seconds_, duration);
-    if (ImGui::SliderFloat("Phase", &phase, 0.0f, 1.0f, "%.3f")) {
-        current_time_seconds_ = phase * duration;
-    }
-    if (ImGui::Button("Reset Playback")) {
-        ResetPlayback();
-    }
+    auto gated_radio = [&](const char* label, ViewerPlaybackMode value, bool enabled,
+                           const char* hint) {
+        if (enabled) {
+            ImGui::RadioButton(label, &mode_int, static_cast<int>(value));
+            return;
+        }
+        ImGui::BeginDisabled();
+        int disabled = mode_int;
+        ImGui::RadioButton(label, &disabled, static_cast<int>(value));
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%s)", hint);
+    };
+    gated_radio("Parametric blend", ViewerPlaybackMode::ParametricBlend, pmg_space_ready_,
+                "add a clip");
+    gated_radio("Graph runtime", ViewerPlaybackMode::GraphRuntime,
+                graph_ready_ && graph_controller_.has_value(), "build graph");
+    mode_ = static_cast<ViewerPlaybackMode>(mode_int);
+
     ImGui::End();
 }
 
-void ViewerApp::BuildClipPanel() {
+void ViewerApp::BuildTransportPanel() {
+    ImGui::Begin("Transport");
+
+    ImGui::Text("Mode: %s", ModeName(mode_));
+    if (clip_.NumFrames() > 0) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("| %d frames @ %.0f fps", clip_.NumFrames(), clip_.frames_per_second);
+    }
+    ImGui::Separator();
+
+    if (ImGui::Button(playing_ ? "Pause" : "Play ")) {
+        playing_ = !playing_;
+    }
+    const bool time_mode = !GraphRuntimeActive();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!time_mode);
+    if (ImGui::Button("< Frame")) {
+        StepFrame(-1);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Frame >")) {
+        StepFrame(1);
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Reset")) {
+        ResetPlayback();
+    }
+    if (GraphRuntimeActive() && graph_controller_.has_value()) {
+        ImGui::SameLine();
+        if (ImGui::Button("Restart graph")) {
+            graph_controller_->Start(graph_controller_->CurrentNode(),
+                                     {graph_desired_parameter_}, graph_frame_count_, graph_fps_);
+        }
+    }
+
+    ImGui::SliderFloat("Speed", &playback_speed_, 0.1f, 3.0f, "%.2fx");
+
+    // Phase scrub: clip & blend only (the graph's phase is owned by the
+    // controller). Auto-pause while dragging so playback doesn't fight it.
+    const float duration = ActiveReferenceDuration();
+    if (time_mode) {
+        float phase = NormalizedPhase(current_time_seconds_, duration);
+        if (ImGui::SliderFloat("Phase", &phase, 0.0f, 1.0f, "%.3f")) {
+            current_time_seconds_ = phase * duration;
+        }
+        if (ImGui::IsItemActive()) {
+            playing_ = false;
+        }
+    } else if (graph_controller_.has_value()) {
+        ImGui::Text("Phase %.3f  (graph-driven)", graph_controller_->CurrentPhase());
+    }
+
+    ImGui::TextDisabled("space play/pause   .   arrows step   .   R reset");
+    ImGui::End();
+}
+
+void ViewerApp::BuildClipsPanel() {
     ImGui::Begin("Clips");
     ImGui::Text("%zu BVH files", bvh_files_.size());
-    if (ImGui::BeginListBox("##clips", ImVec2(-1.0f, 240.0f))) {
+
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputTextWithHint("##clip_filter", "filter by name...", clip_filter_,
+                             sizeof(clip_filter_));
+
+    std::string needle = clip_filter_;
+    std::transform(needle.begin(), needle.end(), needle.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (ImGui::BeginListBox("##clips", ImVec2(-1.0f, 220.0f))) {
         for (int i = 0; i < static_cast<int>(bvh_files_.size()); ++i) {
+            const std::string name = bvh_files_[i].filename().string();
+            if (!needle.empty()) {
+                std::string hay = name;
+                std::transform(hay.begin(), hay.end(), hay.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (hay.find(needle) == std::string::npos) {
+                    continue;
+                }
+            }
             const bool selected = (i == selected_file_index_);
-            if (ImGui::Selectable(bvh_files_[i].filename().string().c_str(), selected)) {
+            if (ImGui::Selectable(name.c_str(), selected)) {
                 LoadClip(i);
             }
         }
         ImGui::EndListBox();
     }
+
+    if (clip_.NumFrames() > 0) {
+        ImGui::TextDisabled("Loaded: %d frames @ %.0f fps, %d joints", clip_.NumFrames(),
+                            clip_.frames_per_second, skeleton_.NumJoints());
+    }
+
     ImGui::Separator();
-    ImGui::InputFloat("New example parameter", &next_example_parameter_);
-    if (ImGui::Button("Add loaded clip to PMG space")) {
+    ImGui::TextWrapped("Add the loaded clip to the parametric blend space. The parameter is "
+                       "its coordinate on the blend axis (e.g. turn rate or speed); poses are "
+                       "interpolated between examples.");
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::InputFloat("Blend parameter", &next_example_parameter_);
+    ImGui::SameLine();
+    if (ImGui::Button("Add to blend space")) {
         AddCurrentClipToSpace(next_example_parameter_);
     }
     ImGui::End();
 }
 
-void ViewerApp::BuildCameraPanel() {
-    ImGui::Begin("Camera");
+void ViewerApp::BuildViewPanel() {
+    ImGui::Begin("View");
     ImGui::Checkbox("Follow motion centroid", &follow_centroid_);
     const glm::vec3 target = camera_.Target();
-    ImGui::Text("Target: %.1f, %.1f, %.1f", target.x, target.y, target.z);
+    ImGui::Text("Camera target: %.1f, %.1f, %.1f", target.x, target.y, target.z);
     ImGui::TextDisabled("Drag left mouse to orbit, scroll to zoom.");
-    if (ImGui::Button("Reset Camera")) {
+    if (ImGui::Button("Reset camera")) {
         camera_.Reset();
         follow_centroid_ = true;
     }
+    ImGui::Separator();
+    ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
+    ImGui::SliderFloat("Display scale", &display_scale_, 1.0f, 40.0f, "%.1fx");
+    ImGui::TextDisabled("Display scale magnifies the whole world, travel included.");
     ImGui::End();
 }
 
-void ViewerApp::BuildPmgPanel() {
+void ViewerApp::BuildBlendPanel() {
     ImGui::Begin("Parametric Blend");
-    ImGui::TextWrapped(
-        "Live parametric blend over added example clips "
-        "(pmg_core ParametricMotionSpace).");
+    ImGui::TextWrapped("Live parametric blend over the added example clips "
+                       "(pmg_core ParametricMotionSpace). Enter Parametric blend mode in "
+                       "the Workflow panel to scrub it.");
     ImGui::Text("Examples: %zu", pmg_examples_.size());
     for (const PmgExample& example : pmg_examples_) {
         ImGui::BulletText("%s  (param %.2f)", example.label.c_str(), example.parameter);
     }
     ImGui::Separator();
 
-    // Playback-mode selector. Clip playback is always available; parametric
-    // blend unlocks once a space exists; graph runtime unlocks once a graph is
-    // built (see the Graph Runtime panel).
-    int mode_int = static_cast<int>(mode_);
-    ImGui::TextDisabled("Playback mode");
-    ImGui::RadioButton("Clip playback", &mode_int,
-                       static_cast<int>(ViewerPlaybackMode::ClipPlayback));
-
-    if (pmg_space_ready_) {
-        ImGui::RadioButton("Parametric blend", &mode_int,
-                           static_cast<int>(ViewerPlaybackMode::ParametricBlend));
-    } else {
-        ImGui::BeginDisabled();
-        int blend_disabled = mode_int;
-        ImGui::RadioButton("Parametric blend", &blend_disabled,
-                           static_cast<int>(ViewerPlaybackMode::ParametricBlend));
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::TextDisabled("(add a clip)");
-    }
-
-    if (graph_ready_) {
-        ImGui::RadioButton("Graph runtime", &mode_int,
-                           static_cast<int>(ViewerPlaybackMode::GraphRuntime));
-    } else {
-        ImGui::BeginDisabled();
-        int graph_disabled = mode_int;
-        ImGui::RadioButton("Graph runtime", &graph_disabled,
-                           static_cast<int>(ViewerPlaybackMode::GraphRuntime));
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::TextDisabled("(build graph)");
-    }
-
-    mode_ = static_cast<ViewerPlaybackMode>(mode_int);
-
     if (ParametricBlendActive()) {
         ImGui::SliderFloat("Blend parameter", &pmg_parameter_,
                            pmg_parameter_min_, pmg_parameter_max_, "%.3f");
+    } else {
+        ImGui::TextDisabled("Enter Parametric blend mode to scrub the blend parameter.");
     }
 
-    ImGui::Separator();
-    if (ImGui::Button("Clear Parametric Space")) {
+    if (ImGui::Button("Clear blend space")) {
         pmg_examples_.clear();
         RebuildPmgSpace();
         status_message_ = "Cleared parametric space.";
@@ -534,7 +652,7 @@ void ViewerApp::SaveHeatmapCsv() {
     heatmap_status_ = "Saved distance_grid.csv";
 }
 
-void ViewerApp::BuildHeatmapPanel() {
+void ViewerApp::BuildDistanceGridPanel() {
     ImGui::Begin("Distance Grid");
 
     if (selected_file_index_ >= 0 &&
@@ -560,15 +678,9 @@ void ViewerApp::BuildHeatmapPanel() {
         ImGui::EndCombo();
     }
 
-    ImGui::SliderInt("Window", &heatmap_config_.window_size, 1, 15);
-    ImGui::SliderInt("Source stride", &heatmap_config_.source_frame_stride, 1, 5);
-    ImGui::SliderInt("Target stride", &heatmap_config_.target_frame_stride, 1, 5);
-    ImGui::SliderFloat("Source phase start", &heatmap_config_.source_phase_start, 0.0f, 1.0f, "%.2f");
-    ImGui::SliderFloat("Source phase end", &heatmap_config_.source_phase_end, 0.0f, 1.0f, "%.2f");
-    ImGui::SliderFloat("Target phase start", &heatmap_config_.target_phase_start, 0.0f, 1.0f, "%.2f");
-    ImGui::SliderFloat("Target phase end", &heatmap_config_.target_phase_end, 0.0f, 1.0f, "%.2f");
-    ImGui::SliderFloat("TGOOD", &heatmap_tgood_, 0.0f, 2.0f, "%.3f");
-    ImGui::SliderFloat("TBAD", &heatmap_tbad_, 0.0f, 2.0f, "%.3f");
+    // Shared GOOD/BAD thresholds -- also drive the graph edge build.
+    ImGui::SliderFloat("TGOOD", &tgood_, 0.0f, 2.0f, "%.3f");
+    ImGui::SliderFloat("TBAD", &tbad_, 0.0f, 2.0f, "%.3f");
 
     if (ImGui::Button("Recompute")) {
         RecomputeHeatmap();
@@ -577,6 +689,28 @@ void ViewerApp::BuildHeatmapPanel() {
     if (ImGui::Button("Save CSV")) {
         SaveHeatmapCsv();
     }
+
+    // Grid-sampling knobs are advanced; collapse them so the panel stays
+    // approachable. The preset restores the paper's transition-region window.
+    if (ImGui::CollapsingHeader("Advanced grid settings")) {
+        if (ImGui::Button("Transition-region preset")) {
+            heatmap_config_.window_size = 5;
+            heatmap_config_.source_frame_stride = 2;
+            heatmap_config_.target_frame_stride = 2;
+            heatmap_config_.source_phase_start = 0.70f;
+            heatmap_config_.source_phase_end = 0.95f;
+            heatmap_config_.target_phase_start = 0.05f;
+            heatmap_config_.target_phase_end = 0.30f;
+        }
+        ImGui::SliderInt("Window", &heatmap_config_.window_size, 1, 15);
+        ImGui::SliderInt("Source stride", &heatmap_config_.source_frame_stride, 1, 5);
+        ImGui::SliderInt("Target stride", &heatmap_config_.target_frame_stride, 1, 5);
+        ImGui::SliderFloat("Source phase start", &heatmap_config_.source_phase_start, 0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat("Source phase end", &heatmap_config_.source_phase_end, 0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat("Target phase start", &heatmap_config_.target_phase_start, 0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat("Target phase end", &heatmap_config_.target_phase_end, 0.0f, 1.0f, "%.2f");
+    }
+
     ImGui::TextWrapped("%s", heatmap_status_.c_str());
     ImGui::Separator();
 
@@ -656,9 +790,9 @@ void ViewerApp::BuildHeatmapPanel() {
         const int source_frame = heatmap_grid_.source_frames[source_index];
         const int target_frame = heatmap_grid_.target_frames[target_index];
         const float distance = heatmap_grid_.At(source_index, target_index);
-        const char* classification = distance <= heatmap_tgood_   ? "GOOD"
-                                     : distance >= heatmap_tbad_   ? "BAD"
-                                                                   : "NEUTRAL";
+        const char* classification = distance <= tgood_   ? "GOOD"
+                                     : distance >= tbad_   ? "BAD"
+                                                           : "NEUTRAL";
         ImGui::Text("%s: src f%d (%.2f) -> tgt f%d (%.2f)  d=%.4f  [%s]",
                     label, source_frame,
                     FramePhaseLocal(source_frame, clip_.NumFrames()),
@@ -690,8 +824,8 @@ void ViewerApp::BuildGraphRuntime() {
         graph_status_ = "Add at least one clip to the parametric space first.";
         return;
     }
-    if (graph_tbad_ < graph_tgood_) {
-        graph_tbad_ = graph_tgood_;
+    if (tbad_ < tgood_) {
+        tbad_ = tgood_;
     }
 
     try {
@@ -703,8 +837,8 @@ void ViewerApp::BuildGraphRuntime() {
         config.target_sample_count = 32;
         config.generated_frame_count = graph_frame_count_;
         config.generated_frames_per_second = graph_fps_;
-        config.good_transition_threshold = graph_tgood_;
-        config.bad_transition_threshold = graph_tbad_;
+        config.good_transition_threshold = tgood_;
+        config.bad_transition_threshold = tbad_;
 
         pmg::PmgEdge edge = pmg::PmgBuilder::BuildEdge(
             pmg_skeleton_, node, node, pmg_space_, pmg_space_, config);
@@ -738,9 +872,7 @@ void ViewerApp::BuildGraphPanel() {
         "PMG streaming (paper Sec 4-5): builds a self-edge over the parametric "
         "space and streams motion with point-cloud-aligned transitions.");
     ImGui::Text("Space examples: %zu", pmg_examples_.size());
-
-    ImGui::SliderFloat("Edge TGOOD", &graph_tgood_, 0.0f, 2.0f, "%.3f");
-    ImGui::SliderFloat("Edge TBAD", &graph_tbad_, 0.0f, 4.0f, "%.3f");
+    ImGui::TextDisabled("Edge GOOD/BAD use the shared TGOOD/TBAD in Distance Grid.");
     if (ImGui::Button("Build Graph")) {
         BuildGraphRuntime();
     }
@@ -748,11 +880,6 @@ void ViewerApp::BuildGraphPanel() {
     ImGui::Separator();
 
     if (graph_ready_ && graph_controller_.has_value()) {
-        bool active = (mode_ == ViewerPlaybackMode::GraphRuntime);
-        if (ImGui::Checkbox("Run (Graph Runtime mode)", &active)) {
-            mode_ = active ? ViewerPlaybackMode::GraphRuntime
-                           : ViewerPlaybackMode::ClipPlayback;
-        }
         ImGui::SliderFloat("Desired parameter", &graph_desired_parameter_,
                            pmg_parameter_min_, pmg_parameter_max_, "%.3f");
         ImGui::Text("Node %d   phase %.2f   transitions %d   %s",
@@ -760,11 +887,8 @@ void ViewerApp::BuildGraphPanel() {
                     graph_controller_->CurrentPhase(),
                     graph_controller_->CompletedTransitions(),
                     graph_controller_->IsTransitioning() ? "[transitioning]" : "");
-        if (ImGui::Button("Restart graph")) {
-            graph_controller_->Start(graph_controller_->CurrentNode(),
-                                     {graph_desired_parameter_},
-                                     graph_frame_count_, graph_fps_);
-        }
+        ImGui::TextDisabled("Switch to Graph runtime mode (Workflow) to run; "
+                            "Restart is in Transport.");
     } else {
         ImGui::TextDisabled("No graph yet. Add clips to the space and Build Graph.");
     }
