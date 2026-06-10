@@ -59,6 +59,12 @@ structure, and installing per-example TimeWarps so blends combine structurally
 corresponding moments (strike with strike, swing with swing).
 _Avoid_: alignment (reserved for the rigid floor transform at transitions).
 
+**Root-delta blending**:
+How GenerateClip moves the root: blend each example's per-frame floor step in
+its own heading frame, then integrate. Absolute root positions are never
+averaged across examples (that bends arcs and drags planted feet).
+_Avoid_: root blending, trajectory averaging.
+
 ### Graph
 
 **ParametricMotionGraph**:

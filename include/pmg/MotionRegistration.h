@@ -31,4 +31,14 @@ void RegisterSpaceByContacts(
     const std::vector<int>& contact_joints,
     const ContactDetectionSettings& settings);
 
+// Cut `clip` at the strikes of `cycle_joint` and return the first complete
+// gait cycle (strike to next strike, inclusive). Normalizes multi-cycle
+// corpus clips into single-cycle examples so their contact structures match
+// across a motion space. Throws if fewer than two strikes are found.
+MotionClip ExtractFirstCycle(
+    const Skeleton& skeleton,
+    const MotionClip& clip,
+    int cycle_joint,
+    const ContactDetectionSettings& settings);
+
 }  // namespace pmg

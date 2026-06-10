@@ -1,7 +1,9 @@
 #include "pmg/ParametricMotionSpace.h"
 #include "pmg/PoseBlend.h"
+#include "pmg/RigidTransform2D.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
@@ -12,6 +14,23 @@ namespace pmg {
 namespace {
 
 constexpr float kExactParameterThreshold = 1.0e-6f;
+
+float WrapPi(float angle_radians) {
+    return angle_radians - 2.0f * kPi * std::round(angle_radians / (2.0f * kPi));
+}
+
+// Heading of a root rotation: yaw of the rotated +Z axis, in the same
+// convention as RigidTransform2D::RotateFloor (rotating (0,0,1) by yaw gives
+// (sin(yaw), cos(yaw))). The reference axis only fixes a per-space constant
+// offset; root-delta integration uses heading differences, so any consistent
+// axis choice cancels out.
+float RootHeading(const Pose& pose) {
+    if (pose.local_rotations.empty()) {
+        return 0.0f;
+    }
+    const Vec3 forward = Rotate(pose.local_rotations.front(), {0.0f, 0.0f, 1.0f});
+    return std::atan2(forward.x, forward.z);
+}
 
 }  // namespace
 
@@ -169,12 +188,74 @@ MotionClip ParametricMotionSpace::GenerateClip(
     generated_clip.frames.reserve(static_cast<std::size_t>(frame_count));
 
     const ParameterVector clamped_parameter = ClampToDomain(parameter);
-    for (int frame_index = 0; frame_index < frame_count; ++frame_index) {
+    const std::vector<float> weights = ComputeLocalBlendWeights(clamped_parameter);
+
+    const auto sample_example = [this](std::size_t example_index, float canonical_phase) {
+        const float example_phase =
+            example_time_warps_.empty()
+                ? canonical_phase
+                : example_time_warps_[example_index].Evaluate(canonical_phase);
+        return examples_[example_index].clip.SampleNormalizedPhase(example_phase);
+    };
+
+    Pose first_frame = EvaluatePose(clamped_parameter, 0.0f);
+    float world_x = first_frame.root_position.x;
+    float world_z = first_frame.root_position.z;
+    float world_heading = RootHeading(first_frame);
+    generated_clip.frames.push_back(std::move(first_frame));
+
+    for (int frame_index = 1; frame_index < frame_count; ++frame_index) {
+        const float previous_phase =
+            static_cast<float>(frame_index - 1) / static_cast<float>(frame_count - 1);
         const float phase =
-            frame_count == 1
-                ? 0.0f
-                : static_cast<float>(frame_index) / static_cast<float>(frame_count - 1);
-        generated_clip.frames.push_back(EvaluatePose(clamped_parameter, phase));
+            static_cast<float>(frame_index) / static_cast<float>(frame_count - 1);
+
+        // Blend each example's root step expressed in its own heading frame.
+        float delta_x = 0.0f;
+        float delta_z = 0.0f;
+        float delta_heading = 0.0f;
+        for (std::size_t example_index = 0; example_index < examples_.size(); ++example_index) {
+            if (weights[example_index] <= 0.0f) {
+                continue;
+            }
+            const Pose previous_pose = sample_example(example_index, previous_phase);
+            const Pose current_pose = sample_example(example_index, phase);
+
+            const float previous_heading = RootHeading(previous_pose);
+            const RigidTransform2D into_heading_frame{-previous_heading, 0.0f, 0.0f};
+            float local_dx = 0.0f;
+            float local_dz = 0.0f;
+            into_heading_frame.RotateFloor(
+                current_pose.root_position.x - previous_pose.root_position.x,
+                current_pose.root_position.z - previous_pose.root_position.z,
+                local_dx, local_dz);
+
+            delta_x += weights[example_index] * local_dx;
+            delta_z += weights[example_index] * local_dz;
+            delta_heading += weights[example_index] *
+                             WrapPi(RootHeading(current_pose) - previous_heading);
+        }
+
+        const RigidTransform2D out_of_heading_frame{world_heading, 0.0f, 0.0f};
+        float step_x = 0.0f;
+        float step_z = 0.0f;
+        out_of_heading_frame.RotateFloor(delta_x, delta_z, step_x, step_z);
+        world_x += step_x;
+        world_z += step_z;
+        world_heading += delta_heading;
+
+        // Joints and height come from the registered pose blend; only the
+        // root's floor placement and heading are replaced by the integral.
+        Pose frame = EvaluatePose(clamped_parameter, phase);
+        frame.root_position.x = world_x;
+        frame.root_position.z = world_z;
+        if (!frame.local_rotations.empty()) {
+            const float heading_fix = WrapPi(world_heading - RootHeading(frame));
+            frame.local_rotations.front() =
+                Quaternion::FromAxisAngle({0.0f, 1.0f, 0.0f}, heading_fix) *
+                frame.local_rotations.front();
+        }
+        generated_clip.frames.push_back(std::move(frame));
     }
 
     return generated_clip;

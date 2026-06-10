@@ -1,0 +1,10 @@
+# Walk(curvature) parametric motion space from the multi-cycle walk family
+# (the BVH walk clips sharing one skeleton: walkCurve / walkMoreCurve /
+# walkTightCurve). Parameter = turn tightness (0 = widest authored curve,
+# 1 = tightest). Clips are multi-cycle; consumers should normalize them to
+# one gait cycle (--cycle-joint LeftAnkle) so contact structures match.
+node walk 1
+example walk 0.0 ../BVH/walkCurve.bvh
+example walk 0.5 ../BVH/walkMoreCurve.bvh
+example walk 1.0 ../BVH/walkTightCurve.bvh
+edge walk walk
