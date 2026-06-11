@@ -35,10 +35,11 @@ public:
                       const AlignmentStrategy& alignment,
                       RuntimeControllerConfig config = {});
 
+    // Clip lengths derive from each space's BlendedDurationSeconds at the
+    // active parameter (paper timing); only the sampling rate is configured.
     void Start(
         int node_index,
         const ParameterVector& initial_parameter,
-        int generated_frame_count,
         float frames_per_second);
 
     void Update(float delta_seconds, const RuntimeControlRequest& request);
@@ -61,7 +62,6 @@ private:
 
     const ParametricMotionGraph& graph_;
     const AlignmentStrategy& alignment_;
-    int generated_frame_count_ = 60;
     float frames_per_second_ = 30.0f;
     RuntimeControllerConfig config_;
 

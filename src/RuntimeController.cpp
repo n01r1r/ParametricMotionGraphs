@@ -19,11 +19,7 @@ RuntimeController::RuntimeController(const ParametricMotionGraph& graph,
 void RuntimeController::Start(
     int node_index,
     const ParameterVector& initial_parameter,
-    int generated_frame_count,
     float frames_per_second) {
-    if (generated_frame_count <= 0) {
-        throw std::runtime_error("RuntimeController::Start: generated_frame_count must be positive");
-    }
     if (frames_per_second <= 0.0f) {
         throw std::runtime_error("RuntimeController::Start: frames_per_second must be positive");
     }
@@ -35,10 +31,9 @@ void RuntimeController::Start(
 
     current_node_ = node_index;
     current_parameter_ = initial_parameter;
-    generated_frame_count_ = generated_frame_count;
     frames_per_second_ = frames_per_second;
     current_clip_ = node.motion_space.GenerateClip(
-        initial_parameter, generated_frame_count_, frames_per_second_);
+        initial_parameter, frames_per_second_);
     current_time_seconds_ = 0.0f;
     world_transform_ = RigidTransform2D{};
     transition_active_ = false;
@@ -194,7 +189,7 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
             transition->target_parameter_box.Clamp(request.desired_parameter);
 
         next_clip_ = target_node.motion_space.GenerateClip(
-            target_parameter, generated_frame_count_, frames_per_second_);
+            target_parameter, frames_per_second_);
         next_node_ = edge.target_node;
         next_parameter_ = target_parameter;
         // Start the target half a window before its transition point so the

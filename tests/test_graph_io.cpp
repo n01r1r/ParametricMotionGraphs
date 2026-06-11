@@ -32,6 +32,16 @@ pmg::ParametricMotionGraph MakeGraph(bool registered) {
             pmg::TimeWarp::FromAnchors({0.5f}, {0.35f}),
             pmg::TimeWarp::FromAnchors({0.5f}, {0.65f}),
         });
+        pmg::ParameterCalibration calibration;
+        calibration.metric = pmg::ParameterMetric::kTurnRate;
+        calibration.example_order = {0, 1};
+        calibration.example_measured = {-0.5f, 0.5f};
+        pmg::CalibrationSegment segment;
+        segment.left_example = 0;
+        segment.right_example = 1;
+        segment.samples = {{0.0f, -0.5f}, {0.5f, 0.2f}, {1.0f, 0.5f}};
+        calibration.segments.push_back(segment);
+        space.SetParameterCalibration(calibration);
     }
 
     pmg::ParametricMotionGraph graph;
@@ -125,6 +135,29 @@ void WriteLegacyFixture(
            << "sample 1 0 1 0 1 1 0.8 0.1\n";
 }
 
+// A V4 artifact (pre-calibration format): loads with an intact Skeleton but
+// without parameter calibration.
+void WriteV4Fixture(const std::filesystem::path& path) {
+    std::ofstream output(path);
+    output << "PMG_GRAPH_V4\n"
+           << "runtime 3 30 \"BVH native units\"\n"
+           << "sources 0\n"
+           << "registrations 0\n"
+           << "edge_builds 0\n"
+           << "skeleton 1\n"
+           << "joint \"Hips\" -1 0 0 0 0\n"
+           << "nodes 1\n"
+           << "node \"walk\" 1 1\n"
+           << "example 1 0\n"
+           << "clip \"clip\" 30 2\n"
+           << "frame 0 0 0 1 1 0 0 0\n"
+           << "frame 1 0 0 1 1 0 0 0\n"
+           << "warps 0\n"
+           << "edges 1\n"
+           << "edge 0 0 1\n"
+           << "sample 1 0 1 0 1 1 0.8 0.1\n";
+}
+
 }  // namespace
 
 int main() {
@@ -137,7 +170,7 @@ int main() {
         std::ifstream input(path);
         std::string header;
         input >> header;
-        assert(header == "PMG_GRAPH_V4");
+        assert(header == "PMG_GRAPH_V5");
     }
     const pmg::BuiltPmgArtifact loaded =
         pmg::LoadPmgArtifactText(path.string());
@@ -150,6 +183,20 @@ int main() {
     assert(loaded.metadata.edge_builds[0].config.seed == 42);
     assert(loaded.metadata.edge_builds[0].report.source_reports[0].bad_count == 1);
     assert(loaded.graph.Node(0).motion_space.HasExampleTimeWarps());
+
+    // Parameter calibration round-trips with the space.
+    {
+        const pmg::ParameterCalibration& calibration =
+            loaded.graph.Node(0).motion_space.ParameterCalibrationData();
+        assert(calibration.metric == pmg::ParameterMetric::kTurnRate);
+        assert(calibration.example_order == (std::vector<int>{0, 1}));
+        assert(calibration.segments.size() == 1);
+        assert(calibration.segments[0].samples.size() == 3);
+        assert(std::abs(calibration.segments[0].samples[1].blend_t - 0.5f) <
+               1.0e-6f);
+        assert(std::abs(calibration.segments[0].samples[1].measured - 0.2f) <
+               1.0e-6f);
+    }
 
     const pmg::ParametricMotionSpace& original_space =
         original.graph.Node(0).motion_space;
@@ -167,8 +214,8 @@ int main() {
     pmg::RuntimeController original_runtime(
         original.graph, original_alignment);
     pmg::RuntimeController loaded_runtime(loaded.graph, loaded_alignment);
-    original_runtime.Start(0, {0.5f}, 3, 30.0f);
-    loaded_runtime.Start(0, {0.5f}, 3, 30.0f);
+    original_runtime.Start(0, {0.5f}, 30.0f);
+    loaded_runtime.Start(0, {0.5f}, 30.0f);
     pmg::RuntimeControlRequest runtime_request;
     runtime_request.desired_node = 0;
     runtime_request.desired_parameter = {0.5f};
@@ -192,6 +239,14 @@ int main() {
         assert(legacy.skeleton.NumJoints() == 0);
         assert(legacy.graph.NumNodes() == 1);
         assert(legacy.graph.NumEdges() == 1);
+    }
+
+    {
+        WriteV4Fixture(path);
+        const pmg::BuiltPmgArtifact v4 = pmg::LoadPmgArtifactText(path.string());
+        assert(v4.skeleton.NumJoints() == 1);
+        assert(v4.graph.NumNodes() == 1);
+        assert(!v4.graph.Node(0).motion_space.HasParameterCalibration());
     }
 
     std::filesystem::remove(path);

@@ -53,13 +53,11 @@ GoalDirectedLocomotion::GoalDirectedLocomotion(
     const ParametricMotionGraph& graph,
     const Skeleton& skeleton,
     int node_index,
-    int generated_frame_count,
     float frames_per_second,
     GoalDirectedLocomotionConfig config)
     : graph_(graph),
       skeleton_(skeleton),
       node_index_(node_index),
-      generated_frame_count_(generated_frame_count),
       frames_per_second_(frames_per_second),
       config_(config) {
     const ParametricMotionSpace& space = graph_.Node(node_index_).motion_space;
@@ -67,7 +65,7 @@ GoalDirectedLocomotion::GoalDirectedLocomotion(
         throw std::runtime_error(
             "GoalDirectedLocomotion: node must have one parameter");
     }
-    if (generated_frame_count_ <= 1 || frames_per_second_ <= 0.0f) {
+    if (frames_per_second_ <= 0.0f) {
         throw std::runtime_error(
             "GoalDirectedLocomotion: invalid runtime frame configuration");
     }
@@ -103,8 +101,12 @@ GoalDirectedLocomotion::GoalDirectedLocomotion(
     }
     calibration_.travel_heading_offset =
         EstimateTravelHeadingOffset(space.Examples().front().clip);
-    calibration_.cycle_seconds =
-        static_cast<float>(generated_frame_count_) / frames_per_second_;
+    // Cycle time now follows the blended example durations (D2); use the
+    // domain midpoint as the representative steering cadence.
+    calibration_.cycle_seconds = std::max(
+        1.0f / frames_per_second_,
+        space.BlendedDurationSeconds(
+            {0.5f * (parameter_min + parameter_max)}));
 }
 
 const SteeringCalibration& GoalDirectedLocomotion::Calibration() const {
@@ -114,8 +116,7 @@ const SteeringCalibration& GoalDirectedLocomotion::Calibration() const {
 float GoalDirectedLocomotion::MeasureAchievedTurnRate(float parameter) const {
     PointCloudAlignment alignment(skeleton_);
     RuntimeController controller(graph_, alignment);
-    controller.Start(
-        node_index_, {parameter}, generated_frame_count_, frames_per_second_);
+    controller.Start(node_index_, {parameter}, frames_per_second_);
 
     RuntimeControlRequest request;
     request.desired_node = node_index_;

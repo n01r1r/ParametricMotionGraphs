@@ -15,7 +15,7 @@ GraphSpec
       -> optional DTW refinement
       -> PmgBuilder edge sampling
   -> BuiltPmgArtifact
-      -> GraphIo V4
+      -> GraphIo V5
       -> RuntimeController
       -> GoalDirectedLocomotion
 ```
@@ -28,7 +28,9 @@ edge sampling configuration, seeds, and build reports.
 
 - BVH offsets/root positions and distance thresholds use native BVH units.
 - Phase is normalized to `[0, 1]`.
-- Graph runtime requires a V4 artifact with a non-empty Skeleton.
+- Generated clips derive their frame count from the blended example durations;
+  explicit frame counts are diagnostic overrides.
+- Graph runtime requires a V4+ artifact with a non-empty Skeleton.
 - Node registration either names contact joints or explicitly disables DTW.
 - Edge creation fails if any sampled source parameter has no valid target box.
 - Random runtime selection considers only outgoing edges.
@@ -46,10 +48,8 @@ goal-directed nodes.
 The full prioritized deviation list lives in
 [PAPER_CONFORMANCE.md](PAPER_CONFORMANCE.md). Structural highlights:
 
-- Blend weights are local Shepard interpolation, not the Kovar-Gleicher 2004
-  weight-to-parameter inversion; requested parameters are approximate (D1).
-- Generated clip duration is fixed by configuration instead of following the
-  blended example durations (D2).
+- Parameter-accuracy calibration covers one-dimensional nodes with the
+  turn-rate metric; other dimensions/metrics fall back to Shepard weights.
 - Manual GraphSpec parameterization replaces Kovar-Gleicher automatic database
   extraction and parameterization.
 - The included corpus validates walking/jogging behavior, not the original

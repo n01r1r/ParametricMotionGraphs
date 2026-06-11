@@ -102,7 +102,7 @@ int main() {
     // transition (paper Sec 3.2 / Sec 5.2.1) instead of a root-only debug fallback.
     pmg::PointCloudAlignment alignment(skeleton);
     pmg::RuntimeController controller(graph, alignment);
-    controller.Start(node, {0.5f}, kRuntimeFrameCount, kFramesPerSecond);
+    controller.Start(node, {0.5f}, kFramesPerSecond);
 
     pmg::RuntimeControlRequest request;
     request.desired_node = node;

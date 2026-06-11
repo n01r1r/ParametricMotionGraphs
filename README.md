@@ -12,7 +12,7 @@ BVH examples
   -> point-cloud transition distance grids
   -> sampled GOOD/NEUTRAL/BAD target regions
   -> interpolated PMG edges
-  -> V4 offline artifact
+  -> V5 offline artifact
   -> point-cloud-aligned online runtime
 ```
 
@@ -43,14 +43,21 @@ Graph specs explicitly record registration and edge sampling:
 ```text
 node walk 1
 registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
+parameter_metric walk turn_rate
 example walk 0.0 ../BVH/walkCurve.bvh
 example walk 0.5 ../BVH/walkMoreCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
 edge walk walk
-edge_config walk walk 1.0 1.4 12 60 7
+edge_config walk walk 1.5 2.0 12 60 7
 ```
 
-Build a complete V4 artifact:
+`parameter_metric` enables KG04-style parameter accuracy: the build samples
+blend weights between adjacent examples, measures each blend's turn rate, and
+stores the inversion table so requested parameters achieve their measured
+meaning. Generated clips also derive their length from the blended example
+durations, so cycle time follows the parameter.
+
+Build a complete V5 artifact:
 
 ```powershell
 .\build\Debug\pmg_cli.exe --build-graph `
@@ -70,14 +77,15 @@ outputs/paper_core_walk/
     `-- edge_samples.csv
 ```
 
-V4 stores the Skeleton, registered motion spaces, TimeWarps, transition
-samples, runtime frame settings, source paths, seeds, thresholds, and edge
-build reports. V2/V3 graph files remain readable but lack the Skeleton required
+V5 stores the Skeleton, registered motion spaces, TimeWarps, parameter
+calibrations, transition samples, runtime sampling rate, source paths, seeds,
+thresholds, and edge build reports. V4 files remain readable (without
+parameter calibrations); V2/V3 remain readable but lack the Skeleton required
 for standalone point-cloud runtime alignment.
 
 ## Runtime
 
-Both commands accept either a spec or a built V4 artifact:
+Both commands accept either a spec or a built artifact:
 
 ```powershell
 .\build\Debug\pmg_cli.exe --random-walk `
@@ -117,5 +125,5 @@ not part of the stored PMG runtime contract.
   papers, the prioritized deviation list (D1–D8), and the claim limit.
 - [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — completed
   paper-core and prioritized remaining work.
-- [docs/adr/](docs/adr) — accepted architecture decisions (V4 artifact seam,
-  k-NN cutoff interpretation).
+- [docs/adr/](docs/adr) — accepted architecture decisions (complete artifact
+  seam, k-NN cutoff interpretation, parameter-accuracy calibration).

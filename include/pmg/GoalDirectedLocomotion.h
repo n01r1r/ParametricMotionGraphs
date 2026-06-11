@@ -50,7 +50,6 @@ public:
         const ParametricMotionGraph& graph,
         const Skeleton& skeleton,
         int node_index,
-        int generated_frame_count,
         float frames_per_second,
         GoalDirectedLocomotionConfig config = {});
 
@@ -71,7 +70,6 @@ private:
     const ParametricMotionGraph& graph_;
     const Skeleton& skeleton_;
     int node_index_ = -1;
-    int generated_frame_count_ = 0;
     float frames_per_second_ = 0.0f;
     GoalDirectedLocomotionConfig config_;
     SteeringCalibration calibration_;

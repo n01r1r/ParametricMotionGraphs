@@ -18,32 +18,34 @@ Kovar, Gleicher & Pighin 2002 (*Motion Graphs*).
 | Recompute alignment at runtime | `PointCloudAlignment` |
 | Random graph walk | outgoing-edge runtime selection |
 | Target-directed and interactive control | `GoalDirectedLocomotion` |
+| KG04-style parameter-accurate blend weights (D1) | `CalibrateParameterMetric` / `ParameterCalibration` |
+| Parameter-dependent blended clip duration (D2) | `BlendedDurationSeconds` / duration-derived `GenerateClip` |
+
+## Resolved Deviations
+
+### D1 — Blend weights calibrated against a measured metric (resolved)
+
+`ParametricMotionSpace` now supports KG04-style inversion: the offline build
+samples the blend-weight axis between parameter-adjacent examples, measures
+each blend (`parameter_metric <node> turn_rate` in the spec), and stores the
+monotone (weight, measured) table. `ComputeLocalBlendWeights` inverts the
+table so a requested parameter lands on the anchor-interpolated measured
+value. Nodes without a declared metric keep the Shepard fallback; only 1-D
+spaces and the turn-rate metric are implemented so far. The calibration
+serializes with the space (`PMG_GRAPH_V5`).
+
+### D2 — Generated clip duration follows the parameter (resolved)
+
+`GenerateClip(parameter, fps)` derives its frame count from
+`BlendedDurationSeconds` (the weighted sum of example durations), so cycle
+time varies with the parameter as in the paper. The builder and runtime use
+this path; the explicit-frame-count overload remains for frame-aligned
+diagnostics only. Distance thresholds in the specs were recalibrated because
+duration-true clips raised absolute point-cloud distances.
 
 ## Known Deviations
 
-Ordered by priority (impact on the paper's central claims first). Motion-space
-fidelity (D1, D2) outranks graph-layer polish; the graph layer is already
-near-conformant.
-
-### D1 — Blend weights are Shepard interpolation, not Kovar-Gleicher 2004 parameterization (high)
-
-The paper builds motion spaces with K&G04: densely sample blend-weight space,
-record which parameter each weight combination actually achieves, then invert
-that map so a requested parameter is accurately reached.
-`ParametricMotionSpace::ComputeLocalBlendWeights` instead applies
-inverse-distance (Shepard) weights over the k = dim + 1 nearest authored
-examples directly in parameter space, assuming the parameter is linear in the
-weights. Observable consequence: `GoalDirectedLocomotion` must calibrate
-achieved turn rates because requested curvature does not equal achieved
-curvature.
-
-### D2 — Generated clip duration ignores the parameter (high)
-
-`GenerateClip(parameter, frame_count, fps)` produces a fixed-length clip from
-configuration. The paper's blend duration is the weighted sum of the
-(time-warped) example durations, so cycle time varies with the parameter.
-A tight turn and a straight walk currently play over the same frame count,
-distorting playback speed across the parameter range.
+Ordered by priority (impact on the paper's central claims first).
 
 ### D3 — Source clip freezes when a blend crosses its end (medium)
 
@@ -90,8 +92,8 @@ here is an independent IK post-process.
   rigid alignment and constraint matching are approximated by root-delta
   blending and contact anchors; see D1/D2 for the remaining gap).
 - Root-delta blending and optional foot locking address observed BVH artifacts.
-- V4 artifacts and structured reports add reproducibility not specified by the
-  original paper.
+- Complete (V5) artifacts and structured reports add reproducibility not
+  specified by the original paper.
 
 ## Claim Limit
 

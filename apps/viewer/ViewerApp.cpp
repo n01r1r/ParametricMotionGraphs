@@ -265,8 +265,7 @@ void ViewerApp::CalibrateSteering() {
         return;
     }
     try {
-        steering_.emplace(
-            graph_, pmg_skeleton_, 0, graph_frame_count_, graph_fps_);
+        steering_.emplace(graph_, pmg_skeleton_, 0, graph_fps_);
         const pmg::SteeringCalibration& calibration =
             steering_->Calibration();
         goto_status_ = "Calibrated: achieved turn rates " +
@@ -610,7 +609,7 @@ void ViewerApp::BuildTransportSection() {
         ImGui::SameLine();
         if (ImGui::Button("Restart graph")) {
             graph_controller_->Start(graph_controller_->CurrentNode(),
-                                     {graph_desired_parameter_}, graph_frame_count_, graph_fps_);
+                                     {graph_desired_parameter_}, graph_fps_);
         }
     }
 
@@ -980,10 +979,9 @@ void ViewerApp::LoadGraphArtifact(const std::string& artifact_path) {
         pmg::LoadPmgArtifactText(artifact_path);
     if (artifact.skeleton.NumJoints() == 0) {
         throw std::runtime_error(
-            "viewer runtime requires a V4 artifact with a Skeleton");
+            "viewer runtime requires a complete (V4+) artifact with a Skeleton");
     }
     if (artifact.graph.NumNodes() == 0 ||
-        artifact.metadata.generated_frame_count <= 0 ||
         artifact.metadata.frames_per_second <= 0.0f) {
         throw std::runtime_error(
             "viewer runtime artifact has incomplete graph/frame metadata");
@@ -991,7 +989,6 @@ void ViewerApp::LoadGraphArtifact(const std::string& artifact_path) {
 
     pmg_skeleton_ = std::move(artifact.skeleton);
     graph_ = std::move(artifact.graph);
-    graph_frame_count_ = artifact.metadata.generated_frame_count;
     graph_fps_ = artifact.metadata.frames_per_second;
     pmg_space_ = graph_.Node(0).motion_space;
     pmg_examples_.clear();
@@ -1007,12 +1004,11 @@ void ViewerApp::LoadGraphArtifact(const std::string& artifact_path) {
 
     graph_alignment_.emplace(pmg_skeleton_);
     graph_controller_.emplace(graph_, *graph_alignment_);
-    graph_controller_->Start(
-        0, {graph_desired_parameter_}, graph_frame_count_, graph_fps_);
+    graph_controller_->Start(0, {graph_desired_parameter_}, graph_fps_);
     graph_ready_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
     playing_ = true;
-    graph_status_ = "Loaded V4 artifact: " + artifact_path;
+    graph_status_ = "Loaded artifact: " + artifact_path;
     status_message_ = graph_status_;
 }
 
@@ -1039,7 +1035,6 @@ void ViewerApp::BuildGraphRuntime() {
         pmg::PmgBuilderConfig config;
         config.source_sample_count = 8;     // small for interactive build
         config.target_sample_count = 32;
-        config.generated_frame_count = graph_frame_count_;
         config.generated_frames_per_second = graph_fps_;
         config.good_transition_threshold = tgood_;
         config.bad_transition_threshold = tbad_;
@@ -1059,7 +1054,7 @@ void ViewerApp::BuildGraphRuntime() {
         graph_controller_.emplace(graph_, *graph_alignment_);
         graph_desired_parameter_ =
             std::clamp(graph_desired_parameter_, pmg_parameter_min_, pmg_parameter_max_);
-        graph_controller_->Start(node, {graph_desired_parameter_}, graph_frame_count_, graph_fps_);
+        graph_controller_->Start(node, {graph_desired_parameter_}, graph_fps_);
 
         graph_ready_ = true;
         mode_ = ViewerPlaybackMode::GraphRuntime;

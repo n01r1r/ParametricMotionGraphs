@@ -107,7 +107,7 @@ int main() {
 
         CountingAlignment alignment;
         pmg::RuntimeController controller(graph, alignment);
-        controller.Start(node, {0.5f}, 24, 30.0f);
+        controller.Start(node, {0.5f}, 30.0f);
 
         pmg::RuntimeControlRequest request;
         request.desired_node = node;

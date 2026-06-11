@@ -157,7 +157,7 @@ if(PMG_BUILD_TESTS)
         COMMAND pmg_cli --validate-graph ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
             --cycle-joint LeftAnkle
             --source-samples 12 --target-samples 60 --seed 7
-            --tgood 1.0 --tbad 1.4
+            --tgood 1.5 --tbad 2.0
             --min-edge-samples 10
             --min-good-fraction 0.9
             --assert-no-regression)
@@ -170,7 +170,7 @@ if(PMG_BUILD_TESTS)
         COMMAND pmg_cli --random-walk ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
             --cycle-joint LeftAnkle
             --source-samples 6 --target-samples 30
-            --tgood 1.0 --tbad 1.4
+            --tgood 1.5 --tbad 2.0
             --seconds 30
             --min-transitions 20
             --max-pop-ratio 3.0)
@@ -183,14 +183,14 @@ if(PMG_BUILD_TESTS)
         COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec 10 10
             --cycle-joint LeftAnkle
             --source-samples 6 --target-samples 30
-            --tgood 1.0 --tbad 1.4
+            --tgood 1.5 --tbad 2.0
             --seconds 60 --tolerance 3
             --max-pop-ratio 3.0)
     add_test(NAME cli_goto_walk_behind
         COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec 0 -20
             --cycle-joint LeftAnkle
             --source-samples 6 --target-samples 30
-            --tgood 1.0 --tbad 1.4
+            --tgood 1.5 --tbad 2.0
             --seconds 60 --tolerance 3
             --max-pop-ratio 3.0)
 

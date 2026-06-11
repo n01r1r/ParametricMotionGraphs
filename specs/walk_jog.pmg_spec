@@ -2,6 +2,7 @@
 # Parameters are normalized authored controls, not inferred physical units.
 node walk 1
 registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
+parameter_metric walk turn_rate
 example walk 0.0 ../BVH/walkCurve.bvh
 example walk 0.5 ../BVH/walkMoreCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
@@ -10,11 +11,12 @@ node jog 1
 registration jog LeftAnkle LeftAnkle,RightAnkle 3 0
 example jog 0.0 ../BVH/jogCurve.bvh
 
+# Thresholds recalibrated for duration-true generated clips (D2).
 edge walk walk
-edge_config walk walk 1.0 1.4 8 40 17
+edge_config walk walk 1.5 2.0 8 40 17
 edge walk jog
-edge_config walk jog 3.0 4.0 8 20 19
+edge_config walk jog 3.5 4.5 8 20 19
 edge jog walk
-edge_config jog walk 3.0 4.0 4 40 23
+edge_config jog walk 3.5 4.5 4 40 23
 edge jog jog
-edge_config jog jog 1.5 2.0 4 20 29
+edge_config jog jog 2.0 2.5 4 20 29
