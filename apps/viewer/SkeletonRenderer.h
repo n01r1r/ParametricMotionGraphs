@@ -20,6 +20,10 @@ struct BoneSegment {
 struct RenderScene {
     std::vector<BoneSegment> bones;
     std::vector<glm::vec3> joints;
+    // Overlay markers (e.g. the goto target gizmo): points render as spheres,
+    // lines as thin cylinders, both in the marker color.
+    std::vector<glm::vec3> marker_points;
+    std::vector<BoneSegment> marker_lines;
     glm::vec3 light_to_direction{0.4f, 0.85f, 0.35f};  // normalized direction toward the light
     glm::vec3 focus_point{0.0f, 8.0f, 0.0f};           // shadow framing center
 };

@@ -47,6 +47,11 @@ public:
     void Update(float delta_seconds);
     void BuildUi();
 
+    // Ray pick (display-space, e.g. from a right-click unprojected by main):
+    // intersects the ground plane and, in graph runtime, places the goto
+    // target there. Returns true when the click was consumed.
+    bool HandleGroundClick(const glm::vec3& ray_origin, const glm::vec3& ray_direction);
+
     const RenderScene& Scene() const { return scene_; }
     OrbitCamera& Camera() { return camera_; }
 
@@ -79,6 +84,19 @@ private:
     void RecomputeHeatmap();
     void SaveHeatmapCsv();
     void BuildGraphRuntime();
+
+    // Goto steering (viewer port of the CLI --goto semantic control):
+    // target position -> desired heading -> turn rate -> curvature parameter.
+    void CalibrateSteering();
+    void UpdateGotoSteering(const pmg::Pose& pose);
+    // Invert the calibrated (possibly non-monotonic) rate table: prefer a
+    // bracketing segment, fall back to the closest calibrated rate.
+    float ParameterForRate(float desired_rate) const;
+
+    // SliderFloat plus tick marks at the example parameters, so the user can
+    // see where the real clips sit on the blend axis.
+    bool ParameterSliderWithTicks(const char* label, float* value,
+                                  float min_value, float max_value);
 
     void HandleShortcuts();
     void StepFrame(int direction);  // +1 / -1 frame; clip & blend modes only
@@ -149,6 +167,26 @@ private:
     int graph_frame_count_ = 48;
     float graph_fps_ = 30.0f;
     std::string graph_status_ = "Build a parametric space, then Build Graph.";
+
+    // --- Goto steering (paper application B/C in the viewer) -------------------
+    // Achieved turn rates differ from the example clips' own turn rates (each
+    // self-transition replays only a slice per cycle), so steering inverts a
+    // table measured by streaming the built graph at held parameters.
+    struct SteeringCalibration {
+        std::vector<float> parameters;
+        std::vector<float> rates;      // achieved world turn rate (rad/s)
+        float lowest_rate = 0.0f;
+        float highest_rate = 0.0f;
+        float travel_offset = 0.0f;    // root +Z reference -> travel direction
+        float cycle_seconds = 1.0f;
+        bool ready = false;
+    };
+    SteeringCalibration steering_;
+    bool goto_active_ = false;
+    bool goto_swinging_ = false;       // long-way-around hysteresis latch
+    glm::vec2 goto_target_{0.0f, 0.0f};  // native units, ground plane (x, z)
+    float goto_tolerance_ = 2.0f;        // native units; arrival radius
+    std::string goto_status_;
 
     RenderScene scene_;
     OrbitCamera camera_;

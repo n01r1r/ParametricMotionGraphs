@@ -10,6 +10,7 @@
 #include <string>
 
 #include "pmg/ForwardKinematics.h"
+#include "pmg/MathTypes.h"
 #include "pmg/SkeletonCompatibility.h"
 
 #ifndef PMG_BVH_DIRECTORY
@@ -40,6 +41,43 @@ float FramePhaseLocal(int frame_index, int frame_count) {
         return 0.0f;
     }
     return static_cast<float>(frame_index) / static_cast<float>(frame_count - 1);
+}
+
+float WrapPi(float angle_radians) {
+    return angle_radians -
+           2.0f * pmg::kPi * std::round(angle_radians / (2.0f * pmg::kPi));
+}
+
+// World yaw of the root's +Z reference axis.
+float HeadingOfPose(const pmg::Pose& pose) {
+    if (pose.local_rotations.empty()) {
+        return 0.0f;
+    }
+    const pmg::Vec3 forward = pmg::Rotate(pose.local_rotations.front(), {0.0f, 0.0f, 1.0f});
+    return std::atan2(forward.x, forward.z);
+}
+
+// Constant angle from the root's +Z reference to the actual travel direction,
+// estimated as a displacement-weighted circular mean over a clip. BVH corpora
+// differ in which root axis faces travel; steering must aim the travel
+// direction, not the reference axis. (Mirrors the CLI --goto estimate.)
+float EstimateTravelHeadingOffset(const pmg::MotionClip& clip) {
+    float sum_sin = 0.0f;
+    float sum_cos = 0.0f;
+    for (int frame = 0; frame + 1 < clip.NumFrames(); ++frame) {
+        const pmg::Vec3 step =
+            clip.frames[frame + 1].root_position - clip.frames[frame].root_position;
+        const float step_length = std::sqrt(step.x * step.x + step.z * step.z);
+        if (step_length <= 1.0e-5f) {
+            continue;
+        }
+        const float travel_heading = std::atan2(step.x, step.z);
+        const float reference_heading = HeadingOfPose(clip.frames[frame]);
+        const float offset = WrapPi(travel_heading - reference_heading);
+        sum_sin += step_length * std::sin(offset);
+        sum_cos += step_length * std::cos(offset);
+    }
+    return std::atan2(sum_sin, sum_cos);
 }
 
 // Jet-style colormap: t=0 -> blue (low distance, good), t=1 -> red (high, bad).
@@ -230,16 +268,187 @@ void ViewerApp::RebuildScene(const pmg::Pose& pose) {
              world_positions[static_cast<std::size_t>(joint_index)]});
     }
 
+    // Goto target gizmo: ground sphere plus a beacon roughly character-tall
+    // (native target back into display space, same transform as the root).
+    scene_.marker_points.clear();
+    scene_.marker_lines.clear();
+    if (goto_active_ && GraphRuntimeActive()) {
+        const glm::vec3 base(goto_target_.x * display_scale_, 0.0f,
+                             goto_target_.y * display_scale_);
+        const glm::vec3 top = base + glm::vec3(0.0f, 1.8f * display_scale_, 0.0f);
+        scene_.marker_points.push_back(base);
+        scene_.marker_lines.push_back({base, top});
+    }
+
     scene_.focus_point = centroid;
     if (follow_centroid_) {
         camera_.SetTarget(centroid);
     }
 }
 
+// --- Goto steering (viewer port of CLI --goto) ------------------------------
+
+// Achieved world turn rate when streaming the graph at one held parameter.
+// Differs from the example clips' own turn rates: each self-transition plays
+// only the target-phase -> source-gate slice per cycle, so the net heading
+// advance per hop is that slice's heading change (including sway).
+void ViewerApp::CalibrateSteering() {
+    steering_ = SteeringCalibration{};
+    if (!graph_ready_ || pmg_examples_.empty()) {
+        goto_status_ = "Build a graph first.";
+        return;
+    }
+
+    constexpr int kCalibrationPoints = 5;
+    constexpr float kCalibrationSeconds = 8.0f;
+    const float dt = 1.0f / graph_fps_;
+    const int total_frames = static_cast<int>(kCalibrationSeconds * graph_fps_);
+
+    for (int point = 0; point < kCalibrationPoints; ++point) {
+        const float alpha =
+            static_cast<float>(point) / static_cast<float>(kCalibrationPoints - 1);
+        const float parameter =
+            pmg_parameter_min_ + alpha * (pmg_parameter_max_ - pmg_parameter_min_);
+
+        pmg::PointCloudAlignment alignment(pmg_skeleton_);
+        pmg::RuntimeController controller(graph_, alignment);
+        controller.Start(0, {parameter}, graph_frame_count_, graph_fps_);
+
+        pmg::RuntimeControlRequest request;
+        request.desired_node = 0;
+        request.desired_parameter = {parameter};
+
+        float unwrapped = 0.0f;
+        float previous_heading = HeadingOfPose(controller.CurrentPose());
+        for (int frame = 0; frame < total_frames; ++frame) {
+            controller.Update(dt, request);
+            const float heading = HeadingOfPose(controller.CurrentPose());
+            unwrapped += WrapPi(heading - previous_heading);
+            previous_heading = heading;
+        }
+        steering_.parameters.push_back(parameter);
+        steering_.rates.push_back(unwrapped / (static_cast<float>(total_frames) * dt));
+    }
+
+    steering_.lowest_rate =
+        *std::min_element(steering_.rates.begin(), steering_.rates.end());
+    steering_.highest_rate =
+        *std::max_element(steering_.rates.begin(), steering_.rates.end());
+    if (steering_.highest_rate - steering_.lowest_rate < 1.0e-4f) {
+        goto_status_ = "Calibration found no turn-rate variation; cannot steer.";
+        return;
+    }
+    steering_.travel_offset = EstimateTravelHeadingOffset(pmg_examples_.front().clip);
+    steering_.cycle_seconds = static_cast<float>(graph_frame_count_) / graph_fps_;
+    steering_.ready = true;
+    goto_status_ = "Calibrated: achieved turn rates " +
+                   std::to_string(steering_.lowest_rate) + " .. " +
+                   std::to_string(steering_.highest_rate) + " rad/s.";
+}
+
+float ViewerApp::ParameterForRate(float desired_rate) const {
+    const float clamped =
+        std::clamp(desired_rate, steering_.lowest_rate, steering_.highest_rate);
+    for (std::size_t segment = 0; segment + 1 < steering_.rates.size(); ++segment) {
+        const float rate_a = steering_.rates[segment];
+        const float rate_b = steering_.rates[segment + 1];
+        if ((clamped - rate_a) * (clamped - rate_b) <= 0.0f &&
+            std::abs(rate_b - rate_a) > 1.0e-6f) {
+            const float alpha = (clamped - rate_a) / (rate_b - rate_a);
+            return steering_.parameters[segment] +
+                   alpha * (steering_.parameters[segment + 1] - steering_.parameters[segment]);
+        }
+    }
+    std::size_t best = 0;
+    for (std::size_t point = 1; point < steering_.rates.size(); ++point) {
+        if (std::abs(steering_.rates[point] - clamped) <
+            std::abs(steering_.rates[best] - clamped)) {
+            best = point;
+        }
+    }
+    return steering_.parameters[best];
+}
+
+void ViewerApp::UpdateGotoSteering(const pmg::Pose& pose) {
+    const float dx = goto_target_.x - pose.root_position.x;
+    const float dz = goto_target_.y - pose.root_position.z;
+    const float distance = std::sqrt(dx * dx + dz * dz);
+    if (distance <= goto_tolerance_) {
+        goto_active_ = false;
+        goto_swinging_ = false;
+        goto_status_ = "Target reached.";
+        return;
+    }
+
+    const float desired_heading = std::atan2(dx, dz);
+    const float travel_heading = WrapPi(HeadingOfPose(pose) + steering_.travel_offset);
+    const float heading_error = WrapPi(desired_heading - travel_heading);
+    const float desired_rate = heading_error / steering_.cycle_seconds;
+
+    // When the demanded turn exceeds what its own direction offers (target
+    // inside that branch's minimum turning radius), going the long way around
+    // with the tightest branch converges; the wide branch orbits forever.
+    // Hysteresis keeps the swing from chattering.
+    const float tightest_rate =
+        std::abs(steering_.lowest_rate) > std::abs(steering_.highest_rate)
+            ? steering_.lowest_rate
+            : steering_.highest_rate;
+    if (!goto_swinging_ && std::abs(heading_error) > 0.5f &&
+        (desired_rate > steering_.highest_rate || desired_rate < steering_.lowest_rate) &&
+        std::abs(std::clamp(desired_rate, steering_.lowest_rate, steering_.highest_rate)) <
+            0.5f * std::abs(tightest_rate)) {
+        goto_swinging_ = true;
+    }
+    if (goto_swinging_ && std::abs(heading_error) < 0.2f) {
+        goto_swinging_ = false;
+    }
+
+    const float commanded_rate =
+        goto_swinging_
+            ? tightest_rate
+            : std::clamp(desired_rate, steering_.lowest_rate, steering_.highest_rate);
+    graph_desired_parameter_ = std::clamp(
+        ParameterForRate(commanded_rate), pmg_parameter_min_, pmg_parameter_max_);
+}
+
+bool ViewerApp::HandleGroundClick(const glm::vec3& ray_origin,
+                                  const glm::vec3& ray_direction) {
+    if (!GraphRuntimeActive()) {
+        if (graph_ready_) {
+            status_message_ = "Switch to Graph runtime mode to place a walk target.";
+        }
+        return false;
+    }
+    if (std::abs(ray_direction.y) < 1.0e-6f) {
+        return false;
+    }
+    const float t = -ray_origin.y / ray_direction.y;
+    if (t <= 0.0f) {
+        return false;
+    }
+    const glm::vec3 hit = ray_origin + t * ray_direction;
+    // The scene is rendered at display scale; steering runs in native units.
+    goto_target_ = glm::vec2(hit.x, hit.z) / std::max(display_scale_, kEpsilon);
+
+    if (!steering_.ready) {
+        CalibrateSteering();  // one-time; a few seconds of offline streaming
+    }
+    goto_swinging_ = false;
+    goto_active_ = steering_.ready;
+    if (goto_active_) {
+        playing_ = true;
+        goto_status_ = "Walking to target.";
+    }
+    return true;
+}
+
 void ViewerApp::Update(float delta_seconds) {
     // Graph runtime: drive the RuntimeController and render its streamed pose.
     if (GraphRuntimeActive()) {
         if (playing_) {
+            if (goto_active_ && steering_.ready) {
+                UpdateGotoSteering(graph_controller_->CurrentPose());
+            }
             pmg::RuntimeControlRequest request;
             request.desired_node = graph_controller_->CurrentNode();
             request.desired_parameter = {graph_desired_parameter_};
@@ -404,6 +613,36 @@ void ViewerApp::StepFrame(int direction) {
         time += duration;
     }
     current_time_seconds_ = time;
+}
+
+bool ViewerApp::ParameterSliderWithTicks(const char* label, float* value,
+                                         float min_value, float max_value) {
+    const float frame_width = ImGui::CalcItemWidth();
+    const bool changed = ImGui::SliderFloat(label, value, min_value, max_value, "%.3f");
+
+    // Tick marks at the example parameters along the slider frame's bottom
+    // edge, so the user sees where real clips sit on the blend axis.
+    const float span = max_value - min_value;
+    if (span > kEpsilon && !pmg_examples_.empty()) {
+        const ImVec2 rect_min = ImGui::GetItemRectMin();
+        const float bottom = ImGui::GetItemRectMax().y;
+        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        for (const PmgExample& example : pmg_examples_) {
+            const float alpha = std::clamp((example.parameter - min_value) / span, 0.0f, 1.0f);
+            const float x = rect_min.x + alpha * frame_width;
+            draw_list->AddLine(ImVec2(x, bottom - 4.0f), ImVec2(x, bottom + 2.0f),
+                               IM_COL32(255, 255, 255, 170), 1.0f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::TextDisabled("ticks = example clips (ctrl+click to type)");
+            for (const PmgExample& example : pmg_examples_) {
+                ImGui::Text("%.3f  %s", example.parameter, example.label.c_str());
+            }
+            ImGui::EndTooltip();
+        }
+    }
+    return changed;
 }
 
 void ViewerApp::BuildWorkflowSection() {
@@ -584,8 +823,8 @@ void ViewerApp::BuildBlendSection() {
     ImGui::Separator();
 
     if (ParametricBlendActive()) {
-        ImGui::SliderFloat("Blend parameter", &pmg_parameter_,
-                           pmg_parameter_min_, pmg_parameter_max_, "%.3f");
+        ParameterSliderWithTicks("Blend parameter", &pmg_parameter_,
+                                 pmg_parameter_min_, pmg_parameter_max_);
     } else {
         ImGui::TextDisabled("Enter Parametric blend mode to scrub the blend parameter.");
     }
@@ -851,6 +1090,11 @@ void ViewerApp::BuildDistanceGridSection() {
 void ViewerApp::BuildGraphRuntime() {
     graph_ready_ = false;
     graph_controller_.reset();
+    // A new graph invalidates the achieved-turn-rate table and any active goto.
+    steering_ = SteeringCalibration{};
+    goto_active_ = false;
+    goto_swinging_ = false;
+    goto_status_.clear();
 
     if (!pmg_space_ready_ || pmg_examples_.empty()) {
         graph_status_ = "Add at least one clip to the parametric space first.";
@@ -911,8 +1155,12 @@ void ViewerApp::BuildGraphSection() {
     ImGui::Separator();
 
     if (graph_ready_ && graph_controller_.has_value()) {
-        ImGui::SliderFloat("Desired parameter", &graph_desired_parameter_,
-                           pmg_parameter_min_, pmg_parameter_max_, "%.3f");
+        // While goto steering is active it owns the parameter; show it live
+        // but don't let the slider fight the controller.
+        ImGui::BeginDisabled(goto_active_);
+        ParameterSliderWithTicks("Desired parameter", &graph_desired_parameter_,
+                                 pmg_parameter_min_, pmg_parameter_max_);
+        ImGui::EndDisabled();
         ImGui::Text("Node %d   phase %.2f   transitions %d   %s",
                     graph_controller_->CurrentNode(),
                     graph_controller_->CurrentPhase(),
@@ -920,6 +1168,37 @@ void ViewerApp::BuildGraphSection() {
                     graph_controller_->IsTransitioning() ? "[transitioning]" : "");
         ImGui::TextDisabled("Switch to Graph runtime mode above to run; "
                             "Restart graph is next to Play.");
+
+        ImGui::Separator();
+        ImGui::TextDisabled("Goto steering");
+        ImGui::TextWrapped("Right-click the floor (in Graph runtime mode) to set a "
+                           "walk target. First click calibrates achieved turn rates "
+                           "(a few seconds).");
+        if (ImGui::Button(steering_.ready ? "Recalibrate" : "Calibrate steering")) {
+            CalibrateSteering();
+        }
+        if (steering_.ready) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("rates %.2f .. %.2f rad/s",
+                                steering_.lowest_rate, steering_.highest_rate);
+        }
+        if (goto_active_) {
+            const pmg::Pose pose = graph_controller_->CurrentPose();
+            const float dx = goto_target_.x - pose.root_position.x;
+            const float dz = goto_target_.y - pose.root_position.z;
+            ImGui::Text("Target (%.1f, %.1f)   distance %.2f%s",
+                        goto_target_.x, goto_target_.y, std::sqrt(dx * dx + dz * dz),
+                        goto_swinging_ ? "   [swinging long way]" : "");
+            ImGui::SameLine();
+            if (ImGui::Button("Clear target")) {
+                goto_active_ = false;
+                goto_swinging_ = false;
+                goto_status_ = "Target cleared.";
+            }
+        }
+        if (!goto_status_.empty()) {
+            ImGui::TextWrapped("%s", goto_status_.c_str());
+        }
     } else {
         ImGui::TextDisabled("No graph yet. Add clips to the space and Build Graph.");
     }
