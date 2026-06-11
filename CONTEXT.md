@@ -25,10 +25,26 @@ _Avoid_: time, t, progress.
 
 **ParametricMotionSpace**:
 One action (e.g. "walk") as a set of example clips keyed by a parameter vector;
-evaluates an interpolated pose for any parameter via local k-nearest blend
-weights, sampling each example at its registered (time-warped) phase.
+evaluates an interpolated pose for any parameter, sampling each example at its
+registered (time-warped) phase. Weights come from the parameter calibration
+when one is installed, otherwise from the local k-nearest Shepard stencil.
 _Avoid_: blend tree, blendspace, motion set, inverse-distance weighting (the
 old global scheme, replaced by the local stencil).
+
+**ParameterCalibration**:
+The KG04-style accuracy table of a 1-D space: per parameter-adjacent example
+pair, sampled (blend weight, measured metric) points, anchored at the
+examples' measured values. Built offline by `CalibrateParameterMetric` from a
+declared ParameterMetric (currently turn rate); inverted at evaluation time so
+a requested parameter achieves its anchor-interpolated measured value.
+_Avoid_: weight LUT, steering calibration (that is the goal-directed module's
+separate streamed-rate table).
+
+**Blended duration**:
+The cycle time of a generated clip: the weighted sum of the examples' clip
+durations at the evaluated parameter. GenerateClip derives its frame count
+from this, so a tight turn and a straight walk play at their own cadence.
+_Avoid_: fixed frame count (diagnostic-only override).
 
 **ParameterVector**:
 The control coordinates of a motion space (e.g. turn rate, speed).
@@ -90,9 +106,9 @@ _Avoid_: state machine, blend graph.
 
 **BuiltPmgArtifact**:
 The complete offline output consumed online: Skeleton, registered
-ParametricMotionGraph, runtime frame settings, source paths, registration
-settings, edge sampling configuration, seeds, and build reports. Serialized as
-PMG_GRAPH_V4.
+ParametricMotionGraph, parameter calibrations, runtime sampling rate, source
+paths, registration settings, edge sampling configuration, seeds, and build
+reports. Serialized as PMG_GRAPH_V5 (V2–V4 stay readable).
 _Avoid_: graph file, cached graph (those omit the complete runtime contract).
 
 **TransitionSample**:
