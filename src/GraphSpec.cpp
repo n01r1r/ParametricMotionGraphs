@@ -189,6 +189,41 @@ GraphSpec LoadGraphSpec(const std::string& path) {
             continue;
         }
 
+        if (keyword == "parameter_metric") {
+            std::string node_name;
+            std::string metric_name;
+            if (!(line >> node_name >> metric_name)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": expected parameter_metric <node> <turn_rate|none>");
+            }
+            auto node_it = std::find_if(
+                spec.nodes.begin(), spec.nodes.end(),
+                [&](const GraphSpecNode& node) { return node.name == node_name; });
+            if (node_it == spec.nodes.end()) {
+                throw std::runtime_error("LoadGraphSpec line " +
+                                         std::to_string(line_number) +
+                                         ": parameter_metric references unknown node '" +
+                                         node_name + "'");
+            }
+            if (metric_name == "turn_rate") {
+                node_it->parameter_metric = ParameterMetric::kTurnRate;
+            } else if (metric_name == "none") {
+                node_it->parameter_metric = ParameterMetric::kNone;
+            } else {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": unknown parameter metric '" + metric_name + "'");
+            }
+            if (node_it->parameter_metric != ParameterMetric::kNone &&
+                node_it->parameter_dimension != 1) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": parameter_metric requires a one-dimensional node");
+            }
+            continue;
+        }
+
         if (keyword == "edge") {
             GraphSpecEdge edge;
             if (!(line >> edge.source_node >> edge.target_node)) {
@@ -391,6 +426,14 @@ BuiltPmgArtifact BuildPmgArtifactFromSpec(
             throw std::runtime_error(
                 "BuildPmgArtifactFromSpec: node '" + node.name +
                 "' enables DTW refinement without contact joints");
+        }
+
+        // Parameter-accuracy calibration runs after registration so the
+        // measured blends already combine corresponding moments.
+        if (node.parameter_metric != ParameterMetric::kNone) {
+            space.SetParameterCalibration(CalibrateParameterMetric(
+                space, node.parameter_metric,
+                config.default_edge_config.generated_frames_per_second));
         }
 
         artifact.metadata.node_registrations.push_back(registration);

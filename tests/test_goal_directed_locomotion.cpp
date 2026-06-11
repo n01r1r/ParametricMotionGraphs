@@ -90,7 +90,7 @@ int main() {
     config.calibration.sample_count = 3;
     config.calibration.sample_seconds = 3.0f;
     pmg::GoalDirectedLocomotion steering(
-        graph, skeleton, walk, kFrameCount, kFramesPerSecond, config);
+        graph, skeleton, walk, kFramesPerSecond, config);
     assert(steering.Calibration().parameters.size() == 3);
     assert(steering.Calibration().highest_rate >
            steering.Calibration().lowest_rate);

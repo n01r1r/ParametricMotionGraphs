@@ -12,6 +12,9 @@ namespace pmg {
 struct PmgBuilderConfig {
     int source_sample_count = 50;
     int target_sample_count = 1000;
+    // Retained for artifact-format compatibility only: sampled clips derive
+    // their frame count from BlendedDurationSeconds at the sampled parameter,
+    // so playback timing matches the blended examples.
     int generated_frame_count = 48;
     float generated_frames_per_second = 30.0f;
     float good_transition_threshold = 0.5f;

@@ -684,9 +684,7 @@ ArtifactRuntimeMetrics BenchmarkArtifact(
             0.5f * (domain.Bounds().min_corner[dimension] +
                     domain.Bounds().max_corner[dimension]);
     }
-    controller.Start(
-        0, start_parameter, artifact.metadata.generated_frame_count,
-        artifact.metadata.frames_per_second);
+    controller.Start(0, start_parameter, artifact.metadata.frames_per_second);
 
     std::mt19937 random(12345u);
     pmg::RuntimeControlRequest request =
@@ -726,14 +724,12 @@ ArtifactRuntimeMetrics BenchmarkArtifact(
     try {
         pmg::GoalDirectedLocomotion steering(
             artifact.graph, artifact.skeleton, 0,
-            artifact.metadata.generated_frame_count,
             artifact.metadata.frames_per_second);
         pmg::PointCloudAlignment goal_alignment(artifact.skeleton);
         pmg::RuntimeController goal_controller(
             artifact.graph, goal_alignment);
         goal_controller.Start(
-            0, start_parameter, artifact.metadata.generated_frame_count,
-            artifact.metadata.frames_per_second);
+            0, start_parameter, artifact.metadata.frames_per_second);
         pmg::GoalRequest goal;
         goal.target_position = {10.0f, 0.0f, 10.0f};
         metrics.target_min_distance =
@@ -794,7 +790,7 @@ void WriteArtifactReports(
     {
         std::ofstream config(output_directory / "config.json");
         config << "{\n"
-               << "  \"format\": \"PMG_GRAPH_V4\",\n"
+               << "  \"format\": \"PMG_GRAPH_V5\",\n"
                << "  \"units\": \"" << JsonEscape(artifact.metadata.units) << "\",\n"
                << "  \"generated_frame_count\": "
                << artifact.metadata.generated_frame_count << ",\n"
@@ -1694,8 +1690,7 @@ pmg::BuiltPmgArtifact LoadOrBuildRuntimeArtifact(
             throw std::runtime_error(
                 "runtime requires a V4 artifact containing its Skeleton");
         }
-        if (artifact.metadata.generated_frame_count <= 0 ||
-            artifact.metadata.frames_per_second <= 0.0f) {
+        if (artifact.metadata.frames_per_second <= 0.0f) {
             throw std::runtime_error(
                 "runtime artifact has invalid frame metadata");
         }
@@ -1769,7 +1764,6 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
     controller.Start(0,
                      hold ? pmg::ParameterVector{options.hold_parameter}
                           : start_domain.SampleUniform(rng),
-                     artifact.metadata.generated_frame_count,
                      artifact.metadata.frames_per_second);
 
     pmg::RuntimeControlRequest request;
@@ -1875,7 +1869,6 @@ int GotoCommand(const GotoOptions& options) {
     const float parameter_max = walk_space.MaxParameter()[0];
     pmg::GoalDirectedLocomotion steering(
         artifact.graph, artifact.skeleton, 0,
-        artifact.metadata.generated_frame_count,
         artifact.metadata.frames_per_second);
     const pmg::SteeringCalibration& calibration = steering.Calibration();
     for (std::size_t sample = 0; sample < calibration.parameters.size(); ++sample) {
@@ -1890,7 +1883,6 @@ int GotoCommand(const GotoOptions& options) {
     pmg::PointCloudAlignment alignment(artifact.skeleton);
     pmg::RuntimeController controller(artifact.graph, alignment);
     controller.Start(0, {0.5f * (parameter_min + parameter_max)},
-                     artifact.metadata.generated_frame_count,
                      artifact.metadata.frames_per_second);
 
     const float dt = 1.0f / artifact.metadata.frames_per_second;

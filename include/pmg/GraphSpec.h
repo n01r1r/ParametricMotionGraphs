@@ -16,6 +16,9 @@ struct GraphSpecNode {
     std::vector<std::string> contact_joints;
     int min_contact_frames = 3;
     bool dtw_refine = true;
+    // kNone: Shepard weights. Otherwise the artifact build calibrates blend
+    // weights against this measured metric (KG04-style parameter accuracy).
+    ParameterMetric parameter_metric = ParameterMetric::kNone;
 };
 
 struct GraphSpecExample {
@@ -40,6 +43,7 @@ struct GraphSpec {
 // Minimal whitespace-delimited spec:
 //   node <name> <parameter_dimension>
 //   registration <node> <cycle_joint|-> <contact_joint_csv|-> <min_frames> <dtw:0|1>
+//   parameter_metric <node> <turn_rate|none>
 //   example <node_name> <p0> ... <pN-1> <path/to/file.bvh>
 //   edge <source_node> <target_node>
 //   edge_config <source> <target> <tgood> <tbad> <source_samples>

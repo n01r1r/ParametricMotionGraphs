@@ -169,6 +169,28 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
             WritePhaseList(output, warp.InteriorToPhases());
             output << '\n';
         }
+        const ParameterCalibration& calibration = space.ParameterCalibrationData();
+        output << "calibration " << static_cast<int>(calibration.metric);
+        if (space.HasParameterCalibration()) {
+            output << ' ' << calibration.example_order.size();
+            for (const int example_index : calibration.example_order) {
+                output << ' ' << example_index;
+            }
+            for (const float measured : calibration.example_measured) {
+                output << ' ' << measured;
+            }
+            output << ' ' << calibration.segments.size() << '\n';
+            for (const CalibrationSegment& segment : calibration.segments) {
+                output << "segment " << segment.left_example << ' '
+                       << segment.right_example << ' ' << segment.samples.size();
+                for (const CalibrationSample& sample : segment.samples) {
+                    output << ' ' << sample.blend_t << ' ' << sample.measured;
+                }
+                output << '\n';
+            }
+        } else {
+            output << '\n';
+        }
     }
 
     output << "edges " << graph.NumEdges() << '\n';
@@ -188,7 +210,8 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
 }
 
 ParametricMotionGraph ReadGraphPayload(
-    std::istream& input, bool has_warp_records, bool quoted_names) {
+    std::istream& input, bool has_warp_records, bool has_calibration_records,
+    bool quoted_names) {
     std::string keyword;
     int node_count = 0;
     input >> keyword >> node_count;
@@ -244,6 +267,56 @@ ParametricMotionGraph ReadGraphPayload(
                         TimeWarp::FromAnchors(from_phases, to_phases));
                 }
                 space.SetExampleTimeWarps(std::move(warps));
+            }
+        }
+        if (has_calibration_records) {
+            int metric_value = -1;
+            input >> keyword >> metric_value;
+            if (keyword != "calibration" || metric_value < 0 || metric_value > 1 ||
+                !input) {
+                throw std::runtime_error(
+                    "LoadPmgArtifactText: invalid calibration record");
+            }
+            if (metric_value != 0) {
+                ParameterCalibration calibration;
+                calibration.metric = static_cast<ParameterMetric>(metric_value);
+                std::size_t ordered_count = 0;
+                input >> ordered_count;
+                calibration.example_order.resize(ordered_count);
+                for (int& example_index : calibration.example_order) {
+                    input >> example_index;
+                }
+                calibration.example_measured.resize(ordered_count);
+                for (float& measured : calibration.example_measured) {
+                    input >> measured;
+                }
+                std::size_t segment_count = 0;
+                input >> segment_count;
+                if (!input) {
+                    throw std::runtime_error(
+                        "LoadPmgArtifactText: invalid calibration table");
+                }
+                for (std::size_t segment_index = 0; segment_index < segment_count;
+                     ++segment_index) {
+                    CalibrationSegment segment;
+                    std::size_t sample_count = 0;
+                    input >> keyword >> segment.left_example
+                          >> segment.right_example >> sample_count;
+                    if (keyword != "segment" || !input) {
+                        throw std::runtime_error(
+                            "LoadPmgArtifactText: invalid calibration segment");
+                    }
+                    segment.samples.resize(sample_count);
+                    for (CalibrationSample& sample : segment.samples) {
+                        input >> sample.blend_t >> sample.measured;
+                    }
+                    if (!input) {
+                        throw std::runtime_error(
+                            "LoadPmgArtifactText: invalid calibration samples");
+                    }
+                    calibration.segments.push_back(std::move(segment));
+                }
+                space.SetParameterCalibration(std::move(calibration));
             }
         }
         graph.AddNode(node_name, std::move(space));
@@ -479,7 +552,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V4\n";
+    output << "PMG_GRAPH_V5\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
@@ -495,25 +568,36 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     input >> header;
 
     BuiltPmgArtifact artifact;
+    if (header == "PMG_GRAPH_V5") {
+        artifact.metadata = ReadMetadata(input);
+        artifact.skeleton = ReadSkeleton(input);
+        artifact.graph = ReadGraphPayload(
+            input, /*has_warp_records=*/true, /*has_calibration_records=*/true,
+            /*quoted_names=*/true);
+        return artifact;
+    }
     if (header == "PMG_GRAPH_V4") {
         artifact.metadata = ReadMetadata(input);
         artifact.skeleton = ReadSkeleton(input);
         artifact.graph = ReadGraphPayload(
-            input, /*has_warp_records=*/true, /*quoted_names=*/true);
+            input, /*has_warp_records=*/true, /*has_calibration_records=*/false,
+            /*quoted_names=*/true);
         return artifact;
     }
     if (header == "PMG_GRAPH_V3") {
         artifact.graph = ReadGraphPayload(
-            input, /*has_warp_records=*/true, /*quoted_names=*/false);
+            input, /*has_warp_records=*/true, /*has_calibration_records=*/false,
+            /*quoted_names=*/false);
         return artifact;
     }
     if (header == "PMG_GRAPH_V2") {
         artifact.graph = ReadGraphPayload(
-            input, /*has_warp_records=*/false, /*quoted_names=*/false);
+            input, /*has_warp_records=*/false, /*has_calibration_records=*/false,
+            /*quoted_names=*/false);
         return artifact;
     }
     throw std::runtime_error(
-        "LoadPmgArtifactText: expected PMG_GRAPH_V2, V3, or V4");
+        "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V5");
 }
 
 void SaveGraphText(

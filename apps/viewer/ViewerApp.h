@@ -163,7 +163,6 @@ private:
     std::optional<pmg::RuntimeController> graph_controller_;
     bool graph_ready_ = false;
     float graph_desired_parameter_ = 0.0f;
-    int graph_frame_count_ = 48;
     float graph_fps_ = 30.0f;
     std::string graph_status_ = "Build a parametric space, then Build Graph.";
 

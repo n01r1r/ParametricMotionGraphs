@@ -122,9 +122,7 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
     target_clips.reserve(target_samples.size());
     for (const ParameterVector& target_parameter : target_samples) {
         target_clips.push_back(target_space.GenerateClip(
-            target_parameter,
-            config.generated_frame_count,
-            config.generated_frames_per_second));
+            target_parameter, config.generated_frames_per_second));
     }
 
     struct GoodHit {
@@ -142,9 +140,7 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
             ParameterAabb::Empty(target_space.ParameterDimension());
 
         const MotionClip source_clip = source_space.GenerateClip(
-            source_parameter,
-            config.generated_frame_count,
-            config.generated_frames_per_second);
+            source_parameter, config.generated_frames_per_second);
 
         std::vector<GoodHit> good_hits;
         std::vector<ParameterVector> bad_target_parameters;
