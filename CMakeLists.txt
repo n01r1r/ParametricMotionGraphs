@@ -12,6 +12,7 @@ add_library(pmg_core
     src/AlignmentStrategy.cpp
     src/BvhLoader.cpp
     src/ContactDetection.cpp
+    src/FootLocking.cpp
     src/ForwardKinematics.cpp
     src/GraphIo.cpp
     src/GraphSpec.cpp
@@ -112,6 +113,10 @@ if(PMG_BUILD_TESTS)
     target_link_libraries(test_dtw_refine PRIVATE pmg_core)
     add_test(NAME test_dtw_refine COMMAND test_dtw_refine)
 
+    add_executable(test_foot_locking tests/test_foot_locking.cpp)
+    target_link_libraries(test_foot_locking PRIVATE pmg_core)
+    add_test(NAME test_foot_locking COMMAND test_foot_locking)
+
     add_executable(test_registered_blending tests/test_registered_blending.cpp)
     target_link_libraries(test_registered_blending PRIVATE pmg_core)
     add_test(NAME test_registered_blending COMMAND test_registered_blending)
@@ -121,8 +126,10 @@ if(PMG_BUILD_TESTS)
     # smoothly across its parameter range, and must not regress the naive
     # blend's contact metrics. --dtw-refine additionally gates the DTW-refined
     # warps against the contact-anchor registration (measured: foot slide
-    # 0.173 -> 0.146). Thresholds carry ~40% headroom over measured values so
-    # they catch regressions, not corpus noise.
+    # 0.173 -> 0.146), and --foot-lock gates IK contact locking on top of it
+    # (measured slide rate 0.41 -> 0.20, must stay below 0.6x). Thresholds
+    # carry ~40% headroom over measured values so they catch regressions, not
+    # corpus noise.
     add_test(NAME cli_space_sweep_walk
         COMMAND pmg_cli --space-sweep ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec walk
             --cycle-joint LeftAnkle
@@ -130,7 +137,8 @@ if(PMG_BUILD_TESTS)
             --max-foot-slide 0.25
             --max-adjacent-step 1.8
             --assert-no-regression
-            --dtw-refine)
+            --dtw-refine
+            --foot-lock)
 
     # PMG edge construction on the registered Walk(curvature) space: the edge
     # must build with full sample coverage, keep its GOOD fraction at the

@@ -1,5 +1,6 @@
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
+#include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GraphIo.h"
 #include "pmg/GraphSpec.h"
@@ -1039,6 +1040,9 @@ struct SpaceSweepOptions {
     // Also measure a DTW-refined registration and gate it against the
     // contact-anchor registration the same way.
     bool dtw_refine = false;
+    // Also measure IK foot locking applied to the best registered variant's
+    // generated clips and require it to cut the residual slide.
+    bool foot_lock = false;
 };
 
 struct SweepMetrics {
@@ -1102,7 +1106,8 @@ SweepMetrics MeasureSpaceSweep(
     int sweep_steps,
     int generated_frame_count,
     float frames_per_second,
-    const char* label) {
+    const char* label,
+    bool foot_lock = false) {
     const std::vector<float> min_parameter = space.MinParameter();
     const std::vector<float> max_parameter = space.MaxParameter();
 
@@ -1127,8 +1132,13 @@ SweepMetrics MeasureSpaceSweep(
                          : mid;
         }
 
-        const pmg::MotionClip clip =
+        pmg::MotionClip clip =
             space.GenerateClip(parameter, generated_frame_count, frames_per_second);
+        if (foot_lock) {
+            pmg::FootLockSettings lock_settings;
+            lock_settings.contacts = settings;
+            pmg::LockFootContacts(skeleton, clip, contact_joints, lock_settings);
+        }
 
         const std::vector<pmg::ContactInterval> intervals =
             pmg::DetectContacts(skeleton, clip, contact_joints, settings);
@@ -1262,13 +1272,22 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
         generated_frame_count, frames_per_second, "registered");
 
     std::optional<SweepMetrics> dtw;
+    pmg::ParametricMotionSpace best_space = registered_space;
     if (options.dtw_refine) {
-        pmg::ParametricMotionSpace dtw_space = registered_space;
-        pmg::RefineRegistrationByDtw(dtw_space, skeleton, {});
+        pmg::RefineRegistrationByDtw(best_space, skeleton, {});
         std::cout << "dtw_refined=yes\n";
         dtw = MeasureSpaceSweep(
-            dtw_space, skeleton, contact_joints, settings, options.sweep_steps,
+            best_space, skeleton, contact_joints, settings, options.sweep_steps,
             generated_frame_count, frames_per_second, "dtw");
+    }
+
+    // IK foot locking post-processes the best registered variant's clips.
+    std::optional<SweepMetrics> locked;
+    if (options.foot_lock) {
+        std::cout << "foot_lock=yes\n";
+        locked = MeasureSpaceSweep(
+            best_space, skeleton, contact_joints, settings, options.sweep_steps,
+            generated_frame_count, frames_per_second, "locked", /*foot_lock=*/true);
     }
 
     bool failed = false;
@@ -1335,6 +1354,34 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
                     "dtw refinement increased slide rate: " +
                         std::to_string(dtw->max_slide_rate) + " > " +
                         std::to_string(registered.max_slide_rate));
+        }
+    }
+    if (locked.has_value()) {
+        const SweepMetrics& baseline = dtw.has_value() ? *dtw : registered;
+        if (options.min_contacts >= 0) {
+            fail_if(locked->min_contacts < options.min_contacts,
+                    "locked_min_contacts=" + std::to_string(locked->min_contacts) + " < " +
+                        std::to_string(options.min_contacts));
+        }
+        if (options.max_adjacent_step >= 0.0f) {
+            fail_if(locked->max_adjacent_step > options.max_adjacent_step,
+                    "locked_max_adjacent_step=" + std::to_string(locked->max_adjacent_step) +
+                        " > " + std::to_string(options.max_adjacent_step));
+        }
+        if (options.assert_no_regression) {
+            fail_if(locked->min_contacts < baseline.min_contacts,
+                    "foot lock lost contacts: " + std::to_string(locked->min_contacts) +
+                        " < " + std::to_string(baseline.min_contacts));
+            fail_if(locked->min_contact_coverage < baseline.min_contact_coverage,
+                    "foot lock lost contact coverage: " +
+                        std::to_string(locked->min_contact_coverage) + " < " +
+                        std::to_string(baseline.min_contact_coverage));
+            // Locking exists to cut residual slide; require a real reduction,
+            // not parity (measured 0.41 -> 0.20 on the walk corpus).
+            fail_if(locked->max_slide_rate > baseline.max_slide_rate * 0.6f,
+                    "foot lock did not cut slide rate by 40%: " +
+                        std::to_string(locked->max_slide_rate) + " > 0.6 * " +
+                        std::to_string(baseline.max_slide_rate));
         }
     }
 
@@ -2148,6 +2195,8 @@ SpaceSweepOptions ParseSpaceSweepOptions(int argc, char** argv) {
             options.assert_no_regression = true;
         } else if (option == "--dtw-refine") {
             options.dtw_refine = true;
+        } else if (option == "--foot-lock") {
+            options.foot_lock = true;
         } else {
             throw std::runtime_error("unknown space-sweep option '" + option + "'");
         }
@@ -2174,7 +2223,7 @@ void PrintUsage() {
               << "  pmg_cli --space-sweep graph_spec.txt node [--contact-joints a,b]\n"
               << "      [--cycle-joint name] [--sweep-steps N] [--min-contacts N]\n"
               << "      [--max-foot-slide X] [--max-adjacent-step X] [--assert-no-regression]\n"
-              << "      [--dtw-refine]\n"
+              << "      [--dtw-refine] [--foot-lock]\n"
               << "  pmg_cli --validate-graph graph_spec.txt [--cycle-joint name]\n"
               << "      [--tgood X --tbad Y --source-samples N --target-samples N --seed S]\n"
               << "      [--min-edge-samples N] [--min-good-fraction F] [--assert-no-regression]\n"
