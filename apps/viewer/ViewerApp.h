@@ -35,8 +35,9 @@ enum class ViewerPlaybackMode {
 // Top-level viewer state: owns the loaded BVH motion, playback clock, the live
 // parametric-blend control, and produces a RenderScene each frame.
 //
-// Purpose: drive the skeleton renderer from pmg_core data and expose ImGui
-// panels (playback, clip picker, camera, parametric blend).
+// Purpose: drive the skeleton renderer from pmg_core data and expose one
+// tabbed ImGui control window (workflow + transport on top; clips, blend,
+// distance grid, graph, and view settings as tabs).
 // Assumptions: world is Y-up; a clip's lowest point over its whole duration is
 // rested on y = 0 so vertical dynamics are preserved.
 class ViewerApp {
@@ -67,13 +68,13 @@ private:
     static float ComputeGroundOffset(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip);
     float ActiveReferenceDuration() const;
 
-    void BuildWorkflowPanel();
-    void BuildTransportPanel();
-    void BuildClipsPanel();
-    void BuildViewPanel();
-    void BuildBlendPanel();
-    void BuildDistanceGridPanel();
-    void BuildGraphPanel();
+    void BuildWorkflowSection();
+    void BuildTransportSection();
+    void BuildClipsSection();
+    void BuildViewSection();
+    void BuildBlendSection();
+    void BuildDistanceGridSection();
+    void BuildGraphSection();
 
     void RecomputeHeatmap();
     void SaveHeatmapCsv();

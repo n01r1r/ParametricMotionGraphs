@@ -310,17 +310,49 @@ void ViewerApp::RebuildPmgSpace() {
     pmg_space_ready_ = true;
 }
 
-// --- ImGui panels ----------------------------------------------------------
+// --- ImGui UI ---------------------------------------------------------------
+//
+// Everything lives in one window: Workflow + Transport stay visible at the
+// top (they are needed in every mode), the rest is tabbed. Seven floating
+// windows buried the 3D view and each other.
 
 void ViewerApp::BuildUi() {
     HandleShortcuts();
-    BuildWorkflowPanel();
-    BuildTransportPanel();
-    BuildClipsPanel();
-    BuildViewPanel();
-    BuildBlendPanel();
-    BuildDistanceGridPanel();
-    BuildGraphPanel();
+
+    ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(430.0f, 740.0f), ImGuiCond_FirstUseEver);
+    ImGui::Begin("PMG Viewer");
+
+    BuildWorkflowSection();
+    ImGui::Separator();
+    BuildTransportSection();
+    ImGui::Separator();
+
+    if (ImGui::BeginTabBar("##viewer_tabs")) {
+        if (ImGui::BeginTabItem("Clips")) {
+            BuildClipsSection();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Blend")) {
+            BuildBlendSection();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Distance Grid")) {
+            BuildDistanceGridSection();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Graph")) {
+            BuildGraphSection();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("View")) {
+            BuildViewSection();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+
+    ImGui::End();
 }
 
 void ViewerApp::HandleShortcuts() {
@@ -358,13 +390,23 @@ void ViewerApp::StepFrame(int direction) {
         frame_count > 1 ? duration / static_cast<float>(frame_count - 1) : 1.0f / fps;
 
     playing_ = false;
-    current_time_seconds_ = std::clamp(
-        current_time_seconds_ + static_cast<float>(direction) * frame_seconds, 0.0f, duration);
+    // Fold the free-running play clock into one loop, step, then wrap. Clamping
+    // here used to pin the clock at exactly `duration` once playback had run
+    // past one loop; that displays as phase 0 (fmod) and made forward stepping
+    // a dead end until something moved the clock back inside the loop.
+    float time = std::fmod(current_time_seconds_, duration);
+    if (time < 0.0f) {
+        time += duration;
+    }
+    time += static_cast<float>(direction) * frame_seconds;
+    time = std::fmod(time, duration);
+    if (time < 0.0f) {
+        time += duration;
+    }
+    current_time_seconds_ = time;
 }
 
-void ViewerApp::BuildWorkflowPanel() {
-    ImGui::Begin("Workflow");
-
+void ViewerApp::BuildWorkflowSection() {
     ImGui::TextWrapped("%s", status_message_.c_str());
     ImGui::Separator();
 
@@ -413,13 +455,9 @@ void ViewerApp::BuildWorkflowPanel() {
     gated_radio("Graph runtime", ViewerPlaybackMode::GraphRuntime,
                 graph_ready_ && graph_controller_.has_value(), "build graph");
     mode_ = static_cast<ViewerPlaybackMode>(mode_int);
-
-    ImGui::End();
 }
 
-void ViewerApp::BuildTransportPanel() {
-    ImGui::Begin("Transport");
-
+void ViewerApp::BuildTransportSection() {
     ImGui::Text("Mode: %s", ModeName(mode_));
     if (clip_.NumFrames() > 0) {
         ImGui::SameLine();
@@ -471,11 +509,9 @@ void ViewerApp::BuildTransportPanel() {
     }
 
     ImGui::TextDisabled("space play/pause   .   arrows step   .   R reset");
-    ImGui::End();
 }
 
-void ViewerApp::BuildClipsPanel() {
-    ImGui::Begin("Clips");
+void ViewerApp::BuildClipsSection() {
     ImGui::Text("%zu BVH files", bvh_files_.size());
 
     ImGui::SetNextItemWidth(-1.0f);
@@ -520,11 +556,9 @@ void ViewerApp::BuildClipsPanel() {
     if (ImGui::Button("Add to blend space")) {
         AddCurrentClipToSpace(next_example_parameter_);
     }
-    ImGui::End();
 }
 
-void ViewerApp::BuildViewPanel() {
-    ImGui::Begin("View");
+void ViewerApp::BuildViewSection() {
     ImGui::Checkbox("Follow motion centroid", &follow_centroid_);
     const glm::vec3 target = camera_.Target();
     ImGui::Text("Camera target: %.1f, %.1f, %.1f", target.x, target.y, target.z);
@@ -537,14 +571,12 @@ void ViewerApp::BuildViewPanel() {
     ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
     ImGui::SliderFloat("Display scale", &display_scale_, 1.0f, 40.0f, "%.1fx");
     ImGui::TextDisabled("Display scale magnifies the whole world, travel included.");
-    ImGui::End();
 }
 
-void ViewerApp::BuildBlendPanel() {
-    ImGui::Begin("Parametric Blend");
+void ViewerApp::BuildBlendSection() {
     ImGui::TextWrapped("Live parametric blend over the added example clips "
-                       "(pmg_core ParametricMotionSpace). Enter Parametric blend mode in "
-                       "the Workflow panel to scrub it.");
+                       "(pmg_core ParametricMotionSpace). Enter Parametric blend mode "
+                       "above to scrub it.");
     ImGui::Text("Examples: %zu", pmg_examples_.size());
     for (const PmgExample& example : pmg_examples_) {
         ImGui::BulletText("%s  (param %.2f)", example.label.c_str(), example.parameter);
@@ -563,7 +595,6 @@ void ViewerApp::BuildBlendPanel() {
         RebuildPmgSpace();
         status_message_ = "Cleared parametric space.";
     }
-    ImGui::End();
 }
 
 // --- Distance Grid heatmap (transition visualization) ----------------------
@@ -658,9 +689,7 @@ void ViewerApp::SaveHeatmapCsv() {
     heatmap_status_ = "Saved distance_grid.csv";
 }
 
-void ViewerApp::BuildDistanceGridPanel() {
-    ImGui::Begin("Distance Grid");
-
+void ViewerApp::BuildDistanceGridSection() {
     if (selected_file_index_ >= 0 &&
         selected_file_index_ < static_cast<int>(bvh_files_.size())) {
         ImGui::Text("Source: %s",
@@ -722,7 +751,6 @@ void ViewerApp::BuildDistanceGridPanel() {
 
     if (!heatmap_ready_) {
         ImGui::TextDisabled("No grid yet. Pick a target and Recompute.");
-        ImGui::End();
         return;
     }
 
@@ -816,8 +844,6 @@ void ViewerApp::BuildDistanceGridPanel() {
         ImGui::Text("selected alignment: yaw %.3f rad  dx %.2f  dz %.2f",
                     alignment.yaw, alignment.dx, alignment.dz);
     }
-
-    ImGui::End();
 }
 
 // --- Graph runtime (PMG streaming) -----------------------------------------
@@ -872,13 +898,12 @@ void ViewerApp::BuildGraphRuntime() {
     }
 }
 
-void ViewerApp::BuildGraphPanel() {
-    ImGui::Begin("Graph Runtime");
+void ViewerApp::BuildGraphSection() {
     ImGui::TextWrapped(
         "PMG streaming (paper Sec 4-5): builds a self-edge over the parametric "
         "space and streams motion with point-cloud-aligned transitions.");
     ImGui::Text("Space examples: %zu", pmg_examples_.size());
-    ImGui::TextDisabled("Edge GOOD/BAD use the shared TGOOD/TBAD in Distance Grid.");
+    ImGui::TextDisabled("Edge GOOD/BAD use the shared TGOOD/TBAD in the Distance Grid tab.");
     if (ImGui::Button("Build Graph")) {
         BuildGraphRuntime();
     }
@@ -893,12 +918,11 @@ void ViewerApp::BuildGraphPanel() {
                     graph_controller_->CurrentPhase(),
                     graph_controller_->CompletedTransitions(),
                     graph_controller_->IsTransitioning() ? "[transitioning]" : "");
-        ImGui::TextDisabled("Switch to Graph runtime mode (Workflow) to run; "
-                            "Restart is in Transport.");
+        ImGui::TextDisabled("Switch to Graph runtime mode above to run; "
+                            "Restart graph is next to Play.");
     } else {
         ImGui::TextDisabled("No graph yet. Add clips to the space and Build Graph.");
     }
-    ImGui::End();
 }
 
 }  // namespace pmgviewer
