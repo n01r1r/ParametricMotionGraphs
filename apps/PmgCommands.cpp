@@ -674,8 +674,12 @@ struct ArtifactRuntimeMetrics {
 ArtifactRuntimeMetrics BenchmarkArtifact(
     const pmg::BuiltPmgArtifact& artifact) {
     ArtifactRuntimeMetrics metrics;
-    pmg::PointCloudAlignment alignment(artifact.skeleton);
-    pmg::RuntimeController controller(artifact.graph, alignment);
+    const pmg::RuntimeControllerConfig runtime_config =
+        pmg::RuntimeControllerConfigFromArtifact(artifact);
+    pmg::PointCloudAlignment alignment(
+        artifact.skeleton, runtime_config.transition_blend_frames);
+    pmg::RuntimeController controller(
+        artifact.graph, alignment, runtime_config);
     const pmg::ParameterDomain domain =
         artifact.graph.Node(0).motion_space.Domain();
     pmg::ParameterVector start_parameter = domain.Bounds().min_corner;
@@ -722,12 +726,15 @@ ArtifactRuntimeMetrics BenchmarkArtifact(
             : 0.0;
 
     try {
+        pmg::GoalDirectedLocomotionConfig steering_config;
+        steering_config.runtime = runtime_config;
         pmg::GoalDirectedLocomotion steering(
             artifact.graph, artifact.skeleton, 0,
-            artifact.metadata.frames_per_second);
-        pmg::PointCloudAlignment goal_alignment(artifact.skeleton);
+            artifact.metadata.frames_per_second, steering_config);
+        pmg::PointCloudAlignment goal_alignment(
+            artifact.skeleton, runtime_config.transition_blend_frames);
         pmg::RuntimeController goal_controller(
-            artifact.graph, goal_alignment);
+            artifact.graph, goal_alignment, runtime_config);
         goal_controller.Start(
             0, start_parameter, artifact.metadata.frames_per_second);
         pmg::GoalRequest goal;
@@ -790,7 +797,7 @@ void WriteArtifactReports(
     {
         std::ofstream config(output_directory / "config.json");
         config << "{\n"
-               << "  \"format\": \"PMG_GRAPH_V5\",\n"
+               << "  \"format\": \"PMG_GRAPH_V6\",\n"
                << "  \"units\": \"" << JsonEscape(artifact.metadata.units) << "\",\n"
                << "  \"generated_frame_count\": "
                << artifact.metadata.generated_frame_count << ",\n"
@@ -964,7 +971,7 @@ int BuildGraphCommand(const std::string& spec_path,
     pmg::SavePmgArtifactText(artifact, output_path);
     WriteArtifactReports(artifact, artifact_path, build_seconds);
     std::cout << "wrote graph: " << output_path << "\n";
-    std::cout << "format=PMG_GRAPH_V5\n";
+    std::cout << "format=PMG_GRAPH_V6\n";
     std::cout << "nodes=" << artifact.graph.NumNodes()
               << " edges=" << artifact.graph.NumEdges() << "\n";
     std::cout << "skeleton_joints=" << artifact.skeleton.NumJoints() << "\n";
@@ -1753,8 +1760,12 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
         options.spec_path, options.cycle_joint, options.contact_joints_csv,
         options.min_contact_frames, options.builder);
 
-    pmg::PointCloudAlignment alignment(artifact.skeleton);
-    pmg::RuntimeController controller(artifact.graph, alignment);
+    const pmg::RuntimeControllerConfig runtime_config =
+        pmg::RuntimeControllerConfigFromArtifact(artifact);
+    pmg::PointCloudAlignment alignment(
+        artifact.skeleton, runtime_config.transition_blend_frames);
+    pmg::RuntimeController controller(
+        artifact.graph, alignment, runtime_config);
 
     std::mt19937 rng(options.seed);
     const bool hold = !std::isnan(options.hold_parameter);
@@ -1867,9 +1878,13 @@ int GotoCommand(const GotoOptions& options) {
         artifact.graph.Node(0).motion_space;
     const float parameter_min = walk_space.MinParameter()[0];
     const float parameter_max = walk_space.MaxParameter()[0];
+    const pmg::RuntimeControllerConfig runtime_config =
+        pmg::RuntimeControllerConfigFromArtifact(artifact);
+    pmg::GoalDirectedLocomotionConfig steering_config;
+    steering_config.runtime = runtime_config;
     pmg::GoalDirectedLocomotion steering(
         artifact.graph, artifact.skeleton, 0,
-        artifact.metadata.frames_per_second);
+        artifact.metadata.frames_per_second, steering_config);
     const pmg::SteeringCalibration& calibration = steering.Calibration();
     for (std::size_t sample = 0; sample < calibration.parameters.size(); ++sample) {
         std::cout << "achieved_turn_rate[param="
@@ -1880,8 +1895,10 @@ int GotoCommand(const GotoOptions& options) {
               << calibration.travel_heading_offset * 180.0f / pmg::kPi
               << "\n";
 
-    pmg::PointCloudAlignment alignment(artifact.skeleton);
-    pmg::RuntimeController controller(artifact.graph, alignment);
+    pmg::PointCloudAlignment alignment(
+        artifact.skeleton, runtime_config.transition_blend_frames);
+    pmg::RuntimeController controller(
+        artifact.graph, alignment, runtime_config);
     controller.Start(0, {0.5f * (parameter_min + parameter_max)},
                      artifact.metadata.frames_per_second);
 

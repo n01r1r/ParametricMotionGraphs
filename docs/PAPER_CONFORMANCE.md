@@ -20,6 +20,9 @@ Kovar, Gleicher & Pighin 2002 (*Motion Graphs*).
 | Target-directed and interactive control | `GoalDirectedLocomotion` |
 | KG04-style parameter-accurate blend weights (D1) | `CalibrateParameterMetric` / `ParameterCalibration` |
 | Parameter-dependent blended clip duration (D2) | `BlendedDurationSeconds` / duration-derived `GenerateClip` |
+| Source playback through cycle-crossing transitions (D3) | `RuntimeController::FoldCompletedCycles` |
+| Metric/blend transition-window unification (D4) | `RuntimeControllerConfigFromArtifact` |
+| Per-target transition phase lookup (D5) | `TargetTransitionPhaseSample` |
 
 ## Resolved Deviations
 
@@ -43,30 +46,33 @@ this path; the explicit-frame-count overload remains for frame-aligned
 diagnostics only. Distance thresholds in the specs were recalibrated because
 duration-true clips raised absolute point-cloud distances.
 
+### D3 — Source continues through cycle-crossing blends (resolved)
+
+The runtime folds each completed source cycle into its accumulated world
+placement and resumes sampling at the wrapped clip-local phase. Active
+transitions therefore play real source frames through the whole blend instead
+of clamping at the final pose. A regression test forces a transition window
+across phase 1 and checks continuous root motion.
+
+### D4 — Blend length equals the metric window (resolved)
+
+`transition_blend_frames` is derived from the artifact edge builds'
+`DistanceGridConfig::window_size` and is used for runtime blending,
+point-cloud alignment, and goal-directed calibration. Because the runtime has
+one global window, artifacts whose edge builds record different window sizes
+are rejected explicitly.
+
+### D5 — Transition phases remain target-dependent (resolved)
+
+Each source sample stores the phase pair measured at every retained GOOD
+target sample inside its shrunk reachable box. Runtime lookup clamps the
+requested target to the interpolated box, interpolates phases in target
+parameter space, then interpolates across source samples. The artifact format
+is `PMG_GRAPH_V6`; V2-V5 scalar phases remain readable as fallback values.
+
 ## Known Deviations
 
 Ordered by priority (impact on the paper's central claims first).
-
-### D3 — Source clip freezes when a blend crosses its end (medium)
-
-During an active transition the source is sampled with a clamped phase
-(`RuntimeController::SampleWorldClamped`) and holds its final pose. The paper
-plays both motions through the whole transition window. Windows that straddle
-the source clip's end blend against a frozen pose.
-
-### D4 — Blend length and metric window are independent knobs (medium)
-
-The runtime blend spans `blend_window_phase × target clip duration`; the
-distance metric evaluates similarity over `window_size` frames. The paper ties
-the transition length to the metric window, so similarity is measured over the
-same temporal extent that is actually blended.
-
-### D5 — Transition phases averaged across in-box GOOD hits (medium)
-
-`PmgBuilder` stores one source/target phase pair per source sample: the average
-over the GOOD hits inside the shrunk box. Per-target transition timing is
-discarded, so the runtime uses the same target phase regardless of which target
-parameter is chosen inside the box.
 
 ### D6 — Point clouds are joint positions, not mesh points (low)
 
@@ -92,7 +98,7 @@ here is an independent IK post-process.
   rigid alignment and constraint matching are approximated by root-delta
   blending and contact anchors; see D1/D2 for the remaining gap).
 - Root-delta blending and optional foot locking address observed BVH artifacts.
-- Complete (V5) artifacts and structured reports add reproducibility not
+- Complete (V6) artifacts and structured reports add reproducibility not
   specified by the original paper.
 
 ## Claim Limit

@@ -125,16 +125,22 @@ struct ParameterAabb {
     }
 };
 
-// A PMG edge sample stores only the paper's compact graph information:
-// source parameter sample, target reachable parameter box, and averaged source
-// / target transition phases. The floor-plane alignment transform is intentionally
-// not stored; RuntimeController recomputes it from point clouds at scheduling time
-// following Heck & Gleicher §3.2.
+// Phase pair measured at one retained GOOD target parameter. Runtime evaluates
+// these samples at the requested target instead of using one in-box average.
+struct TargetTransitionPhaseSample {
+    ParameterVector target_parameter;
+    float source_transition_phase = 0.85f;
+    float target_transition_phase = 0.15f;
+};
+
+// One sampled source parameter, its reachable target box, and target-dependent
+// transition phases. Scalar phases are V2-V5 fallback/summary values.
 struct TransitionSample {
     ParameterVector source_parameter;
     ParameterAabb target_parameter_box;
     float source_transition_phase = 0.85f;
     float target_transition_phase = 0.15f;
+    std::vector<TargetTransitionPhaseSample> target_phase_samples;
 };
 
 }  // namespace pmg

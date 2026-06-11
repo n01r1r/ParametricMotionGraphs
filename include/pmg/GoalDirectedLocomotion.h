@@ -36,6 +36,7 @@ struct GoalRequest {
 
 struct GoalDirectedLocomotionConfig {
     SteeringCalibrationConfig calibration;
+    RuntimeControllerConfig runtime;
     float swing_enter_error_radians = 0.5f;
     float swing_exit_error_radians = 0.2f;
     float orientation_blend_distance = 5.0f;

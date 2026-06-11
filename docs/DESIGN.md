@@ -15,7 +15,7 @@ GraphSpec
       -> optional DTW refinement
       -> PmgBuilder edge sampling
   -> BuiltPmgArtifact
-      -> GraphIo V5
+      -> GraphIo V6
       -> RuntimeController
       -> GoalDirectedLocomotion
 ```
@@ -30,6 +30,10 @@ edge sampling configuration, seeds, and build reports.
 - Phase is normalized to `[0, 1]`.
 - Generated clips derive their frame count from the blended example durations;
   explicit frame counts are diagnostic overrides.
+- Runtime blend length and point-cloud alignment use the edge-build metric
+  window recorded in the artifact; heterogeneous edge windows are rejected.
+- Transition phases are evaluated from retained GOOD samples at the requested
+  target parameter; V2-V5 scalar records use legacy fallback behavior.
 - Graph runtime requires a V4+ artifact with a non-empty Skeleton.
 - Node registration either names contact joints or explicitly disables DTW.
 - Edge creation fails if any sampled source parameter has no valid target box.

@@ -157,6 +157,7 @@ private:
     // --- Graph runtime (PMG streaming, paper Sec 4-5) ---------------------------
     // Builds a self-edge over the parametric space and drives a RuntimeController.
     pmg::ParametricMotionGraph graph_;
+    pmg::RuntimeControllerConfig graph_runtime_config_;
     // Owns the alignment strategy injected into the controller; must outlive it,
     // so it is declared first (members destroy in reverse order).
     std::optional<pmg::PointCloudAlignment> graph_alignment_;

@@ -265,7 +265,10 @@ void ViewerApp::CalibrateSteering() {
         return;
     }
     try {
-        steering_.emplace(graph_, pmg_skeleton_, 0, graph_fps_);
+        pmg::GoalDirectedLocomotionConfig steering_config;
+        steering_config.runtime = graph_runtime_config_;
+        steering_.emplace(
+            graph_, pmg_skeleton_, 0, graph_fps_, steering_config);
         const pmg::SteeringCalibration& calibration =
             steering_->Calibration();
         goto_status_ = "Calibrated: achieved turn rates " +
@@ -1002,8 +1005,12 @@ void ViewerApp::LoadGraphArtifact(const std::string& artifact_path) {
     graph_desired_parameter_ =
         0.5f * (pmg_parameter_min_ + pmg_parameter_max_);
 
-    graph_alignment_.emplace(pmg_skeleton_);
-    graph_controller_.emplace(graph_, *graph_alignment_);
+    graph_runtime_config_ =
+        pmg::RuntimeControllerConfigFromArtifact(artifact);
+    graph_alignment_.emplace(
+        pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
+    graph_controller_.emplace(
+        graph_, *graph_alignment_, graph_runtime_config_);
     graph_controller_->Start(0, {graph_desired_parameter_}, graph_fps_);
     graph_ready_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
@@ -1050,8 +1057,12 @@ void ViewerApp::BuildGraphRuntime() {
 
         // Paper-faithful runtime align: inject the point-cloud strategy. It holds
         // a reference to pmg_skeleton_ (a stable member), so build it first.
-        graph_alignment_.emplace(pmg_skeleton_);
-        graph_controller_.emplace(graph_, *graph_alignment_);
+        graph_runtime_config_.transition_blend_frames =
+            std::max(1, config.distance_grid.window_size);
+        graph_alignment_.emplace(
+            pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
+        graph_controller_.emplace(
+            graph_, *graph_alignment_, graph_runtime_config_);
         graph_desired_parameter_ =
             std::clamp(graph_desired_parameter_, pmg_parameter_min_, pmg_parameter_max_);
         graph_controller_->Start(node, {graph_desired_parameter_}, graph_fps_);

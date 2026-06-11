@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (format since extended to PMG_GRAPH_V5 by ADR-0003; the seam decision
+Accepted (format since extended to PMG_GRAPH_V6; the seam decision
 is unchanged)
 
 ## Context

@@ -22,6 +22,7 @@ add_library(pmg_core
     src/MotionRegistration.cpp
     src/ParametricMotionGraph.cpp
     src/ParametricMotionSpace.cpp
+    src/PmgArtifact.cpp
     src/PmgBuilder.cpp
     src/PoseBlend.cpp
     src/RuntimeController.cpp

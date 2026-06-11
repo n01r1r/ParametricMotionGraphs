@@ -12,7 +12,7 @@ BVH examples
   -> point-cloud transition distance grids
   -> sampled GOOD/NEUTRAL/BAD target regions
   -> interpolated PMG edges
-  -> V5 offline artifact
+  -> V6 offline artifact
   -> point-cloud-aligned online runtime
 ```
 
@@ -57,7 +57,7 @@ stores the inversion table so requested parameters achieve their measured
 meaning. Generated clips also derive their length from the blended example
 durations, so cycle time follows the parameter.
 
-Build a complete V5 artifact:
+Build a complete V6 artifact:
 
 ```powershell
 .\build\Debug\pmg_cli.exe --build-graph `
@@ -77,11 +77,11 @@ outputs/paper_core_walk/
     `-- edge_samples.csv
 ```
 
-V5 stores the Skeleton, registered motion spaces, TimeWarps, parameter
+V6 stores the Skeleton, registered motion spaces, TimeWarps, parameter
 calibrations, transition samples, runtime sampling rate, source paths, seeds,
-thresholds, and edge build reports. V4 files remain readable (without
-parameter calibrations); V2/V3 remain readable but lack the Skeleton required
-for standalone point-cloud runtime alignment.
+thresholds, and edge build reports. V5 files remain readable with scalar
+transition-phase fallback; V4 also lacks parameter calibrations. V2/V3 remain
+readable but lack the Skeleton required for standalone point-cloud alignment.
 
 ## Runtime
 

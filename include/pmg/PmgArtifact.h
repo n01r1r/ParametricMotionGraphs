@@ -2,6 +2,7 @@
 
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/PmgBuilder.h"
+#include "pmg/RuntimeController.h"
 #include "pmg/Skeleton.h"
 
 #include <string>
@@ -41,5 +42,12 @@ struct BuiltPmgArtifact {
     ParametricMotionGraph graph;
     PmgArtifactMetadata metadata;
 };
+
+// Runtime transition window recorded by the offline edge builds. Runtime has
+// one global transition window, so every edge build must use the same positive
+// DistanceGridConfig::window_size. Legacy metadata with no edge records uses
+// RuntimeControllerConfig's default.
+RuntimeControllerConfig RuntimeControllerConfigFromArtifact(
+    const BuiltPmgArtifact& artifact);
 
 }  // namespace pmg

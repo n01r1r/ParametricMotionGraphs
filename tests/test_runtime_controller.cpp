@@ -76,6 +76,27 @@ pmg::ParametricMotionGraph MakeSelfGraph(const pmg::Skeleton& skeleton, int& nod
     return graph;
 }
 
+pmg::ParametricMotionGraph MakeBoundaryCrossingGraph(int& node_out) {
+    pmg::ParametricMotionSpace space("boundary_walk", 1);
+    space.AddExample({0.0f}, MakeWalkClip(0.0f));
+    space.AddExample({1.0f}, MakeWalkClip(1.0f));
+
+    pmg::ParametricMotionGraph graph;
+    node_out = graph.AddNode("boundary_walk", space);
+
+    pmg::PmgEdge edge;
+    edge.source_node = node_out;
+    edge.target_node = node_out;
+    edge.samples.push_back({
+        {0.5f},
+        {{0.0f}, {1.0f}},
+        0.95f,
+        0.50f,
+    });
+    graph.AddEdge(std::move(edge));
+    return graph;
+}
+
 float WorldFacingYaw(const pmg::Pose& world_pose) {
     const pmg::Vec3 forward = pmg::Rotate(world_pose.local_rotations[0], {0.0f, 0.0f, 1.0f});
     return std::atan2(forward.x, forward.z);
@@ -96,7 +117,8 @@ int main() {
     const pmg::ParametricMotionGraph graph = MakeSelfGraph(skeleton, node);
 
     const float source_phase_gate =
-        graph.Edge(0).LookupInterpolated({0.5f})->source_transition_phase;
+        graph.Edge(0).LookupInterpolated(
+            {0.5f}, {0.5f})->source_transition_phase;
 
     // Paper-faithful path: recompute the exact point-cloud alignment per
     // transition (paper Sec 3.2 / Sec 5.2.1) instead of a root-only debug fallback.
@@ -132,9 +154,10 @@ int main() {
     // At least a couple of self-transitions occurred over the run.
     assert(controller.CompletedTransitions() >= 2);
 
-    // The blend window is centered on the optimal transition point (F3): the
+    // The blend window is centered on the optimal transition point: the
     // transition begins by the optimal phase (so its midpoint lands on it), and
-    // no earlier than ~half a window before it (blend 0.20 -> ~0.10, plus a frame).
+    // no earlier than half a metric window before it (default 5 frames at
+    // 30 fps over a ~0.77 s source clip -> half-window ~0.11 phase).
     assert(first_transition_phase <= source_phase_gate + 1.0e-4f);
     assert(first_transition_phase >= source_phase_gate - 0.15f);
 
@@ -158,6 +181,106 @@ int main() {
         max_facing_delta = std::max(max_facing_delta, WrappedDelta(facing_yaws[i], facing_yaws[i - 1]));
     }
     assert(max_facing_delta < 0.2f);  // radians; a misaligned turn would jump far more
+
+    // Free-running loop continuity: with no transition requested, completed
+    // cycles fold into the world placement, so the clip-local wrap never
+    // teleports the root back to the start and the character keeps advancing.
+    {
+        pmg::RuntimeController free_runner(graph, alignment);
+        free_runner.Start(node, {0.5f}, kFramesPerSecond);
+        const pmg::RuntimeControlRequest no_request;  // desired_node = -1
+
+        std::vector<pmg::Vec3> free_positions;
+        free_positions.push_back(free_runner.CurrentPose().root_position);
+        for (int step = 0; step < 120; ++step) {  // ~5 clip cycles
+            free_runner.Update(delta_seconds, no_request);
+            free_positions.push_back(free_runner.CurrentPose().root_position);
+        }
+
+        float free_total = 0.0f;
+        float free_max = 0.0f;
+        for (std::size_t i = 1; i < free_positions.size(); ++i) {
+            const float step = (free_positions[i] - free_positions[i - 1]).Norm();
+            free_total += step;
+            free_max = std::max(free_max, step);
+        }
+        const float free_mean =
+            free_total / static_cast<float>(free_positions.size() - 1);
+        assert(free_mean > 1.0e-4f);
+        assert(free_max < 6.0f * free_mean);  // a wrap teleport would be ~one clip span
+
+        // Net displacement keeps growing across loops (no snap-back).
+        const float net = (free_positions.back() - free_positions.front()).Norm();
+        assert(net > 2.0f * kStrideUnits);  // several cycles of forward travel
+    }
+
+    // D3/D4 regression: a 9-frame transition centered near source phase 0.95
+    // must cross the source cycle boundary without freezing or popping. The
+    // active duration comes from transition_blend_frames, the same frame count
+    // used by the metric window.
+    {
+        int boundary_node = -1;
+        const pmg::ParametricMotionGraph boundary_graph =
+            MakeBoundaryCrossingGraph(boundary_node);
+        pmg::RootOnlyAlignment boundary_alignment;
+        pmg::RuntimeControllerConfig runtime_config;
+        runtime_config.transition_blend_frames = 9;
+        pmg::RuntimeController boundary_controller(
+            boundary_graph, boundary_alignment, runtime_config);
+        boundary_controller.Start(
+            boundary_node, {0.5f}, kFramesPerSecond);
+
+        pmg::RuntimeControlRequest boundary_request;
+        boundary_request.desired_node = boundary_node;
+        boundary_request.desired_parameter = {0.5f};
+
+        std::vector<pmg::Vec3> boundary_positions;
+        boundary_positions.push_back(
+            boundary_controller.CurrentPose().root_position);
+        bool crossed_source_boundary_during_blend = false;
+        int transition_update_count = 0;
+        float previous_phase = boundary_controller.CurrentPhase();
+        for (int step = 0; step < 60; ++step) {
+            const bool was_transitioning =
+                boundary_controller.IsTransitioning();
+            boundary_controller.Update(delta_seconds, boundary_request);
+            const bool is_transitioning =
+                boundary_controller.IsTransitioning();
+            const float phase = boundary_controller.CurrentPhase();
+            if (was_transitioning && phase < previous_phase) {
+                crossed_source_boundary_during_blend = true;
+            }
+            if (was_transitioning) {
+                ++transition_update_count;
+            }
+            boundary_positions.push_back(
+                boundary_controller.CurrentPose().root_position);
+            previous_phase = phase;
+            if (!is_transitioning &&
+                boundary_controller.CompletedTransitions() > 0) {
+                break;
+            }
+        }
+
+        assert(crossed_source_boundary_during_blend);
+        assert(transition_update_count >= 9);
+        assert(transition_update_count <= 10);
+        assert(boundary_controller.CompletedTransitions() == 1);
+
+        float boundary_total_step = 0.0f;
+        float boundary_max_step = 0.0f;
+        for (std::size_t i = 1; i < boundary_positions.size(); ++i) {
+            const float step =
+                (boundary_positions[i] - boundary_positions[i - 1]).Norm();
+            boundary_total_step += step;
+            boundary_max_step = std::max(boundary_max_step, step);
+        }
+        const float boundary_mean_step =
+            boundary_total_step /
+            static_cast<float>(boundary_positions.size() - 1);
+        assert(boundary_mean_step > 1.0e-4f);
+        assert(boundary_max_step < 6.0f * boundary_mean_step);
+    }
 
     return 0;
 }

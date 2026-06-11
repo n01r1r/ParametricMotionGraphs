@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 
 namespace {
 
@@ -53,6 +54,10 @@ pmg::ParametricMotionGraph MakeGraph(bool registered) {
     edge.source_node = node;
     edge.target_node = node;
     edge.samples.push_back({{0.0f}, box, 0.8f, 0.1f});
+    edge.samples.back().target_phase_samples = {
+        {{0.0f}, 0.75f, 0.05f},
+        {{1.0f}, 0.85f, 0.15f},
+    };
     graph.AddEdge(edge);
     return graph;
 }
@@ -158,6 +163,28 @@ void WriteV4Fixture(const std::filesystem::path& path) {
            << "sample 1 0 1 0 1 1 0.8 0.1\n";
 }
 
+void WriteV5Fixture(const std::filesystem::path& path) {
+    std::ofstream output(path);
+    output << "PMG_GRAPH_V5\n"
+           << "runtime 3 30 \"BVH native units\"\n"
+           << "sources 0\n"
+           << "registrations 0\n"
+           << "edge_builds 0\n"
+           << "skeleton 1\n"
+           << "joint \"Hips\" -1 0 0 0 0\n"
+           << "nodes 1\n"
+           << "node \"walk\" 1 1\n"
+           << "example 1 0\n"
+           << "clip \"clip\" 30 2\n"
+           << "frame 0 0 0 1 1 0 0 0\n"
+           << "frame 1 0 0 1 1 0 0 0\n"
+           << "warps 0\n"
+           << "calibration 0\n"
+           << "edges 1\n"
+           << "edge 0 0 1\n"
+           << "sample 1 0 1 0 1 1 0.8 0.1\n";
+}
+
 }  // namespace
 
 int main() {
@@ -165,12 +192,32 @@ int main() {
         std::filesystem::temp_directory_path() / "pmg_graph_io_test.pmg";
 
     const pmg::BuiltPmgArtifact original = MakeArtifact();
+    {
+        const pmg::RuntimeControllerConfig runtime_config =
+            pmg::RuntimeControllerConfigFromArtifact(original);
+        assert(runtime_config.transition_blend_frames ==
+               original.metadata.edge_builds.front()
+                   .config.distance_grid.window_size);
+
+        pmg::BuiltPmgArtifact inconsistent = original;
+        pmg::EdgeBuildMetadata second_edge =
+            inconsistent.metadata.edge_builds.front();
+        ++second_edge.config.distance_grid.window_size;
+        inconsistent.metadata.edge_builds.push_back(second_edge);
+        bool rejected_inconsistent_windows = false;
+        try {
+            (void)pmg::RuntimeControllerConfigFromArtifact(inconsistent);
+        } catch (const std::runtime_error&) {
+            rejected_inconsistent_windows = true;
+        }
+        assert(rejected_inconsistent_windows);
+    }
     pmg::SavePmgArtifactText(original, path.string());
     {
         std::ifstream input(path);
         std::string header;
         input >> header;
-        assert(header == "PMG_GRAPH_V5");
+        assert(header == "PMG_GRAPH_V6");
     }
     const pmg::BuiltPmgArtifact loaded =
         pmg::LoadPmgArtifactText(path.string());
@@ -183,6 +230,13 @@ int main() {
     assert(loaded.metadata.edge_builds[0].config.seed == 42);
     assert(loaded.metadata.edge_builds[0].report.source_reports[0].bad_count == 1);
     assert(loaded.graph.Node(0).motion_space.HasExampleTimeWarps());
+    assert(loaded.graph.Edge(0).samples[0].target_phase_samples.size() == 2);
+    assert(std::abs(
+               loaded.graph.Edge(0)
+                       .samples[0]
+                       .target_phase_samples[1]
+                       .target_transition_phase -
+               0.15f) < 1.0e-6f);
 
     // Parameter calibration round-trips with the space.
     {
@@ -247,6 +301,21 @@ int main() {
         assert(v4.skeleton.NumJoints() == 1);
         assert(v4.graph.NumNodes() == 1);
         assert(!v4.graph.Node(0).motion_space.HasParameterCalibration());
+    }
+
+    {
+        WriteV5Fixture(path);
+        const pmg::BuiltPmgArtifact v5 = pmg::LoadPmgArtifactText(path.string());
+        assert(v5.skeleton.NumJoints() == 1);
+        assert(v5.graph.NumEdges() == 1);
+        assert(v5.graph.Edge(0).samples[0].target_phase_samples.empty());
+        const auto transition =
+            v5.graph.Edge(0).LookupInterpolated({0.0f}, {0.7f});
+        assert(transition.has_value());
+        assert(std::abs(transition->source_transition_phase - 0.8f) <
+               1.0e-6f);
+        assert(std::abs(transition->target_transition_phase - 0.1f) <
+               1.0e-6f);
     }
 
     std::filesystem::remove(path);

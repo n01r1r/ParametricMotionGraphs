@@ -230,12 +230,26 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
         }
 
         const float inv_count = 1.0f / static_cast<float>(in_box_count);
-        result.edge.samples.push_back({
-            source_parameter,
-            target_box,
-            sum_source_phase * inv_count,
-            sum_target_phase * inv_count,
-        });
+        TransitionSample transition_sample;
+        transition_sample.source_parameter = source_parameter;
+        transition_sample.target_parameter_box = target_box;
+        transition_sample.source_transition_phase =
+            sum_source_phase * inv_count;
+        transition_sample.target_transition_phase =
+            sum_target_phase * inv_count;
+        transition_sample.target_phase_samples.reserve(
+            static_cast<std::size_t>(in_box_count));
+        for (const GoodHit& hit : good_hits) {
+            if (!target_box.Contains(hit.parameter)) {
+                continue;
+            }
+            transition_sample.target_phase_samples.push_back({
+                hit.parameter,
+                hit.source_phase,
+                hit.target_phase,
+            });
+        }
+        result.edge.samples.push_back(std::move(transition_sample));
 
         sample_report.accepted = true;
         result.report.source_reports.push_back(sample_report);

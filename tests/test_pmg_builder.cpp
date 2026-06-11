@@ -67,6 +67,16 @@ bool SamplesEqual(const pmg::TransitionSample& a, const pmg::TransitionSample& b
     if (a.target_parameter_box.max_corner != b.target_parameter_box.max_corner) return false;
     if (a.source_transition_phase != b.source_transition_phase) return false;
     if (a.target_transition_phase != b.target_transition_phase) return false;
+    if (a.target_phase_samples.size() != b.target_phase_samples.size()) return false;
+    for (std::size_t index = 0; index < a.target_phase_samples.size(); ++index) {
+        const pmg::TargetTransitionPhaseSample& phase_a =
+            a.target_phase_samples[index];
+        const pmg::TargetTransitionPhaseSample& phase_b =
+            b.target_phase_samples[index];
+        if (phase_a.target_parameter != phase_b.target_parameter) return false;
+        if (phase_a.source_transition_phase != phase_b.source_transition_phase) return false;
+        if (phase_a.target_transition_phase != phase_b.target_transition_phase) return false;
+    }
     return true;
 }
 
@@ -139,8 +149,14 @@ int main() {
         assert(!edge.samples.empty());
         for (const pmg::TransitionSample& sample : edge.samples) {
             assert(sample.target_parameter_box.IsValid());
+            assert(!sample.target_phase_samples.empty());
             assert(sample.source_transition_phase >= 0.0f &&
                    sample.source_transition_phase <= 1.0f);
+            for (const pmg::TargetTransitionPhaseSample& phase_sample :
+                 sample.target_phase_samples) {
+                assert(sample.target_parameter_box.Contains(
+                    phase_sample.target_parameter));
+            }
         }
     }
 

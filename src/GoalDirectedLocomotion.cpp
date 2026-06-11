@@ -114,8 +114,9 @@ const SteeringCalibration& GoalDirectedLocomotion::Calibration() const {
 }
 
 float GoalDirectedLocomotion::MeasureAchievedTurnRate(float parameter) const {
-    PointCloudAlignment alignment(skeleton_);
-    RuntimeController controller(graph_, alignment);
+    PointCloudAlignment alignment(
+        skeleton_, config_.runtime.transition_blend_frames);
+    RuntimeController controller(graph_, alignment, config_.runtime);
     controller.Start(node_index_, {parameter}, frames_per_second_);
 
     RuntimeControlRequest request;

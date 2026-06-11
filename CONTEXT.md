@@ -108,13 +108,14 @@ _Avoid_: state machine, blend graph.
 The complete offline output consumed online: Skeleton, registered
 ParametricMotionGraph, parameter calibrations, runtime sampling rate, source
 paths, registration settings, edge sampling configuration, seeds, and build
-reports. Serialized as PMG_GRAPH_V5 (V2–V4 stay readable).
+reports. Serialized as PMG_GRAPH_V6 (V2-V5 stay readable).
 _Avoid_: graph file, cached graph (those omit the complete runtime contract).
 
 **TransitionSample**:
-One sampled source parameter with the reachable target parameter box and the
-source/target transition phases. No alignment is stored; alignment is resolved
-at runtime through `AlignmentStrategy`.
+One sampled source parameter with the reachable target parameter box and phase
+pairs measured at retained GOOD target samples. Runtime evaluates this phase
+field at the requested target. No alignment is stored; alignment is resolved
+through `AlignmentStrategy`.
 _Avoid_: edge point, transition record, baked alignment (nothing is baked).
 
 ### Alignment & placement
@@ -143,7 +144,9 @@ _Avoid_: alignment kind, strategy enum, baked alignment.
 Streams motion from a graph: advances the current clip, schedules a transition
 when the source phase reaches the gate, and aligns + blends into the target,
 accumulating the world placement so motion stays continuous. Takes an
-`AlignmentStrategy` at construction.
+`AlignmentStrategy` at construction. Blend length is measured in frames and
+must match the artifact edge metric's `window_size`; completed source cycles
+are folded into world placement so cycle-crossing blends never freeze.
 _Avoid_: player, driver, animator.
 
 **Goal-directed locomotion**:

@@ -204,14 +204,23 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
             output << ' ';
             WriteAabb(output, sample.target_parameter_box);
             output << ' ' << sample.source_transition_phase << ' '
-                   << sample.target_transition_phase << '\n';
+                   << sample.target_transition_phase << ' '
+                   << sample.target_phase_samples.size() << '\n';
+            for (const TargetTransitionPhaseSample& phase_sample :
+                 sample.target_phase_samples) {
+                output << "target_phase ";
+                WriteParameter(output, phase_sample.target_parameter);
+                output << ' ' << phase_sample.source_transition_phase
+                       << ' ' << phase_sample.target_transition_phase
+                       << '\n';
+            }
         }
     }
 }
 
 ParametricMotionGraph ReadGraphPayload(
     std::istream& input, bool has_warp_records, bool has_calibration_records,
-    bool quoted_names) {
+    bool has_target_phase_samples, bool quoted_names) {
     std::string keyword;
     int node_count = 0;
     input >> keyword >> node_count;
@@ -345,9 +354,31 @@ ParametricMotionGraph ReadGraphPayload(
             sample.target_parameter_box = ReadAabb(input);
             input >> sample.source_transition_phase
                   >> sample.target_transition_phase;
+            std::size_t target_phase_sample_count = 0;
+            if (has_target_phase_samples) {
+                input >> target_phase_sample_count;
+            }
             if (!input) {
                 throw std::runtime_error(
                     "LoadPmgArtifactText: invalid transition sample");
+            }
+            for (std::size_t phase_index = 0;
+                 phase_index < target_phase_sample_count; ++phase_index) {
+                input >> keyword;
+                if (keyword != "target_phase") {
+                    throw std::runtime_error(
+                        "LoadPmgArtifactText: expected target_phase record");
+                }
+                TargetTransitionPhaseSample phase_sample;
+                phase_sample.target_parameter = ReadParameter(input);
+                input >> phase_sample.source_transition_phase
+                      >> phase_sample.target_transition_phase;
+                if (!input) {
+                    throw std::runtime_error(
+                        "LoadPmgArtifactText: invalid target phase sample");
+                }
+                sample.target_phase_samples.push_back(
+                    std::move(phase_sample));
             }
             edge.samples.push_back(std::move(sample));
         }
@@ -552,7 +583,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V5\n";
+    output << "PMG_GRAPH_V6\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
@@ -568,12 +599,20 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     input >> header;
 
     BuiltPmgArtifact artifact;
+    if (header == "PMG_GRAPH_V6") {
+        artifact.metadata = ReadMetadata(input);
+        artifact.skeleton = ReadSkeleton(input);
+        artifact.graph = ReadGraphPayload(
+            input, /*has_warp_records=*/true, /*has_calibration_records=*/true,
+            /*has_target_phase_samples=*/true, /*quoted_names=*/true);
+        return artifact;
+    }
     if (header == "PMG_GRAPH_V5") {
         artifact.metadata = ReadMetadata(input);
         artifact.skeleton = ReadSkeleton(input);
         artifact.graph = ReadGraphPayload(
             input, /*has_warp_records=*/true, /*has_calibration_records=*/true,
-            /*quoted_names=*/true);
+            /*has_target_phase_samples=*/false, /*quoted_names=*/true);
         return artifact;
     }
     if (header == "PMG_GRAPH_V4") {
@@ -581,23 +620,23 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
         artifact.skeleton = ReadSkeleton(input);
         artifact.graph = ReadGraphPayload(
             input, /*has_warp_records=*/true, /*has_calibration_records=*/false,
-            /*quoted_names=*/true);
+            /*has_target_phase_samples=*/false, /*quoted_names=*/true);
         return artifact;
     }
     if (header == "PMG_GRAPH_V3") {
         artifact.graph = ReadGraphPayload(
             input, /*has_warp_records=*/true, /*has_calibration_records=*/false,
-            /*quoted_names=*/false);
+            /*has_target_phase_samples=*/false, /*quoted_names=*/false);
         return artifact;
     }
     if (header == "PMG_GRAPH_V2") {
         artifact.graph = ReadGraphPayload(
             input, /*has_warp_records=*/false, /*has_calibration_records=*/false,
-            /*quoted_names=*/false);
+            /*has_target_phase_samples=*/false, /*quoted_names=*/false);
         return artifact;
     }
     throw std::runtime_error(
-        "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V5");
+        "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V6");
 }
 
 void SaveGraphText(

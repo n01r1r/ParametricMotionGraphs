@@ -34,7 +34,8 @@ struct PmgEdge {
     // handled before reciprocal-weight evaluation. Returns nullopt only for an
     // empty (no-edge) edge.
     std::optional<InterpolatedTransition> LookupInterpolated(
-        const ParameterVector& source_parameter) const;
+        const ParameterVector& source_parameter,
+        const ParameterVector& desired_target_parameter) const;
 };
 
 class ParametricMotionGraph {

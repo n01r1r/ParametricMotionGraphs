@@ -13,10 +13,12 @@ struct RuntimeControlRequest {
 };
 
 struct RuntimeControllerConfig {
-    // Blend length as a fraction of the target clip duration. Paper-style PMG
-    // transitions are windowed; exposing this makes phase/window calibration an
-    // explicit runtime policy instead of a hidden constant.
-    float blend_window_phase = 0.20f;
+    // Transition blend length in frames at the runtime sampling rate. The
+    // paper measures transition similarity and blends over the same window,
+    // so this must equal the DistanceGridConfig window_size the edges were
+    // built with (callers wire it from the artifact's edge build settings;
+    // the default matches DistanceGridConfig's default).
+    int transition_blend_frames = 5;
 };
 
 // The runtime's clip-local -> world placement is a RigidTransform2D, accumulated
@@ -53,12 +55,15 @@ public:
 
 private:
     float ClipPhase(const MotionClip& clip, float time_seconds) const;
-    float ClampedClipPhase(const MotionClip& clip, float time_seconds) const;
     Pose SampleWorld(const MotionClip& clip, float time_seconds,
                      const RigidTransform2D& transform) const;
-    Pose SampleWorldClamped(const MotionClip& clip, float time_seconds,
-                            const RigidTransform2D& transform) const;
     void TryScheduleTransition(const RuntimeControlRequest& request);
+    // Fold completed cycles into the placement: while `time_seconds` has
+    // passed the clip's end, subtract one duration and compose the clip's
+    // cycle delta into `transform`. Keeps looped playback continuous (the
+    // raw clip-local root returns to its start every cycle).
+    void FoldCompletedCycles(const MotionClip& clip, float& time_seconds,
+                             RigidTransform2D& transform) const;
 
     const ParametricMotionGraph& graph_;
     const AlignmentStrategy& alignment_;

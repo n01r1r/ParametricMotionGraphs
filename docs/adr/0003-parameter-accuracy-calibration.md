@@ -28,8 +28,8 @@ parameter range (deviation D2).
 - `GenerateClip(parameter, fps)` derives its frame count from
   `BlendedDurationSeconds` (weighted example durations). The explicit
   frame-count overload remains for frame-aligned diagnostics.
-- The calibration serializes with the space; the artifact format is
-  `PMG_GRAPH_V5` (V4 loads without calibrations).
+- The calibration serializes with the space; introduced in `PMG_GRAPH_V5`.
+  Current `PMG_GRAPH_V6` adds per-target transition phases.
 - Spec syntax: `parameter_metric <node> <turn_rate|none>`, restricted to
   one-dimensional nodes.
 
