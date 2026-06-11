@@ -1,0 +1,10 @@
+# Real-BVH edge with GOOD/NEUTRAL/BAD samples and a parameter-dependent target
+# subspace. This is the paper Section 3.2 validation case, not the permissive
+# runtime demo configuration.
+node walk 1
+registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
+example walk 0.0 ../BVH/walkCurve.bvh
+example walk 0.5 ../BVH/walkMoreCurve.bvh
+example walk 1.0 ../BVH/walkTightCurve.bvh
+edge walk walk
+edge_config walk walk 0.75 0.8 12 60 7

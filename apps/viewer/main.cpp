@@ -13,6 +13,9 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
+#include <glm/glm.hpp>
+
+#include <cmath>
 #include <cstdio>
 #include <exception>
 
@@ -28,10 +31,40 @@ constexpr float kOrbitRadiansPerPixel = 0.01f;
 
 struct InputState {
     pmgviewer::OrbitCamera* camera = nullptr;
+    pmgviewer::ViewerApp* app = nullptr;
     bool dragging = false;
     double last_cursor_x = 0.0;
     double last_cursor_y = 0.0;
 };
+
+// Unproject the cursor through the camera and hand the ray to the app
+// (ground-plane pick for the goto target gizmo).
+void ForwardGroundClick(GLFWwindow* window, const InputState& input) {
+    double cursor_x = 0.0;
+    double cursor_y = 0.0;
+    glfwGetCursorPos(window, &cursor_x, &cursor_y);
+    int width = 0;
+    int height = 0;
+    glfwGetWindowSize(window, &width, &height);
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    const float ndc_x = 2.0f * static_cast<float>(cursor_x) / static_cast<float>(width) - 1.0f;
+    const float ndc_y = 1.0f - 2.0f * static_cast<float>(cursor_y) / static_cast<float>(height);
+
+    const glm::mat4 inverse_view_projection =
+        glm::inverse(input.camera->ProjectionMatrix() * input.camera->ViewMatrix());
+    glm::vec4 near_point = inverse_view_projection * glm::vec4(ndc_x, ndc_y, -1.0f, 1.0f);
+    glm::vec4 far_point = inverse_view_projection * glm::vec4(ndc_x, ndc_y, 1.0f, 1.0f);
+    if (std::abs(near_point.w) < 1.0e-9f || std::abs(far_point.w) < 1.0e-9f) {
+        return;
+    }
+    near_point /= near_point.w;
+    far_point /= far_point.w;
+    const glm::vec3 origin(near_point);
+    const glm::vec3 direction = glm::normalize(glm::vec3(far_point) - origin);
+    input.app->HandleGroundClick(origin, direction);
+}
 
 void CursorPositionCallback(GLFWwindow* window, double x, double y) {
     ImGui_ImplGlfw_CursorPosCallback(window, x, y);
@@ -52,7 +85,16 @@ void CursorPositionCallback(GLFWwindow* window, double x, double y) {
 void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
     ImGui_ImplGlfw_MouseButtonCallback(window, button, action, mods);
     auto* input = static_cast<InputState*>(glfwGetWindowUserPointer(window));
-    if (input == nullptr || button != GLFW_MOUSE_BUTTON_LEFT) {
+    if (input == nullptr) {
+        return;
+    }
+    if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS &&
+        !ImGui::GetIO().WantCaptureMouse && input->app != nullptr &&
+        input->camera != nullptr) {
+        ForwardGroundClick(window, *input);
+        return;
+    }
+    if (button != GLFW_MOUSE_BUTTON_LEFT) {
         return;
     }
     input->dragging = (action == GLFW_PRESS) && !ImGui::GetIO().WantCaptureMouse;
@@ -69,7 +111,7 @@ void ScrollCallback(GLFWwindow* window, double x_offset, double y_offset) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     if (glfwInit() != GLFW_TRUE) {
         std::fprintf(stderr, "error: failed to initialize GLFW\n");
         return 1;
@@ -124,13 +166,14 @@ int main() {
 
     try {
         pmgviewer::ViewerApp app;
-        app.Initialize();
+        app.Initialize(argc >= 2 ? argv[1] : "");
 
         pmgviewer::SkeletonRenderer renderer;
         renderer.Initialize();
 
         InputState input;
         input.camera = &app.Camera();
+        input.app = &app;
         glfwSetWindowUserPointer(window, &input);
         glfwSetCursorPosCallback(window, CursorPositionCallback);
         glfwSetMouseButtonCallback(window, MouseButtonCallback);

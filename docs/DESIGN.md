@@ -1,66 +1,59 @@
-# Design Notes
+# Design
 
 ## Purpose
 
-The Phase-1 implementation reproduces the original Parametric Motion Graph concept with minimal moving parts.
+Provide an inspectable paper-core PMG implementation whose offline output is
+the exact artifact consumed online.
 
-> Status note: this file is the original design sketch. The implementation has
-> since reached a Phase-F0 paper-conformance/diagnostics milestone; see
-> `docs/IMPLEMENTATION_PLAN.md` for current progress and known deviations.
-
-The central representation is:
+## Core Modules
 
 ```text
-ParametricMotionSpace: parameter p, phase φ → pose (minimal placeholder synthesis)
-MotionDistance:        Kovar'02 point-cloud metric + closed-form 2D rigid align
-ParametricEdge:        source parameter p_s → target AABB + transition phases
-ParametricMotionGraph: nodes + directed parametric edges; k-NN edge interpolation
-RuntimeController:      current state + control request → aligned, C¹-blended transition
+GraphSpec
+  -> BuildPmgArtifactFromSpec
+      -> cycle extraction
+      -> contact registration
+      -> optional DTW refinement
+      -> PmgBuilder edge sampling
+  -> BuiltPmgArtifact
+      -> GraphIo V4
+      -> RuntimeController
+      -> GoalDirectedLocomotion
 ```
 
-## Inputs
+`BuiltPmgArtifact` is the offline/online seam. It owns the Skeleton,
+ParametricMotionGraph, runtime frame configuration, registration metadata,
+edge sampling configuration, seeds, and build reports.
 
-- BVH files with a shared skeleton hierarchy when used together in one parametric motion space.
-- Example parameters supplied by the caller, such as curvature values `[-1, 0, +1]`.
+## Contracts
 
-## Outputs
-
-- Runtime poses sampled from generated motion clips.
-- Optional generated PMG edges built from sampled transition quality.
-
-## Assumptions
-
-- BVH clips in one motion space have compatible skeletons.
-- Each motion space has a low-dimensional continuous parameter vector.
-- Nearby parameters are expected to generate nearby motions.
+- BVH offsets/root positions and distance thresholds use native BVH units.
 - Phase is normalized to `[0, 1]`.
-- Rotations are stored as local joint quaternions.
-- Offsets and root position use the BVH file's **native units**; no unit scaling
-  is applied at load. Display scaling is render-time only (viewer `display_scale_`),
-  so the metric, alignment, and thresholds stay in native units (paper-scale).
+- Graph runtime requires a V4 artifact with a non-empty Skeleton.
+- Node registration either names contact joints or explicitly disables DTW.
+- Edge creation fails if any sampled source parameter has no valid target box.
+- Random runtime selection considers only outgoing edges.
+- Goal-directed locomotion currently requires a one-dimensional steerable node.
 
 ## Failure Modes
 
-The code throws `std::runtime_error` when:
+The implementation throws close to the invalid input for missing files,
+unknown joints/nodes, incompatible skeletons, mismatched contact structures,
+empty edges, malformed artifacts, invalid runtime dimensions, and unsteerable
+goal-directed nodes.
 
-- a BVH file cannot be opened;
-- required BVH tokens are missing;
-- a motion clip is empty;
-- pose joint counts mismatch;
-- parameter dimensions mismatch;
-- PMG runtime is started with invalid node or parameter.
+## Limitations
 
-## Current Limitations
+The full prioritized deviation list lives in
+[PAPER_CONFORMANCE.md](PAPER_CONFORMANCE.md). Structural highlights:
 
-- Transition distance is the Kovar'02 point-cloud metric (yaw + floor
-  translation aligned). Remaining gaps: no foot-contact term; motion-space blending is not time-registered (D6).
-- AABB shrinking is conservative, single-dimension, minimal (Fig 4c).
-- k-NN falloff cutoff uses the paper literal k-th neighbor; exact/degenerate cases are guarded.
-- Graph persistence and diagnostics are built (Phase F0); the control applications (Phase G) are not built.
-- Rendering lives only in the optional `pmg_viewer` target; `pmg_core` is dependency-free.
-
-## Extension Boundary
-
-Do not add learned validity, manifold embedding, CUDA, or contact-aware metrics into
-`pmg_core` unless a concrete limitation is observed and documented (see
-`docs/PHASE2_NOTES.md`). Keep third-party deps out of `pmg_core`.
+- Blend weights are local Shepard interpolation, not the Kovar-Gleicher 2004
+  weight-to-parameter inversion; requested parameters are approximate (D1).
+- Generated clip duration is fixed by configuration instead of following the
+  blended example durations (D2).
+- Manual GraphSpec parameterization replaces Kovar-Gleicher automatic database
+  extraction and parameterization.
+- The included corpus validates walking/jogging behavior, not the original
+  boxing/platform experiments.
+- Transition regions are axis-aligned boxes and clips transition near their
+  end; mid-clip transitions and partial source domains remain future work.
+- Foot locking is optional and not serialized as runtime behavior.

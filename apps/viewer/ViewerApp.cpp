@@ -10,6 +10,7 @@
 #include <string>
 
 #include "pmg/ForwardKinematics.h"
+#include "pmg/MathTypes.h"
 #include "pmg/SkeletonCompatibility.h"
 
 #ifndef PMG_BVH_DIRECTORY
@@ -54,10 +55,13 @@ ImU32 HeatColor(float t) {
 }
 }  // namespace
 
-void ViewerApp::Initialize() {
+void ViewerApp::Initialize(const std::string& artifact_path) {
     DiscoverBvhFiles();
     if (!bvh_files_.empty()) {
         LoadClip(0);
+    }
+    if (!artifact_path.empty()) {
+        LoadGraphArtifact(artifact_path);
     }
 }
 
@@ -230,16 +234,105 @@ void ViewerApp::RebuildScene(const pmg::Pose& pose) {
              world_positions[static_cast<std::size_t>(joint_index)]});
     }
 
+    // Goto target gizmo: ground sphere plus a beacon roughly character-tall
+    // (native target back into display space, same transform as the root).
+    scene_.marker_points.clear();
+    scene_.marker_lines.clear();
+    if (goto_active_ && GraphRuntimeActive()) {
+        const glm::vec3 base(goto_target_.x * display_scale_, 0.0f,
+                             goto_target_.y * display_scale_);
+        const glm::vec3 top = base + glm::vec3(0.0f, 1.8f * display_scale_, 0.0f);
+        scene_.marker_points.push_back(base);
+        scene_.marker_lines.push_back({base, top});
+    }
+
     scene_.focus_point = centroid;
     if (follow_centroid_) {
         camera_.SetTarget(centroid);
     }
 }
 
+// --- Goto steering (viewer port of CLI --goto) ------------------------------
+
+// Achieved world turn rate when streaming the graph at one held parameter.
+// Differs from the example clips' own turn rates: each self-transition plays
+// only the target-phase -> source-gate slice per cycle, so the net heading
+// advance per hop is that slice's heading change (including sway).
+void ViewerApp::CalibrateSteering() {
+    steering_.reset();
+    if (!graph_ready_ || pmg_examples_.empty()) {
+        goto_status_ = "Build a graph first.";
+        return;
+    }
+    try {
+        steering_.emplace(
+            graph_, pmg_skeleton_, 0, graph_frame_count_, graph_fps_);
+        const pmg::SteeringCalibration& calibration =
+            steering_->Calibration();
+        goto_status_ = "Calibrated: achieved turn rates " +
+                       std::to_string(calibration.lowest_rate) + " .. " +
+                       std::to_string(calibration.highest_rate) + " rad/s.";
+    } catch (const std::exception& error) {
+        steering_.reset();
+        goto_status_ = std::string("Calibration failed: ") + error.what();
+    }
+}
+
+void ViewerApp::UpdateGotoSteering(const pmg::Pose& pose) {
+    const float dx = goto_target_.x - pose.root_position.x;
+    const float dz = goto_target_.y - pose.root_position.z;
+    const float distance = std::sqrt(dx * dx + dz * dz);
+    if (distance <= goto_tolerance_) {
+        goto_active_ = false;
+        goto_status_ = "Target reached.";
+        return;
+    }
+    pmg::GoalRequest goal;
+    goal.target_position = {goto_target_.x, 0.0f, goto_target_.y};
+    graph_desired_parameter_ =
+        steering_->RequestForPose(pose, goal).desired_parameter.front();
+}
+
+bool ViewerApp::HandleGroundClick(const glm::vec3& ray_origin,
+                                  const glm::vec3& ray_direction) {
+    if (!GraphRuntimeActive()) {
+        if (graph_ready_) {
+            status_message_ = "Switch to Graph runtime mode to place a walk target.";
+        }
+        return false;
+    }
+    if (std::abs(ray_direction.y) < 1.0e-6f) {
+        return false;
+    }
+    const float t = -ray_origin.y / ray_direction.y;
+    if (t <= 0.0f) {
+        return false;
+    }
+    const glm::vec3 hit = ray_origin + t * ray_direction;
+    // The scene is rendered at display scale; steering runs in native units.
+    goto_target_ = glm::vec2(hit.x, hit.z) / std::max(display_scale_, kEpsilon);
+
+    if (!steering_.has_value()) {
+        CalibrateSteering();  // one-time; a few seconds of offline streaming
+    }
+    if (steering_.has_value()) {
+        steering_->Reset();
+    }
+    goto_active_ = steering_.has_value();
+    if (goto_active_) {
+        playing_ = true;
+        goto_status_ = "Walking to target.";
+    }
+    return true;
+}
+
 void ViewerApp::Update(float delta_seconds) {
     // Graph runtime: drive the RuntimeController and render its streamed pose.
     if (GraphRuntimeActive()) {
         if (playing_) {
+            if (goto_active_ && steering_.has_value()) {
+                UpdateGotoSteering(graph_controller_->CurrentPose());
+            }
             pmg::RuntimeControlRequest request;
             request.desired_node = graph_controller_->CurrentNode();
             request.desired_parameter = {graph_desired_parameter_};
@@ -310,17 +403,49 @@ void ViewerApp::RebuildPmgSpace() {
     pmg_space_ready_ = true;
 }
 
-// --- ImGui panels ----------------------------------------------------------
+// --- ImGui UI ---------------------------------------------------------------
+//
+// Everything lives in one window: Workflow + Transport stay visible at the
+// top (they are needed in every mode), the rest is tabbed. Seven floating
+// windows buried the 3D view and each other.
 
 void ViewerApp::BuildUi() {
     HandleShortcuts();
-    BuildWorkflowPanel();
-    BuildTransportPanel();
-    BuildClipsPanel();
-    BuildViewPanel();
-    BuildBlendPanel();
-    BuildDistanceGridPanel();
-    BuildGraphPanel();
+
+    ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(430.0f, 740.0f), ImGuiCond_FirstUseEver);
+    ImGui::Begin("PMG Viewer");
+
+    BuildWorkflowSection();
+    ImGui::Separator();
+    BuildTransportSection();
+    ImGui::Separator();
+
+    if (ImGui::BeginTabBar("##viewer_tabs")) {
+        if (ImGui::BeginTabItem("Clips")) {
+            BuildClipsSection();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Blend")) {
+            BuildBlendSection();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Distance Grid")) {
+            BuildDistanceGridSection();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Graph")) {
+            BuildGraphSection();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("View")) {
+            BuildViewSection();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+
+    ImGui::End();
 }
 
 void ViewerApp::HandleShortcuts() {
@@ -358,13 +483,53 @@ void ViewerApp::StepFrame(int direction) {
         frame_count > 1 ? duration / static_cast<float>(frame_count - 1) : 1.0f / fps;
 
     playing_ = false;
-    current_time_seconds_ = std::clamp(
-        current_time_seconds_ + static_cast<float>(direction) * frame_seconds, 0.0f, duration);
+    // Fold the free-running play clock into one loop, step, then wrap. Clamping
+    // here used to pin the clock at exactly `duration` once playback had run
+    // past one loop; that displays as phase 0 (fmod) and made forward stepping
+    // a dead end until something moved the clock back inside the loop.
+    float time = std::fmod(current_time_seconds_, duration);
+    if (time < 0.0f) {
+        time += duration;
+    }
+    time += static_cast<float>(direction) * frame_seconds;
+    time = std::fmod(time, duration);
+    if (time < 0.0f) {
+        time += duration;
+    }
+    current_time_seconds_ = time;
 }
 
-void ViewerApp::BuildWorkflowPanel() {
-    ImGui::Begin("Workflow");
+bool ViewerApp::ParameterSliderWithTicks(const char* label, float* value,
+                                         float min_value, float max_value) {
+    const float frame_width = ImGui::CalcItemWidth();
+    const bool changed = ImGui::SliderFloat(label, value, min_value, max_value, "%.3f");
 
+    // Tick marks at the example parameters along the slider frame's bottom
+    // edge, so the user sees where real clips sit on the blend axis.
+    const float span = max_value - min_value;
+    if (span > kEpsilon && !pmg_examples_.empty()) {
+        const ImVec2 rect_min = ImGui::GetItemRectMin();
+        const float bottom = ImGui::GetItemRectMax().y;
+        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        for (const PmgExample& example : pmg_examples_) {
+            const float alpha = std::clamp((example.parameter - min_value) / span, 0.0f, 1.0f);
+            const float x = rect_min.x + alpha * frame_width;
+            draw_list->AddLine(ImVec2(x, bottom - 4.0f), ImVec2(x, bottom + 2.0f),
+                               IM_COL32(255, 255, 255, 170), 1.0f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::TextDisabled("ticks = example clips (ctrl+click to type)");
+            for (const PmgExample& example : pmg_examples_) {
+                ImGui::Text("%.3f  %s", example.parameter, example.label.c_str());
+            }
+            ImGui::EndTooltip();
+        }
+    }
+    return changed;
+}
+
+void ViewerApp::BuildWorkflowSection() {
     ImGui::TextWrapped("%s", status_message_.c_str());
     ImGui::Separator();
 
@@ -413,13 +578,9 @@ void ViewerApp::BuildWorkflowPanel() {
     gated_radio("Graph runtime", ViewerPlaybackMode::GraphRuntime,
                 graph_ready_ && graph_controller_.has_value(), "build graph");
     mode_ = static_cast<ViewerPlaybackMode>(mode_int);
-
-    ImGui::End();
 }
 
-void ViewerApp::BuildTransportPanel() {
-    ImGui::Begin("Transport");
-
+void ViewerApp::BuildTransportSection() {
     ImGui::Text("Mode: %s", ModeName(mode_));
     if (clip_.NumFrames() > 0) {
         ImGui::SameLine();
@@ -471,11 +632,9 @@ void ViewerApp::BuildTransportPanel() {
     }
 
     ImGui::TextDisabled("space play/pause   .   arrows step   .   R reset");
-    ImGui::End();
 }
 
-void ViewerApp::BuildClipsPanel() {
-    ImGui::Begin("Clips");
+void ViewerApp::BuildClipsSection() {
     ImGui::Text("%zu BVH files", bvh_files_.size());
 
     ImGui::SetNextItemWidth(-1.0f);
@@ -520,11 +679,9 @@ void ViewerApp::BuildClipsPanel() {
     if (ImGui::Button("Add to blend space")) {
         AddCurrentClipToSpace(next_example_parameter_);
     }
-    ImGui::End();
 }
 
-void ViewerApp::BuildViewPanel() {
-    ImGui::Begin("View");
+void ViewerApp::BuildViewSection() {
     ImGui::Checkbox("Follow motion centroid", &follow_centroid_);
     const glm::vec3 target = camera_.Target();
     ImGui::Text("Camera target: %.1f, %.1f, %.1f", target.x, target.y, target.z);
@@ -537,14 +694,12 @@ void ViewerApp::BuildViewPanel() {
     ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
     ImGui::SliderFloat("Display scale", &display_scale_, 1.0f, 40.0f, "%.1fx");
     ImGui::TextDisabled("Display scale magnifies the whole world, travel included.");
-    ImGui::End();
 }
 
-void ViewerApp::BuildBlendPanel() {
-    ImGui::Begin("Parametric Blend");
+void ViewerApp::BuildBlendSection() {
     ImGui::TextWrapped("Live parametric blend over the added example clips "
-                       "(pmg_core ParametricMotionSpace). Enter Parametric blend mode in "
-                       "the Workflow panel to scrub it.");
+                       "(pmg_core ParametricMotionSpace). Enter Parametric blend mode "
+                       "above to scrub it.");
     ImGui::Text("Examples: %zu", pmg_examples_.size());
     for (const PmgExample& example : pmg_examples_) {
         ImGui::BulletText("%s  (param %.2f)", example.label.c_str(), example.parameter);
@@ -552,8 +707,8 @@ void ViewerApp::BuildBlendPanel() {
     ImGui::Separator();
 
     if (ParametricBlendActive()) {
-        ImGui::SliderFloat("Blend parameter", &pmg_parameter_,
-                           pmg_parameter_min_, pmg_parameter_max_, "%.3f");
+        ParameterSliderWithTicks("Blend parameter", &pmg_parameter_,
+                                 pmg_parameter_min_, pmg_parameter_max_);
     } else {
         ImGui::TextDisabled("Enter Parametric blend mode to scrub the blend parameter.");
     }
@@ -563,7 +718,6 @@ void ViewerApp::BuildBlendPanel() {
         RebuildPmgSpace();
         status_message_ = "Cleared parametric space.";
     }
-    ImGui::End();
 }
 
 // --- Distance Grid heatmap (transition visualization) ----------------------
@@ -658,9 +812,7 @@ void ViewerApp::SaveHeatmapCsv() {
     heatmap_status_ = "Saved distance_grid.csv";
 }
 
-void ViewerApp::BuildDistanceGridPanel() {
-    ImGui::Begin("Distance Grid");
-
+void ViewerApp::BuildDistanceGridSection() {
     if (selected_file_index_ >= 0 &&
         selected_file_index_ < static_cast<int>(bvh_files_.size())) {
         ImGui::Text("Source: %s",
@@ -722,7 +874,6 @@ void ViewerApp::BuildDistanceGridPanel() {
 
     if (!heatmap_ready_) {
         ImGui::TextDisabled("No grid yet. Pick a target and Recompute.");
-        ImGui::End();
         return;
     }
 
@@ -816,15 +967,62 @@ void ViewerApp::BuildDistanceGridPanel() {
         ImGui::Text("selected alignment: yaw %.3f rad  dx %.2f  dz %.2f",
                     alignment.yaw, alignment.dx, alignment.dz);
     }
-
-    ImGui::End();
 }
 
 // --- Graph runtime (PMG streaming) -----------------------------------------
 
+void ViewerApp::LoadGraphArtifact(const std::string& artifact_path) {
+    steering_.reset();
+    graph_controller_.reset();
+    graph_alignment_.reset();
+
+    pmg::BuiltPmgArtifact artifact =
+        pmg::LoadPmgArtifactText(artifact_path);
+    if (artifact.skeleton.NumJoints() == 0) {
+        throw std::runtime_error(
+            "viewer runtime requires a V4 artifact with a Skeleton");
+    }
+    if (artifact.graph.NumNodes() == 0 ||
+        artifact.metadata.generated_frame_count <= 0 ||
+        artifact.metadata.frames_per_second <= 0.0f) {
+        throw std::runtime_error(
+            "viewer runtime artifact has incomplete graph/frame metadata");
+    }
+
+    pmg_skeleton_ = std::move(artifact.skeleton);
+    graph_ = std::move(artifact.graph);
+    graph_frame_count_ = artifact.metadata.generated_frame_count;
+    graph_fps_ = artifact.metadata.frames_per_second;
+    pmg_space_ = graph_.Node(0).motion_space;
+    pmg_examples_.clear();
+    for (const pmg::ExampleMotion& example : pmg_space_.Examples()) {
+        pmg_examples_.push_back(
+            {example.clip.name, example.parameter.front(), example.clip});
+    }
+    pmg_space_ready_ = true;
+    pmg_parameter_min_ = pmg_space_.MinParameter().front();
+    pmg_parameter_max_ = pmg_space_.MaxParameter().front();
+    graph_desired_parameter_ =
+        0.5f * (pmg_parameter_min_ + pmg_parameter_max_);
+
+    graph_alignment_.emplace(pmg_skeleton_);
+    graph_controller_.emplace(graph_, *graph_alignment_);
+    graph_controller_->Start(
+        0, {graph_desired_parameter_}, graph_frame_count_, graph_fps_);
+    graph_ready_ = true;
+    mode_ = ViewerPlaybackMode::GraphRuntime;
+    playing_ = true;
+    graph_status_ = "Loaded V4 artifact: " + artifact_path;
+    status_message_ = graph_status_;
+}
+
 void ViewerApp::BuildGraphRuntime() {
     graph_ready_ = false;
     graph_controller_.reset();
+    // A new graph invalidates the achieved-turn-rate table and any active goto.
+    steering_.reset();
+    goto_active_ = false;
+    goto_status_.clear();
 
     if (!pmg_space_ready_ || pmg_examples_.empty()) {
         graph_status_ = "Add at least one clip to the parametric space first.";
@@ -872,13 +1070,12 @@ void ViewerApp::BuildGraphRuntime() {
     }
 }
 
-void ViewerApp::BuildGraphPanel() {
-    ImGui::Begin("Graph Runtime");
+void ViewerApp::BuildGraphSection() {
     ImGui::TextWrapped(
         "PMG streaming (paper Sec 4-5): builds a self-edge over the parametric "
         "space and streams motion with point-cloud-aligned transitions.");
     ImGui::Text("Space examples: %zu", pmg_examples_.size());
-    ImGui::TextDisabled("Edge GOOD/BAD use the shared TGOOD/TBAD in Distance Grid.");
+    ImGui::TextDisabled("Edge GOOD/BAD use the shared TGOOD/TBAD in the Distance Grid tab.");
     if (ImGui::Button("Build Graph")) {
         BuildGraphRuntime();
     }
@@ -886,19 +1083,55 @@ void ViewerApp::BuildGraphPanel() {
     ImGui::Separator();
 
     if (graph_ready_ && graph_controller_.has_value()) {
-        ImGui::SliderFloat("Desired parameter", &graph_desired_parameter_,
-                           pmg_parameter_min_, pmg_parameter_max_, "%.3f");
+        // While goto steering is active it owns the parameter; show it live
+        // but don't let the slider fight the controller.
+        ImGui::BeginDisabled(goto_active_);
+        ParameterSliderWithTicks("Desired parameter", &graph_desired_parameter_,
+                                 pmg_parameter_min_, pmg_parameter_max_);
+        ImGui::EndDisabled();
         ImGui::Text("Node %d   phase %.2f   transitions %d   %s",
                     graph_controller_->CurrentNode(),
                     graph_controller_->CurrentPhase(),
                     graph_controller_->CompletedTransitions(),
                     graph_controller_->IsTransitioning() ? "[transitioning]" : "");
-        ImGui::TextDisabled("Switch to Graph runtime mode (Workflow) to run; "
-                            "Restart is in Transport.");
+        ImGui::TextDisabled("Switch to Graph runtime mode above to run; "
+                            "Restart graph is next to Play.");
+
+        ImGui::Separator();
+        ImGui::TextDisabled("Goto steering");
+        ImGui::TextWrapped("Right-click the floor (in Graph runtime mode) to set a "
+                           "walk target. First click calibrates achieved turn rates "
+                           "(a few seconds).");
+        if (ImGui::Button(steering_.has_value() ? "Recalibrate" : "Calibrate steering")) {
+            CalibrateSteering();
+        }
+        if (steering_.has_value()) {
+            const pmg::SteeringCalibration& calibration =
+                steering_->Calibration();
+            ImGui::SameLine();
+            ImGui::TextDisabled("rates %.2f .. %.2f rad/s",
+                                calibration.lowest_rate,
+                                calibration.highest_rate);
+        }
+        if (goto_active_) {
+            const pmg::Pose pose = graph_controller_->CurrentPose();
+            const float dx = goto_target_.x - pose.root_position.x;
+            const float dz = goto_target_.y - pose.root_position.z;
+            ImGui::Text("Target (%.1f, %.1f)   distance %.2f",
+                        goto_target_.x, goto_target_.y,
+                        std::sqrt(dx * dx + dz * dz));
+            ImGui::SameLine();
+            if (ImGui::Button("Clear target")) {
+                goto_active_ = false;
+                goto_status_ = "Target cleared.";
+            }
+        }
+        if (!goto_status_.empty()) {
+            ImGui::TextWrapped("%s", goto_status_.c_str());
+        }
     } else {
         ImGui::TextDisabled("No graph yet. Add clips to the space and Build Graph.");
     }
-    ImGui::End();
 }
 
 }  // namespace pmgviewer

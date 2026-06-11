@@ -43,6 +43,7 @@ Testing/
 # Viewer runtime output (layout + exported data)
 imgui.ini
 distance_grid.csv
+/outputs/
 
 # Backups / scratch
 *.bak
@@ -52,7 +53,7 @@ distance_grid.csv
 .claude/
 
 # Source paper (copyright) + agent-local extract — kept locally, not tracked
-PMGFullPaper.pdf
+*.pdf
 PMGFullPaper.txt
 
 # Agent-local status / handoff doc — local working notes, not tracked

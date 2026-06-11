@@ -4,7 +4,9 @@
 # 1 = tightest). Clips are multi-cycle; consumers should normalize them to
 # one gait cycle (--cycle-joint LeftAnkle) so contact structures match.
 node walk 1
+registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
 example walk 0.0 ../BVH/walkCurve.bvh
 example walk 0.5 ../BVH/walkMoreCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
 edge walk walk
+edge_config walk walk 1.0 1.4 12 60 7

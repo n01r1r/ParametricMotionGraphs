@@ -88,10 +88,18 @@ the mechanism).
 Nodes are motion spaces; edges carry sampled transitions between them.
 _Avoid_: state machine, blend graph.
 
+**BuiltPmgArtifact**:
+The complete offline output consumed online: Skeleton, registered
+ParametricMotionGraph, runtime frame settings, source paths, registration
+settings, edge sampling configuration, seeds, and build reports. Serialized as
+PMG_GRAPH_V4.
+_Avoid_: graph file, cached graph (those omit the complete runtime contract).
+
 **TransitionSample**:
-One sampled source parameter with the reachable target parameter box, the
-source/target transition phases, and the baked alignment.
-_Avoid_: edge point, transition record.
+One sampled source parameter with the reachable target parameter box and the
+source/target transition phases. No alignment is stored; alignment is resolved
+at runtime through `AlignmentStrategy`.
+_Avoid_: edge point, transition record, baked alignment (nothing is baked).
 
 ### Alignment & placement
 
@@ -108,10 +116,10 @@ at a transition. Resolves a `RigidTransform2D` from an `AlignmentContext`.
 _Avoid_: alignment mode, alignment flag.
 
 **PointCloudAlignment / RootOnlyAlignment**:
-The three adapters behind `AlignmentStrategy`: recompute the exact point-cloud
-alignment (paper-faithful), reuse the alignment baked on the edge, or recompute
-from the root pose alone (legacy/debug).
-_Avoid_: alignment kind, strategy enum.
+The two adapters behind `AlignmentStrategy`: recompute the exact point-cloud
+alignment (paper-faithful), or recompute from the root pose alone
+(legacy/debug, skeleton-free tests).
+_Avoid_: alignment kind, strategy enum, baked alignment.
 
 ### Runtime
 
@@ -121,6 +129,13 @@ when the source phase reaches the gate, and aligns + blends into the target,
 accumulating the world placement so motion stays continuous. Takes an
 `AlignmentStrategy` at construction.
 _Avoid_: player, driver, animator.
+
+**Goal-directed locomotion**:
+The semantic control Module that maps a world-space target position and optional
+final facing direction to a node ParameterVector. It calibrates against achieved
+runtime turn rates rather than assuming authored clip curvature equals streamed
+behavior.
+_Avoid_: goto hack, steering helper.
 
 ### Distance metric
 

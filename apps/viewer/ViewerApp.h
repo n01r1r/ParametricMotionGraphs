@@ -7,6 +7,8 @@
 
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
+#include "pmg/GoalDirectedLocomotion.h"
+#include "pmg/GraphIo.h"
 #include "pmg/MotionClip.h"
 #include "pmg/MotionDistance.h"
 #include "pmg/ParametricMotionGraph.h"
@@ -35,16 +37,22 @@ enum class ViewerPlaybackMode {
 // Top-level viewer state: owns the loaded BVH motion, playback clock, the live
 // parametric-blend control, and produces a RenderScene each frame.
 //
-// Purpose: drive the skeleton renderer from pmg_core data and expose ImGui
-// panels (playback, clip picker, camera, parametric blend).
+// Purpose: drive the skeleton renderer from pmg_core data and expose one
+// tabbed ImGui control window (workflow + transport on top; clips, blend,
+// distance grid, graph, and view settings as tabs).
 // Assumptions: world is Y-up; a clip's lowest point over its whole duration is
 // rested on y = 0 so vertical dynamics are preserved.
 class ViewerApp {
 public:
-    void Initialize();
+    void Initialize(const std::string& artifact_path = {});
 
     void Update(float delta_seconds);
     void BuildUi();
+
+    // Ray pick (display-space, e.g. from a right-click unprojected by main):
+    // intersects the ground plane and, in graph runtime, places the goto
+    // target there. Returns true when the click was consumed.
+    bool HandleGroundClick(const glm::vec3& ray_origin, const glm::vec3& ray_direction);
 
     const RenderScene& Scene() const { return scene_; }
     OrbitCamera& Camera() { return camera_; }
@@ -67,17 +75,27 @@ private:
     static float ComputeGroundOffset(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip);
     float ActiveReferenceDuration() const;
 
-    void BuildWorkflowPanel();
-    void BuildTransportPanel();
-    void BuildClipsPanel();
-    void BuildViewPanel();
-    void BuildBlendPanel();
-    void BuildDistanceGridPanel();
-    void BuildGraphPanel();
+    void BuildWorkflowSection();
+    void BuildTransportSection();
+    void BuildClipsSection();
+    void BuildViewSection();
+    void BuildBlendSection();
+    void BuildDistanceGridSection();
+    void BuildGraphSection();
 
     void RecomputeHeatmap();
     void SaveHeatmapCsv();
     void BuildGraphRuntime();
+    void LoadGraphArtifact(const std::string& artifact_path);
+
+    // Goto steering delegates to the same core module as the CLI.
+    void CalibrateSteering();
+    void UpdateGotoSteering(const pmg::Pose& pose);
+
+    // SliderFloat plus tick marks at the example parameters, so the user can
+    // see where the real clips sit on the blend axis.
+    bool ParameterSliderWithTicks(const char* label, float* value,
+                                  float min_value, float max_value);
 
     void HandleShortcuts();
     void StepFrame(int direction);  // +1 / -1 frame; clip & blend modes only
@@ -148,6 +166,13 @@ private:
     int graph_frame_count_ = 48;
     float graph_fps_ = 30.0f;
     std::string graph_status_ = "Build a parametric space, then Build Graph.";
+
+    // --- Goto steering (paper application B/C in the viewer) -------------------
+    std::optional<pmg::GoalDirectedLocomotion> steering_;
+    bool goto_active_ = false;
+    glm::vec2 goto_target_{0.0f, 0.0f};  // native units, ground plane (x, z)
+    float goto_tolerance_ = 2.0f;        // native units; arrival radius
+    std::string goto_status_;
 
     RenderScene scene_;
     OrbitCamera camera_;

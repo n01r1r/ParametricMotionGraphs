@@ -48,15 +48,21 @@ int main() {
     std::ofstream spec(spec_path);
     spec << "# one-node self graph\n"
          << "node walk 1\n"
+         << "registration walk - - 3 0\n"
          << "example walk 0 walk_a.bvh\n"
          << "example walk 1 walk_b.bvh\n"
-         << "edge walk walk\n";
+         << "edge walk walk\n"
+         << "edge_config walk walk 10 20 2 3 99\n";
     spec.close();
 
     const pmg::GraphSpec parsed = pmg::LoadGraphSpec(spec_path.string());
     assert(parsed.nodes.size() == 1);
     assert(parsed.examples.size() == 2);
     assert(parsed.edges.size() == 1);
+    assert(parsed.nodes[0].has_registration_config);
+    assert(parsed.nodes[0].contact_joints.empty());
+    assert(parsed.edges[0].has_build_config);
+    assert(parsed.edges[0].build_config.seed == 99);
 
     pmg::PmgBuilderConfig config;
     config.source_sample_count = 1;
@@ -70,6 +76,34 @@ int main() {
     assert(graph.NumEdges() == 1);
     assert(graph.Node(0).motion_space.NumExamples() == 2);
     assert(!graph.Edge(0).samples.empty());
+
+    pmg::ArtifactBuildConfig artifact_config;
+    artifact_config.default_edge_config = config;
+    artifact_config.default_contact_joints.clear();
+    artifact_config.default_dtw_refine = false;
+    const pmg::BuiltPmgArtifact artifact =
+        pmg::BuildPmgArtifactFromSpec(parsed, artifact_config);
+    assert(artifact.skeleton.NumJoints() > 0);
+    assert(artifact.graph.NumEdges() == 1);
+    assert(artifact.metadata.edge_builds[0].config.seed == 99);
+
+    const std::filesystem::path invalid_spec_path =
+        directory / "invalid_graph.txt";
+    std::ofstream invalid_spec(invalid_spec_path);
+    invalid_spec << "node walk 1\n"
+                 << "registration walk MissingJoint MissingJoint 3 0\n"
+                 << "example walk 0 walk_a.bvh\n"
+                 << "edge walk walk\n";
+    invalid_spec.close();
+    bool invalid_joint_threw = false;
+    try {
+        const pmg::GraphSpec invalid =
+            pmg::LoadGraphSpec(invalid_spec_path.string());
+        (void)pmg::BuildPmgArtifactFromSpec(invalid, artifact_config);
+    } catch (const std::runtime_error&) {
+        invalid_joint_threw = true;
+    }
+    assert(invalid_joint_threw);
 
     std::filesystem::remove_all(directory);
     return 0;

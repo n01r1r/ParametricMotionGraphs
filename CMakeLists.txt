@@ -14,6 +14,7 @@ add_library(pmg_core
     src/ContactDetection.cpp
     src/FootLocking.cpp
     src/ForwardKinematics.cpp
+    src/GoalDirectedLocomotion.cpp
     src/GraphIo.cpp
     src/GraphSpec.cpp
     src/MotionClip.cpp
@@ -35,7 +36,10 @@ target_compile_options(pmg_core PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
 
-add_executable(pmg_cli apps/pmg_cli.cpp)
+add_executable(pmg_cli
+    apps/pmg_cli.cpp
+    apps/PmgCommands.cpp
+)
 target_link_libraries(pmg_cli PRIVATE pmg_core)
 
 if(PMG_BUILD_TESTS)
@@ -121,6 +125,10 @@ if(PMG_BUILD_TESTS)
     target_link_libraries(test_registered_blending PRIVATE pmg_core)
     add_test(NAME test_registered_blending COMMAND test_registered_blending)
 
+    add_executable(test_goal_directed_locomotion tests/test_goal_directed_locomotion.cpp)
+    target_link_libraries(test_goal_directed_locomotion PRIVATE pmg_core)
+    add_test(NAME test_goal_directed_locomotion COMMAND test_goal_directed_locomotion)
+
     # CLI-level numeric validation on the real BVH corpus: the registered
     # Walk(curvature) space must keep feet planted (contacts, slide) and vary
     # smoothly across its parameter range, and must not regress the naive
@@ -185,6 +193,52 @@ if(PMG_BUILD_TESTS)
             --tgood 1.0 --tbad 1.4
             --seconds 60 --tolerance 3
             --max-pop-ratio 3.0)
+
+    set(PMG_TEST_ARTIFACT_ROOT ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts)
+    add_test(NAME cli_build_v4_walk
+        COMMAND pmg_cli --build-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
+            ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg)
+    set_tests_properties(cli_build_v4_walk PROPERTIES
+        FIXTURES_SETUP pmg_v4_walk)
+
+    add_test(NAME cli_random_walk_v4
+        COMMAND pmg_cli --random-walk
+            ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg
+            --seconds 10 --min-transitions 5 --max-pop-ratio 3.0)
+    set_tests_properties(cli_random_walk_v4 PROPERTIES
+        FIXTURES_REQUIRED pmg_v4_walk)
+
+    add_test(NAME cli_goto_v4
+        COMMAND pmg_cli --goto
+            ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg 10 10
+            --seconds 60 --tolerance 3 --max-pop-ratio 3.0)
+    set_tests_properties(cli_goto_v4 PROPERTIES
+        FIXTURES_REQUIRED pmg_v4_walk)
+
+    add_test(NAME cli_build_v4_walk_jog
+        COMMAND pmg_cli --build-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_jog.pmg_spec
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/artifact.pmg)
+    set_tests_properties(cli_build_v4_walk_jog PROPERTIES
+        FIXTURES_SETUP pmg_v4_walk_jog)
+
+    add_test(NAME cli_random_walk_v4_walk_jog
+        COMMAND pmg_cli --random-walk
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/artifact.pmg
+            --seconds 20 --min-transitions 5 --max-pop-ratio 5.0)
+    set_tests_properties(cli_random_walk_v4_walk_jog PROPERTIES
+        FIXTURES_REQUIRED pmg_v4_walk_jog)
+
+    add_test(NAME cli_build_v4_selective
+        COMMAND pmg_cli --build-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature_selective.pmg_spec
+            ${PMG_TEST_ARTIFACT_ROOT}/selective/artifact.pmg)
+
+    add_test(NAME cli_build_v4_box_shrink
+        COMMAND pmg_cli --build-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/transition_box_shrink.pmg_spec
+            ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
 endif()
 
 # ---------------------------------------------------------------------------

@@ -39,11 +39,6 @@ public:
     std::vector<float> ComputeLocalBlendWeights(
         const ParameterVector& parameter) const;
 
-    // Backward-compatible alias retained for old tests/callers. The
-    // implementation is now local k-nearest interpolation rather than global IDW.
-    std::vector<float> ComputeInverseDistanceWeights(
-        const ParameterVector& parameter) const;
-
     Pose EvaluatePose(const ParameterVector& parameter, float normalized_phase) const;
 
     // Generates a clip by blending joints/height per frame (EvaluatePose) but

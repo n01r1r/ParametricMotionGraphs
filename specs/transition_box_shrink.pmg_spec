@@ -1,0 +1,15 @@
+# Section 3.2 AABB-shrink diagnostic. The target axis intentionally places a
+# dissimilar jog between two walk examples so GOOD endpoints can enclose BAD
+# interior samples. This is a validity stress case, not a smooth runtime space.
+node source_walk 1
+registration source_walk - - 3 0
+example source_walk 0.0 ../BVH/walkMoreCurve.bvh
+
+node nonconvex_target 1
+registration nonconvex_target - - 3 0
+example nonconvex_target 0.0 ../BVH/walkCurve.bvh
+example nonconvex_target 0.5 ../BVH/jogCurve.bvh
+example nonconvex_target 1.0 ../BVH/walkTightCurve.bvh
+
+edge source_walk nonconvex_target
+edge_config source_walk nonconvex_target 1.0 1.5 4 100 31

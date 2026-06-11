@@ -1,125 +1,121 @@
 # ParametricMotionGraphs
 
-C++ implementation of **Parametric Motion Graphs (PMG)** (Heck & Gleicher 2007)
-using BVH motion clips as the motion source.
+Paper-core reference implementation of **Parametric Motion Graphs** (Heck &
+Gleicher, 2007) using BVH motion clips.
+
+The implementation covers the paper's transition construction and lookup:
 
 ```text
-BVH clips (native units)
-→ skeleton / pose / motion clip
-→ parametric motion spaces (blending-based synthesis)
-→ point-cloud transition metric + distance grid
-→ sampled PMG edges (TGOOD/TBAD, AABB transition regions)
-→ runtime graph traversal with point-cloud-aligned C¹ blends
-→ OpenGL/ImGui viewer (playback, parametric blend, distance heatmap, graph runtime)
+BVH examples
+  -> cycle normalization + contact/DTW registration
+  -> parametric motion spaces
+  -> point-cloud transition distance grids
+  -> sampled GOOD/NEUTRAL/BAD target regions
+  -> interpolated PMG edges
+  -> V4 offline artifact
+  -> point-cloud-aligned online runtime
 ```
 
-**Status:** PMG core scaffold with paper-conformance corrections and Phase-F0
-build diagnostics. Phases **A–F0 are implemented, tests 14/14 pass**. This is
-not yet a full Heck & Gleicher reproduction: the current `ParametricMotionSpace`
-is a minimal inverse-distance / normalized-phase placeholder, not the
-Kovar-Gleicher time-registered synthesis system required for high-fidelity real
-corpus claims. See
-[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) for the phase plan and
-progress.
+It is not a reproduction of the paper's unavailable boxing/platform datasets
+or Kovar-Gleicher's automatic database extraction. Claims are limited to the
+included BVH corpus and the implemented acquisition/runtime assumptions.
 
-## Reason
+## Build
 
-PMG is not a motion-blending demo. It uses blending-based parametric synthesis
-inside graph nodes and transition relations between parameterized motion spaces to
-synthesize continuous, controllable motion streams. This codebase is organized for
-inspection and iterative, paper-faithful extension rather than maximum abstraction.
-
-`pmg_core` is dependency-free; third-party libraries (GLFW/GLEW/GLM/ImGui) are
-confined to the optional viewer target.
-
-## What
-
-Implemented:
-
-- minimal BVH loader (native units; display scaling is render-time only);
-- skeleton / pose / quaternion / motion-clip contracts; normalized phase sampling;
-- two-way and N-way pose blending; minimal inverse-distance parametric synthesis placeholder;
-- Kovar'02 **point-cloud distance** with closed-form 2D rigid alignment (yaw + floor translation);
-- **distance grid** + optimal transition point (paper §3.1, Fig 3);
-- **sampled edge builder**: random L_s/L_t, TGOOD/TBAD GOOD/BAD/neutral, AABB +
-  conservative shrink (Fig 4c), empty-box edge rejection, in-box transition-point average;
-- **k-NN edge interpolation** using the paper literal k-th-neighbor cutoff;
-- **runtime controller**: per-transition point-cloud alignment recomputed at scheduling time, accumulated world
-  transform, C¹ (smoothstep) blend;
-- CLI tools (summary, transition inspection, grid dump, threshold calibration, graph spec validation, edge diagnosis, graph build/inspect);
-- OpenGL/ImGui viewer (lit floor + shadows, orbit camera, multi-viewport panels,
-  distance-grid heatmap, parametric blend, graph runtime);
-- `assert`-based executable tests, one per core area.
-
-Not yet implemented:
-
-- the three control applications + CLI flags (Phase G);
-- BVH export, skinned mesh, IK/contact correction, CUDA, learned validity (deferred).
-
-## How
-
-Core + tests (canonical):
-
-```bash
+```powershell
 cmake -S . -B build -DPMG_BUILD_VIEWER=OFF
-cmake --build build
-ctest --test-dir build --output-on-failure       # 14/14
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
-Viewer (pulls GLFW/GLEW/GLM/ImGui via FetchContent):
+The viewer is optional:
 
-```bash
-cmake -S . -B build
+```powershell
+cmake -S . -B build -DPMG_BUILD_VIEWER=ON
 cmake --build build --config Debug --target pmg_viewer
-./build/Debug/pmg_viewer            # Windows: build\Debug\pmg_viewer.exe
+.\build\Debug\pmg_viewer.exe .\outputs\paper_core_walk\artifact.pmg
 ```
 
-CLI examples:
+## Offline Artifact
 
-```bash
-./build/pmg_cli --synthetic
-./build/pmg_cli --bvh BVH/SneakLoopA.bvh
-./build/pmg_cli --inspect-transition BVH/SneakLoopA.bvh BVH/standStill.bvh
-./build/pmg_cli --calibrate-thresholds BVH locomotion_manifest.txt
-./build/pmg_cli --validate-graph-spec graph_spec.txt
-./build/pmg_cli --diagnose-graph-edge graph_spec.txt walk walk --tgood 0.5 --tbad 0.7
-./build/pmg_cli --build-graph graph_spec.txt out.pmg --tgood 0.5 --tbad 0.7
-./build/pmg_cli --inspect-graph out.pmg
-```
-
-Windows MSVC note: if you hit `error C1090: PDB API ... code '3'` (an `mspdbsrv`
-sandbox quirk, not a code error), configure with embedded debug info:
-`-DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded`.
-
-## Directory
+Graph specs explicitly record registration and edge sampling:
 
 ```text
-ParametricMotionGraphs/
-├── CMakeLists.txt
-├── README.md
-├── locomotion_manifest.txt               # calibration clip-list / action-map
-├── BVH/                                   # motion corpus
-├── docs/
-│   ├── IMPLEMENTATION_PLAN.md             # phase plan A–I + progress
-│   ├── DESIGN.md
-│   └── PHASE2_NOTES.md
-├── apps/
-│   ├── pmg_cli.cpp
-│   └── viewer/                            # Camera, MeshPrimitives, SkeletonRenderer, ViewerApp, main
-├── include/pmg/                           # public headers (units/assumptions documented)
-├── src/                                   # pmg_core implementation
-└── tests/                                 # 14 assert-based tests (one per core area)
+node walk 1
+registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
+example walk 0.0 ../BVH/walkCurve.bvh
+example walk 0.5 ../BVH/walkMoreCurve.bvh
+example walk 1.0 ../BVH/walkTightCurve.bvh
+edge walk walk
+edge_config walk walk 1.0 1.4 12 60 7
 ```
 
-## Checklist
+Build a complete V4 artifact:
 
-- [x] PMG core scaffold: point-cloud metric, distance grid, sampled edges, k-NN interp, runtime.
-- [x] Paper-conformance corrections: alignment no longer baked; k-NN uses k-th cutoff; empty edges are diagnosable.
-- [x] BVH native units; display scale render-only; thresholds remain corpus-dependent.
-- [x] OpenGL/ImGui viewer with distance heatmap + graph runtime.
-- [x] CLI transition inspection + threshold calibration.
-- [x] `ctest` green (14/14) after the full code-level update.
-- [x] F3 — centered blend window (deviation D5 resolved).
-- [x] Phase F0 — graph spec validation, edge diagnostics, graph spec build + V2 text save/load.
-- [ ] Phase G — control applications; blocked until real-BVH edges are non-empty and diagnostically understood.
-- [ ] Time-registration / phase alignment before claiming high-fidelity PMG reproduction on real BVH corpus.
+```powershell
+.\build\Debug\pmg_cli.exe --build-graph `
+  .\specs\walk_curvature.pmg_spec `
+  .\outputs\paper_core_walk\artifact.pmg
+```
+
+The output directory contains:
+
+```text
+outputs/paper_core_walk/
+|-- artifact.pmg
+|-- config.json
+|-- metrics.json
+|-- report.md
+`-- tables/
+    `-- edge_samples.csv
+```
+
+V4 stores the Skeleton, registered motion spaces, TimeWarps, transition
+samples, runtime frame settings, source paths, seeds, thresholds, and edge
+build reports. V2/V3 graph files remain readable but lack the Skeleton required
+for standalone point-cloud runtime alignment.
+
+## Runtime
+
+Both commands accept either a spec or a built V4 artifact:
+
+```powershell
+.\build\Debug\pmg_cli.exe --random-walk `
+  .\outputs\paper_core_walk_jog\artifact.pmg --seconds 30
+
+.\build\Debug\pmg_cli.exe --goto `
+  .\outputs\paper_core_walk\artifact.pmg 10 10 `
+  --seconds 60 --tolerance 3
+
+.\build\Debug\pmg_cli.exe --goto `
+  .\outputs\paper_core_walk\artifact.pmg 10 10 `
+  --facing-degrees 90 --facing-tolerance-degrees 15
+```
+
+Random walk selects only actual outgoing edges from the current node.
+Goal-directed locomotion is shared by the CLI and viewer and calibrates
+parameter-to-achieved-turn-rate behavior through the runtime graph.
+
+## Validation Specs
+
+- `specs/walk_curvature.pmg_spec`: permissive one-node runtime graph.
+- `specs/walk_jog.pmg_spec`: two-node walk/jog cross-transition graph.
+- `specs/walk_curvature_selective.pmg_spec`: real-BVH
+  GOOD/NEUTRAL/BAD classification.
+- `specs/transition_box_shrink.pmg_spec`: real-BVH non-convex target stress
+  case that triggers conservative AABB shrink.
+
+Foot locking remains an optional generated-clip diagnostic/post-process. It is
+not part of the stored PMG runtime contract.
+
+## Documentation
+
+- [CONTEXT.md](CONTEXT.md) — project vocabulary; code and conversation use
+  these terms exactly.
+- [docs/DESIGN.md](docs/DESIGN.md) — module structure, contracts, limitations.
+- [docs/PAPER_CONFORMANCE.md](docs/PAPER_CONFORMANCE.md) — what matches the
+  papers, the prioritized deviation list (D1–D8), and the claim limit.
+- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — completed
+  paper-core and prioritized remaining work.
+- [docs/adr/](docs/adr) — accepted architecture decisions (V4 artifact seam,
+  k-NN cutoff interpretation).
