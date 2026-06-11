@@ -15,7 +15,7 @@ GraphSpec
       -> optional DTW refinement
       -> PmgBuilder edge sampling
   -> BuiltPmgArtifact
-      -> GraphIo V4
+      -> GraphIo V5
       -> RuntimeController
       -> GoalDirectedLocomotion
 ```

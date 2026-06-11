@@ -908,8 +908,8 @@ void WriteArtifactReports(
         std::ofstream report(output_directory / "report.md");
         report << "# PMG Paper-Core Build Report\n\n"
                << "## Purpose\n\n"
-               << "Offline-built PMG artifact validated through the same V4 "
-                  "artifact used by online runtime playback.\n\n"
+               << "Offline-built PMG artifact validated through the same "
+                  "complete artifact used by online runtime playback.\n\n"
                << "## Inputs\n\n"
                << "- Source BVHs: " << artifact.metadata.source_bvh_paths.size()
                << "\n- Units: " << artifact.metadata.units
@@ -964,7 +964,7 @@ int BuildGraphCommand(const std::string& spec_path,
     pmg::SavePmgArtifactText(artifact, output_path);
     WriteArtifactReports(artifact, artifact_path, build_seconds);
     std::cout << "wrote graph: " << output_path << "\n";
-    std::cout << "format=PMG_GRAPH_V4\n";
+    std::cout << "format=PMG_GRAPH_V5\n";
     std::cout << "nodes=" << artifact.graph.NumNodes()
               << " edges=" << artifact.graph.NumEdges() << "\n";
     std::cout << "skeleton_joints=" << artifact.skeleton.NumJoints() << "\n";
@@ -1675,7 +1675,7 @@ ValidateGraphOptions ParseValidateGraphOptions(int argc, char** argv) {
 //                  (target position -> desired heading -> curvature parameter)
 // ---------------------------------------------------------------------------
 
-// Load a complete V4 artifact, or build the same artifact in-memory from a
+// Load a complete artifact (V4+), or build the same artifact in-memory from a
 // GraphSpec for compatibility with existing commands and tests.
 pmg::BuiltPmgArtifact LoadOrBuildRuntimeArtifact(
     const std::string& input_path,
@@ -1688,7 +1688,7 @@ pmg::BuiltPmgArtifact LoadOrBuildRuntimeArtifact(
             pmg::LoadPmgArtifactText(input_path);
         if (artifact.skeleton.NumJoints() == 0) {
             throw std::runtime_error(
-                "runtime requires a V4 artifact containing its Skeleton");
+                "runtime requires a complete (V4+) artifact containing its Skeleton");
         }
         if (artifact.metadata.frames_per_second <= 0.0f) {
             throw std::runtime_error(

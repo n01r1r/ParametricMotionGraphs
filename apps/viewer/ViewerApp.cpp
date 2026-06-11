@@ -979,7 +979,7 @@ void ViewerApp::LoadGraphArtifact(const std::string& artifact_path) {
         pmg::LoadPmgArtifactText(artifact_path);
     if (artifact.skeleton.NumJoints() == 0) {
         throw std::runtime_error(
-            "viewer runtime requires a V4 artifact with a Skeleton");
+            "viewer runtime requires a complete (V4+) artifact with a Skeleton");
     }
     if (artifact.graph.NumNodes() == 0 ||
         artifact.metadata.frames_per_second <= 0.0f) {
@@ -1008,7 +1008,7 @@ void ViewerApp::LoadGraphArtifact(const std::string& artifact_path) {
     graph_ready_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
     playing_ = true;
-    graph_status_ = "Loaded V4 artifact: " + artifact_path;
+    graph_status_ = "Loaded artifact: " + artifact_path;
     status_message_ = graph_status_;
 }
 

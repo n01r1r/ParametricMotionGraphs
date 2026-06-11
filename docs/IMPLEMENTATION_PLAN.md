@@ -25,8 +25,9 @@ ctest --test-dir build -C Debug --output-on-failure
 ```
 
 Real-corpus CLI tests cover registration quality, edge construction, random
-streaming, and goal-directed locomotion. Artifact-specific tests cover V4
-round-trip, V2/V3 compatibility, outgoing-edge selection, and semantic control.
+streaming, and goal-directed locomotion. Artifact-specific tests cover V5
+round-trip, V2/V3/V4 compatibility, outgoing-edge selection, semantic control,
+and parameter-calibration round-trip.
 
 ## Remaining Work (priority order)
 

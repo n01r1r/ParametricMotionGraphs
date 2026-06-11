@@ -92,8 +92,8 @@ here is an independent IK post-process.
   rigid alignment and constraint matching are approximated by root-delta
   blending and contact anchors; see D1/D2 for the remaining gap).
 - Root-delta blending and optional foot locking address observed BVH artifacts.
-- V4 artifacts and structured reports add reproducibility not specified by the
-  original paper.
+- Complete (V5) artifacts and structured reports add reproducibility not
+  specified by the original paper.
 
 ## Claim Limit
 

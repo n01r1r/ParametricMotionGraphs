@@ -12,7 +12,7 @@ BVH examples
   -> point-cloud transition distance grids
   -> sampled GOOD/NEUTRAL/BAD target regions
   -> interpolated PMG edges
-  -> V4 offline artifact
+  -> V5 offline artifact
   -> point-cloud-aligned online runtime
 ```
 
@@ -57,7 +57,7 @@ stores the inversion table so requested parameters achieve their measured
 meaning. Generated clips also derive their length from the blended example
 durations, so cycle time follows the parameter.
 
-Build a complete V4 artifact:
+Build a complete V5 artifact:
 
 ```powershell
 .\build\Debug\pmg_cli.exe --build-graph `
