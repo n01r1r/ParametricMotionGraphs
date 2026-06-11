@@ -65,6 +65,23 @@ its own heading frame, then integrate. Absolute root positions are never
 averaged across examples (that bends arcs and drags planted feet).
 _Avoid_: root blending, trajectory averaging.
 
+**DTW refinement**:
+A second registration pass: inside each canonical segment, slope-constrained
+dynamic time warping (steps (1,1)/(1,2)/(2,1)) matches every example to the
+example nearest the parameter centroid and inserts interior warp knots.
+Contact anchors are hard constraints; only the timing between them moves.
+_Avoid_: full DTW, unconstrained warping (flat path runs fabricate timing
+jumps and were measurably worse).
+
+**Foot locking**:
+Post-process on a generated clip: detect contact intervals, then pin each
+contact joint at its strike position with analytic two-bone IK (bend at the
+parent, swing at the grandparent, foot world orientation preserved), eased
+over blend frames at interval boundaries. For blended output only; source
+mocap is not locked.
+_Avoid_: foot IK pass, foot sliding fix (the metric is slide rate; locking is
+the mechanism).
+
 ### Graph
 
 **ParametricMotionGraph**:
