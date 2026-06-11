@@ -86,6 +86,10 @@ bool ParametricMotionSpace::HasExampleTimeWarps() const {
     return !example_time_warps_.empty();
 }
 
+const std::vector<TimeWarp>& ParametricMotionSpace::ExampleTimeWarps() const {
+    return example_time_warps_;
+}
+
 std::vector<float> ParametricMotionSpace::ComputeLocalBlendWeights(
     const ParameterVector& parameter) const {
     if (static_cast<int>(parameter.size()) != parameter_dimension_) {

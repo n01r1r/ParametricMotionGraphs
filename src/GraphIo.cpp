@@ -84,6 +84,26 @@ ParameterAabb ReadAabb(std::istream& input) {
     return box;
 }
 
+void WritePhaseList(std::ostream& output, const std::vector<float>& phases) {
+    output << phases.size();
+    for (const float phase : phases) {
+        output << ' ' << phase;
+    }
+}
+
+std::vector<float> ReadPhaseList(std::istream& input) {
+    std::size_t size = 0;
+    input >> size;
+    std::vector<float> phases(size);
+    for (float& phase : phases) {
+        input >> phase;
+    }
+    if (!input) {
+        throw std::runtime_error("LoadGraphText: failed to read warp phase list");
+    }
+    return phases;
+}
+
 }  // namespace
 
 void SaveGraphText(const ParametricMotionGraph& graph, const std::string& path) {
@@ -91,7 +111,7 @@ void SaveGraphText(const ParametricMotionGraph& graph, const std::string& path) 
     if (!output) {
         throw std::runtime_error("SaveGraphText: failed to open '" + path + "'");
     }
-    output << "PMG_GRAPH_V2\n";
+    output << "PMG_GRAPH_V3\n";
     output << "nodes " << graph.NumNodes() << '\n';
     for (int node_index = 0; node_index < graph.NumNodes(); ++node_index) {
         const PmgNode& node = graph.Node(node_index);
@@ -103,6 +123,18 @@ void SaveGraphText(const ParametricMotionGraph& graph, const std::string& path) 
             WriteParameter(output, example.parameter);
             output << '\n';
             WriteClip(output, example.clip);
+        }
+        // Registration warps: count is NumExamples for registered spaces,
+        // 0 for unregistered ones. Dropping them on load would silently
+        // revert EvaluatePose to unregistered (raw-phase) blending.
+        const std::vector<TimeWarp>& warps = space.ExampleTimeWarps();
+        output << "warps " << warps.size() << '\n';
+        for (const TimeWarp& warp : warps) {
+            output << "warp ";
+            WritePhaseList(output, warp.InteriorFromPhases());
+            output << ' ';
+            WritePhaseList(output, warp.InteriorToPhases());
+            output << '\n';
         }
     }
 
@@ -129,8 +161,11 @@ ParametricMotionGraph LoadGraphText(const std::string& path) {
     }
     std::string keyword;
     input >> keyword;
-    if (keyword != "PMG_GRAPH_V2") {
-        throw std::runtime_error("LoadGraphText: invalid graph file header (expected PMG_GRAPH_V2)");
+    // V2 files predate registration warps; everything else is identical.
+    const bool has_warp_records = keyword == "PMG_GRAPH_V3";
+    if (keyword != "PMG_GRAPH_V2" && !has_warp_records) {
+        throw std::runtime_error(
+            "LoadGraphText: invalid graph file header (expected PMG_GRAPH_V2 or PMG_GRAPH_V3)");
     }
 
     ParametricMotionGraph graph;
@@ -156,6 +191,28 @@ ParametricMotionGraph LoadGraphText(const std::string& path) {
             const ParameterVector parameter = ReadParameter(input);
             MotionClip clip = ReadClip(input);
             space.AddExample(parameter, std::move(clip));
+        }
+        if (has_warp_records) {
+            int warp_count = 0;
+            input >> keyword >> warp_count;
+            if (keyword != "warps" || warp_count < 0 ||
+                (warp_count != 0 && warp_count != example_count)) {
+                throw std::runtime_error("LoadGraphText: invalid warps record");
+            }
+            if (warp_count > 0) {
+                std::vector<TimeWarp> warps;
+                warps.reserve(warp_count);
+                for (int warp_index = 0; warp_index < warp_count; ++warp_index) {
+                    input >> keyword;
+                    if (keyword != "warp") {
+                        throw std::runtime_error("LoadGraphText: expected warp record");
+                    }
+                    const std::vector<float> from_phases = ReadPhaseList(input);
+                    const std::vector<float> to_phases = ReadPhaseList(input);
+                    warps.push_back(TimeWarp::FromAnchors(from_phases, to_phases));
+                }
+                space.SetExampleTimeWarps(std::move(warps));
+            }
         }
         graph.AddNode(node_name, std::move(space));
     }

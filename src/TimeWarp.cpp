@@ -86,4 +86,18 @@ int TimeWarp::NumAnchors() const {
     return static_cast<int>(from_knots_.size()) - 2;
 }
 
+std::vector<float> TimeWarp::InteriorFromPhases() const {
+    if (from_knots_.empty()) {
+        return {};
+    }
+    return {from_knots_.begin() + 1, from_knots_.end() - 1};
+}
+
+std::vector<float> TimeWarp::InteriorToPhases() const {
+    if (to_knots_.empty()) {
+        return {};
+    }
+    return {to_knots_.begin() + 1, to_knots_.end() - 1};
+}
+
 }  // namespace pmg

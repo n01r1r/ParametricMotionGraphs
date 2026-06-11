@@ -27,6 +27,12 @@ public:
     bool IsIdentity() const;
     int NumAnchors() const;
 
+    // Interior anchors without the pinned endpoints; both empty for identity.
+    // FromAnchors(InteriorFromPhases(), InteriorToPhases()) reproduces this
+    // warp exactly, which is what serialization relies on.
+    std::vector<float> InteriorFromPhases() const;
+    std::vector<float> InteriorToPhases() const;
+
 private:
     // Full knot lists including the pinned endpoints; empty for identity.
     std::vector<float> from_knots_;

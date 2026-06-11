@@ -33,6 +33,8 @@ public:
     void SetExampleTimeWarps(std::vector<TimeWarp> warps);
     void ClearExampleTimeWarps();
     bool HasExampleTimeWarps() const;
+    // Empty when unregistered; otherwise one warp per example.
+    const std::vector<TimeWarp>& ExampleTimeWarps() const;
 
     std::vector<float> ComputeLocalBlendWeights(
         const ParameterVector& parameter) const;
