@@ -5,6 +5,8 @@
 #include "pmg/PoseBlend.h"
 #include "pmg/RigidTransform2D.h"
 
+#include <optional>
+
 namespace pmg {
 
 struct RuntimeControlRequest {
@@ -19,6 +21,28 @@ struct RuntimeControllerConfig {
     // built with (callers wire it from the artifact's edge build settings;
     // the default matches DistanceGridConfig's default).
     int transition_blend_frames = 5;
+};
+
+// Read-only snapshot of the transition currently being blended.
+//
+// Purpose: expose the PMG runtime chain to diagnostics/UI without duplicating
+// transition lookup, target clamping, or alignment logic outside the runtime.
+// All parameters use their node's parameter-space coordinates. Phases and
+// blend_progress are normalized to [0, 1]. alignment maps target clip-local
+// floor coordinates into source clip-local floor coordinates.
+struct RuntimeTransitionDiagnostics {
+    int source_node = -1;
+    int target_node = -1;
+    ParameterVector source_parameter;
+    ParameterVector requested_target_parameter;
+    ParameterVector actual_target_parameter;
+    ParameterAabb reachable_target_box;
+    float source_transition_phase = 0.0f;
+    float target_transition_phase = 0.0f;
+    RigidTransform2D alignment;
+    float blend_elapsed_seconds = 0.0f;
+    float blend_duration_seconds = 0.0f;
+    float blend_progress = 0.0f;
 };
 
 // The runtime's clip-local -> world placement is a RigidTransform2D, accumulated
@@ -48,10 +72,12 @@ public:
 
     Pose CurrentPose() const;   // world space
     int CurrentNode() const;
+    const ParameterVector& CurrentParameter() const;
     float CurrentPhase() const; // normalized phase of the active clip
     bool IsTransitioning() const;
     int CompletedTransitions() const;
     const RigidTransform2D& WorldTransform() const;
+    std::optional<RuntimeTransitionDiagnostics> ActiveTransitionDiagnostics() const;
 
 private:
     float ClipPhase(const MotionClip& clip, float time_seconds) const;
@@ -84,6 +110,7 @@ private:
     RigidTransform2D next_world_transform_;
     float transition_elapsed_seconds_ = 0.0f;
     float transition_duration_seconds_ = 0.0f;
+    std::optional<RuntimeTransitionDiagnostics> transition_diagnostics_;
     int completed_transitions_ = 0;
 };
 

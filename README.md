@@ -36,6 +36,19 @@ cmake --build build --config Debug --target pmg_viewer
 .\build\Debug\pmg_viewer.exe .\outputs\paper_core_walk\artifact.pmg
 ```
 
+Viewer UI is organized around the runtime model, not the BVH container:
+
+- `Motion Space`: authored parameter samples, local blend weights, canonical
+  phase registration, and detected contact intervals.
+- `Transition Grid`: source/target phase distance, GOOD/NEUTRAL/BAD regions,
+  and selected alignment.
+- `PMG Runtime`: graph node/edge selection and the live chain from source
+  parameter through reachable target AABB, transition phases, alignment, and
+  runtime blend window. Its topology canvas renders each
+  `ParametricMotionSpace` as a node and each directed transition as an arrow;
+  self-transitions remain visible as loops.
+- `Inputs`: BVH selection plus hierarchy/channel diagnostics.
+
 ## Offline Artifact
 
 Graph specs explicitly record registration and edge sampling:
@@ -118,6 +131,17 @@ not part of the stored PMG runtime contract.
 
 ## Documentation
 
+- [docs/README.md](docs/README.md) — reading order for paper and codebase docs.
+- [docs/PAPER_GUIDE.md](docs/PAPER_GUIDE.md) — integrated explanation of
+  *Motion Graphs*, *Parametric Motion Graphs*, and repository scope.
+- [docs/PAPER_CODE_MAP.md](docs/PAPER_CODE_MAP.md) — paper sections and
+  equations mapped to implementation and tests.
+- [docs/PIPELINE.md](docs/PIPELINE.md) — offline build, artifact, and online
+  runtime contracts.
+- [docs/REPRODUCTION.md](docs/REPRODUCTION.md) — build, validation, runtime,
+  deterministic inputs, and output schemas.
+- [docs/GLOSSARY.md](docs/GLOSSARY.md) — paper terminology, code symbols,
+  units, and naming rules.
 - [CONTEXT.md](CONTEXT.md) — project vocabulary; code and conversation use
   these terms exactly.
 - [docs/DESIGN.md](docs/DESIGN.md) — module structure, contracts, limitations.

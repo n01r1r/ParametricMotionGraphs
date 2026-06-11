@@ -1,9 +1,10 @@
 # ParametricMotionGraphs
 
-A paper-faithful implementation of Parametric Motion Graphs: a parametric
-blend space per action, connected by sampled transition edges, streamed at
-runtime with aligned, blended transitions. This file fixes the vocabulary so
-code and conversation stay aligned.
+A paper-core implementation of Parametric Motion Graphs: a parametric motion
+space per action, connected by sampled transition edges, streamed at runtime
+with aligned, blended transitions. Documented adaptations include joint-based
+point clouds, centered metric windows, and manual BVH parameterization. This
+file fixes the vocabulary so code and conversation stay aligned.
 
 ## Language
 
@@ -44,7 +45,8 @@ separate streamed-rate table).
 The cycle time of a generated clip: the weighted sum of the examples' clip
 durations at the evaluated parameter. GenerateClip derives its frame count
 from this, so a tight turn and a straight walk play at their own cadence.
-_Avoid_: fixed frame count (diagnostic-only override).
+_Avoid_: fixed frame count except through the isolated
+`pmg::legacy::GenerateClipWithFrameCount` diagnostic API.
 
 **ParameterVector**:
 The control coordinates of a motion space (e.g. turn rate, speed).
@@ -123,8 +125,8 @@ _Avoid_: edge point, transition record, baked alignment (nothing is baked).
 **RigidTransform2D**:
 The single representation of a 2D rigid floor transform — yaw about +Y then an
 (x, z) translation. Owns the rotation convention, pose application, and
-composition. Used as a recovered alignment (metric), a baked alignment (edge),
-and the accumulated world placement (runtime).
+composition. Used as a recovered alignment (metric/runtime) and the accumulated
+world placement (runtime). PMG edges do not store an alignment.
 _Avoid_: RigidAlignment2D, WorldTransform2D, alignment floats (all unified into this).
 
 **AlignmentStrategy**:
@@ -133,8 +135,8 @@ at a transition. Resolves a `RigidTransform2D` from an `AlignmentContext`.
 _Avoid_: alignment mode, alignment flag.
 
 **PointCloudAlignment / RootOnlyAlignment**:
-The two adapters behind `AlignmentStrategy`: recompute the exact point-cloud
-alignment (paper-faithful), or recompute from the root pose alone
+The two adapters behind `AlignmentStrategy`: recompute the Kovar-derived
+joint-point-cloud alignment, or recompute from the root pose alone
 (legacy/debug, skeleton-free tests).
 _Avoid_: alignment kind, strategy enum, baked alignment.
 

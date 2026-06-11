@@ -10,6 +10,16 @@
 
 namespace pmg {
 
+class ParametricMotionSpace;
+
+namespace legacy {
+MotionClip GenerateClipWithFrameCount(
+    const ParametricMotionSpace& space,
+    const ParameterVector& parameter,
+    int frame_count,
+    float frames_per_second);
+}  // namespace legacy
+
 struct ExampleMotion {
     ParameterVector parameter;
     MotionClip clip;
@@ -98,14 +108,6 @@ public:
         const ParameterVector& parameter,
         float frames_per_second) const;
 
-    // Diagnostic override: explicit frame count (frame-aligned comparisons in
-    // sweeps/tests). Not the paper path; playback speed no longer reflects the
-    // blended example durations.
-    MotionClip GenerateClip(
-        const ParameterVector& parameter,
-        int frame_count,
-        float frames_per_second) const;
-
     std::vector<ParameterVector> ExampleParameters() const;
     const std::vector<ExampleMotion>& Examples() const;
     std::vector<float> MinParameter() const;
@@ -135,6 +137,11 @@ private:
         ParameterMetric metric,
         float frames_per_second,
         int samples_per_segment);
+    friend MotionClip legacy::GenerateClipWithFrameCount(
+        const ParametricMotionSpace& space,
+        const ParameterVector& parameter,
+        int frame_count,
+        float frames_per_second);
 };
 
 // Offline calibration: for every parameter-adjacent example pair, sample the

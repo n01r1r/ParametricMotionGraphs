@@ -17,6 +17,7 @@ add_library(pmg_core
     src/GoalDirectedLocomotion.cpp
     src/GraphIo.cpp
     src/GraphSpec.cpp
+    src/LegacyFrameCountClipGeneration.cpp
     src/MotionClip.cpp
     src/MotionDistance.cpp
     src/MotionRegistration.cpp
@@ -39,7 +40,12 @@ target_compile_options(pmg_core PRIVATE
 
 add_executable(pmg_cli
     apps/pmg_cli.cpp
+    apps/PmgBvhCommands.cpp
     apps/PmgCommands.cpp
+    apps/PmgDiagnosticCommands.cpp
+    apps/PmgGraphCommands.cpp
+    apps/PmgRuntimeCommands.cpp
+    apps/PmgTransitionCommands.cpp
 )
 target_link_libraries(pmg_cli PRIVATE pmg_core)
 
@@ -196,47 +202,47 @@ if(PMG_BUILD_TESTS)
             --max-pop-ratio 3.0)
 
     set(PMG_TEST_ARTIFACT_ROOT ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts)
-    add_test(NAME cli_build_v4_walk
+    add_test(NAME cli_build_artifact_walk
         COMMAND pmg_cli --build-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg)
-    set_tests_properties(cli_build_v4_walk PROPERTIES
-        FIXTURES_SETUP pmg_v4_walk)
+    set_tests_properties(cli_build_artifact_walk PROPERTIES
+        FIXTURES_SETUP pmg_artifact_walk)
 
-    add_test(NAME cli_random_walk_v4
+    add_test(NAME cli_random_walk_artifact
         COMMAND pmg_cli --random-walk
             ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg
             --seconds 10 --min-transitions 5 --max-pop-ratio 3.0)
-    set_tests_properties(cli_random_walk_v4 PROPERTIES
-        FIXTURES_REQUIRED pmg_v4_walk)
+    set_tests_properties(cli_random_walk_artifact PROPERTIES
+        FIXTURES_REQUIRED pmg_artifact_walk)
 
-    add_test(NAME cli_goto_v4
+    add_test(NAME cli_goto_artifact
         COMMAND pmg_cli --goto
             ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg 10 10
             --seconds 60 --tolerance 3 --max-pop-ratio 3.0)
-    set_tests_properties(cli_goto_v4 PROPERTIES
-        FIXTURES_REQUIRED pmg_v4_walk)
+    set_tests_properties(cli_goto_artifact PROPERTIES
+        FIXTURES_REQUIRED pmg_artifact_walk)
 
-    add_test(NAME cli_build_v4_walk_jog
+    add_test(NAME cli_build_artifact_walk_jog
         COMMAND pmg_cli --build-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_jog.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/artifact.pmg)
-    set_tests_properties(cli_build_v4_walk_jog PROPERTIES
-        FIXTURES_SETUP pmg_v4_walk_jog)
+    set_tests_properties(cli_build_artifact_walk_jog PROPERTIES
+        FIXTURES_SETUP pmg_artifact_walk_jog)
 
-    add_test(NAME cli_random_walk_v4_walk_jog
+    add_test(NAME cli_random_walk_artifact_walk_jog
         COMMAND pmg_cli --random-walk
             ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/artifact.pmg
             --seconds 20 --min-transitions 5 --max-pop-ratio 5.0)
-    set_tests_properties(cli_random_walk_v4_walk_jog PROPERTIES
-        FIXTURES_REQUIRED pmg_v4_walk_jog)
+    set_tests_properties(cli_random_walk_artifact_walk_jog PROPERTIES
+        FIXTURES_REQUIRED pmg_artifact_walk_jog)
 
-    add_test(NAME cli_build_v4_selective
+    add_test(NAME cli_build_artifact_selective
         COMMAND pmg_cli --build-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature_selective.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/selective/artifact.pmg)
 
-    add_test(NAME cli_build_v4_box_shrink
+    add_test(NAME cli_build_artifact_box_shrink
         COMMAND pmg_cli --build-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/transition_box_shrink.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
@@ -314,6 +320,7 @@ if(PMG_BUILD_VIEWER)
         apps/viewer/MeshPrimitives.cpp
         apps/viewer/SkeletonRenderer.cpp
         apps/viewer/ViewerApp.cpp
+        apps/viewer/ViewerGraphInspection.cpp
     )
     target_link_libraries(pmg_viewer PRIVATE
         pmg_core

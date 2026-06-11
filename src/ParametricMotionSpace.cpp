@@ -404,21 +404,6 @@ MotionClip ParametricMotionSpace::GenerateClip(
         ComputeLocalBlendWeights(clamped_parameter), frame_count, frames_per_second);
 }
 
-MotionClip ParametricMotionSpace::GenerateClip(
-    const ParameterVector& parameter,
-    int frame_count,
-    float frames_per_second) const {
-    if (frame_count <= 0) {
-        throw std::runtime_error("ParametricMotionSpace::GenerateClip: frame_count must be positive");
-    }
-    if (frames_per_second <= 0.0f) {
-        throw std::runtime_error("ParametricMotionSpace::GenerateClip: frames_per_second must be positive");
-    }
-    const ParameterVector clamped_parameter = ClampToDomain(parameter);
-    return GenerateClipFromWeights(
-        ComputeLocalBlendWeights(clamped_parameter), frame_count, frames_per_second);
-}
-
 MotionClip ParametricMotionSpace::GenerateClipFromWeights(
     const std::vector<float>& weights,
     int frame_count,

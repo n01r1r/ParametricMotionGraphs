@@ -7,6 +7,7 @@
 
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
+#include "pmg/ContactDetection.h"
 #include "pmg/GoalDirectedLocomotion.h"
 #include "pmg/GraphIo.h"
 #include "pmg/MotionClip.h"
@@ -62,6 +63,7 @@ private:
         std::string label;
         float parameter = 0.0f;
         pmg::MotionClip clip;
+        std::vector<pmg::ContactInterval> contact_intervals;
     };
 
     void DiscoverBvhFiles();
@@ -72,16 +74,22 @@ private:
 
     void AddCurrentClipToSpace(float parameter);
     void RebuildPmgSpace();
+    void RefreshExampleContacts(PmgExample& example);
+    std::vector<int> ResolveContactJointIndices() const;
     static float ComputeGroundOffset(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip);
     float ActiveReferenceDuration() const;
 
     void BuildWorkflowSection();
     void BuildTransportSection();
-    void BuildClipsSection();
+    void BuildInputsSection();
     void BuildViewSection();
-    void BuildBlendSection();
+    void BuildMotionSpaceSection();
     void BuildDistanceGridSection();
     void BuildGraphSection();
+    void DrawParameterSpace(float query_parameter);
+    void DrawPhaseTimeline(float canonical_phase);
+    void DrawGraphCanvas();
+    void DrawTransitionPipeline();
 
     void RecomputeHeatmap();
     void SaveHeatmapCsv();
@@ -91,6 +99,7 @@ private:
     // Goto steering delegates to the same core module as the CLI.
     void CalibrateSteering();
     void UpdateGotoSteering(const pmg::Pose& pose);
+    void UpdateRootMotionDiagnostics(const pmg::Pose& pose, float delta_seconds);
 
     // SliderFloat plus tick marks at the example parameters, so the user can
     // see where the real clips sit on the blend axis.
@@ -164,8 +173,13 @@ private:
     std::optional<pmg::RuntimeController> graph_controller_;
     bool graph_ready_ = false;
     float graph_desired_parameter_ = 0.0f;
+    int graph_desired_node_ = 0;
+    int selected_graph_node_ = 0;
+    int selected_graph_edge_ = -1;
     float graph_fps_ = 30.0f;
-    std::string graph_status_ = "Build a parametric space, then Build Graph.";
+    std::string graph_status_ = "Define a motion space, then build a PMG.";
+    std::vector<std::string> contact_joint_names_;
+    std::string artifact_units_ = "native motion units";
 
     // --- Goto steering (paper application B/C in the viewer) -------------------
     std::optional<pmg::GoalDirectedLocomotion> steering_;
@@ -173,6 +187,10 @@ private:
     glm::vec2 goto_target_{0.0f, 0.0f};  // native units, ground plane (x, z)
     float goto_tolerance_ = 2.0f;        // native units; arrival radius
     std::string goto_status_;
+
+    float root_heading_radians_ = 0.0f;
+    float actual_turn_rate_radians_per_second_ = 0.0f;
+    bool root_heading_initialized_ = false;
 
     RenderScene scene_;
     OrbitCamera camera_;

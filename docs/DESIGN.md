@@ -29,7 +29,8 @@ edge sampling configuration, seeds, and build reports.
 - BVH offsets/root positions and distance thresholds use native BVH units.
 - Phase is normalized to `[0, 1]`.
 - Generated clips derive their frame count from the blended example durations;
-  explicit frame counts are diagnostic overrides.
+  explicit frame counts exist only in the isolated
+  `pmg::legacy::GenerateClipWithFrameCount` diagnostic API.
 - Runtime blend length and point-cloud alignment use the edge-build metric
   window recorded in the artifact; heterogeneous edge windows are rejected.
 - Transition phases are evaluated from retained GOOD samples at the requested
