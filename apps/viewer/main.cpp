@@ -111,7 +111,7 @@ void ScrollCallback(GLFWwindow* window, double x_offset, double y_offset) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     if (glfwInit() != GLFW_TRUE) {
         std::fprintf(stderr, "error: failed to initialize GLFW\n");
         return 1;
@@ -166,7 +166,7 @@ int main() {
 
     try {
         pmgviewer::ViewerApp app;
-        app.Initialize();
+        app.Initialize(argc >= 2 ? argv[1] : "");
 
         pmgviewer::SkeletonRenderer renderer;
         renderer.Initialize();

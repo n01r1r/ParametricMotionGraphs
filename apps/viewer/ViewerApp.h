@@ -7,6 +7,8 @@
 
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
+#include "pmg/GoalDirectedLocomotion.h"
+#include "pmg/GraphIo.h"
 #include "pmg/MotionClip.h"
 #include "pmg/MotionDistance.h"
 #include "pmg/ParametricMotionGraph.h"
@@ -42,7 +44,7 @@ enum class ViewerPlaybackMode {
 // rested on y = 0 so vertical dynamics are preserved.
 class ViewerApp {
 public:
-    void Initialize();
+    void Initialize(const std::string& artifact_path = {});
 
     void Update(float delta_seconds);
     void BuildUi();
@@ -84,14 +86,11 @@ private:
     void RecomputeHeatmap();
     void SaveHeatmapCsv();
     void BuildGraphRuntime();
+    void LoadGraphArtifact(const std::string& artifact_path);
 
-    // Goto steering (viewer port of the CLI --goto semantic control):
-    // target position -> desired heading -> turn rate -> curvature parameter.
+    // Goto steering delegates to the same core module as the CLI.
     void CalibrateSteering();
     void UpdateGotoSteering(const pmg::Pose& pose);
-    // Invert the calibrated (possibly non-monotonic) rate table: prefer a
-    // bracketing segment, fall back to the closest calibrated rate.
-    float ParameterForRate(float desired_rate) const;
 
     // SliderFloat plus tick marks at the example parameters, so the user can
     // see where the real clips sit on the blend axis.
@@ -169,21 +168,8 @@ private:
     std::string graph_status_ = "Build a parametric space, then Build Graph.";
 
     // --- Goto steering (paper application B/C in the viewer) -------------------
-    // Achieved turn rates differ from the example clips' own turn rates (each
-    // self-transition replays only a slice per cycle), so steering inverts a
-    // table measured by streaming the built graph at held parameters.
-    struct SteeringCalibration {
-        std::vector<float> parameters;
-        std::vector<float> rates;      // achieved world turn rate (rad/s)
-        float lowest_rate = 0.0f;
-        float highest_rate = 0.0f;
-        float travel_offset = 0.0f;    // root +Z reference -> travel direction
-        float cycle_seconds = 1.0f;
-        bool ready = false;
-    };
-    SteeringCalibration steering_;
+    std::optional<pmg::GoalDirectedLocomotion> steering_;
     bool goto_active_ = false;
-    bool goto_swinging_ = false;       // long-way-around hysteresis latch
     glm::vec2 goto_target_{0.0f, 0.0f};  // native units, ground plane (x, z)
     float goto_tolerance_ = 2.0f;        // native units; arrival radius
     std::string goto_status_;

@@ -151,11 +151,6 @@ std::vector<float> ParametricMotionSpace::ComputeLocalBlendWeights(
     return weights;
 }
 
-std::vector<float> ParametricMotionSpace::ComputeInverseDistanceWeights(
-    const ParameterVector& parameter) const {
-    return ComputeLocalBlendWeights(parameter);
-}
-
 Pose ParametricMotionSpace::EvaluatePose(
     const ParameterVector& parameter,
     float normalized_phase) const {
