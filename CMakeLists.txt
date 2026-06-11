@@ -108,6 +108,10 @@ if(PMG_BUILD_TESTS)
     target_link_libraries(test_motion_registration PRIVATE pmg_core)
     add_test(NAME test_motion_registration COMMAND test_motion_registration)
 
+    add_executable(test_dtw_refine tests/test_dtw_refine.cpp)
+    target_link_libraries(test_dtw_refine PRIVATE pmg_core)
+    add_test(NAME test_dtw_refine COMMAND test_dtw_refine)
+
     add_executable(test_registered_blending tests/test_registered_blending.cpp)
     target_link_libraries(test_registered_blending PRIVATE pmg_core)
     add_test(NAME test_registered_blending COMMAND test_registered_blending)
@@ -115,15 +119,18 @@ if(PMG_BUILD_TESTS)
     # CLI-level numeric validation on the real BVH corpus: the registered
     # Walk(curvature) space must keep feet planted (contacts, slide) and vary
     # smoothly across its parameter range, and must not regress the naive
-    # blend's contact metrics. Thresholds carry ~40% headroom over measured
-    # values so they catch regressions, not corpus noise.
+    # blend's contact metrics. --dtw-refine additionally gates the DTW-refined
+    # warps against the contact-anchor registration (measured: foot slide
+    # 0.173 -> 0.146). Thresholds carry ~40% headroom over measured values so
+    # they catch regressions, not corpus noise.
     add_test(NAME cli_space_sweep_walk
         COMMAND pmg_cli --space-sweep ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec walk
             --cycle-joint LeftAnkle
             --min-contacts 2
             --max-foot-slide 0.25
             --max-adjacent-step 1.8
-            --assert-no-regression)
+            --assert-no-regression
+            --dtw-refine)
 
     # PMG edge construction on the registered Walk(curvature) space: the edge
     # must build with full sample coverage, keep its GOOD fraction at the

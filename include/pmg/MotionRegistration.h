@@ -31,6 +31,24 @@ void RegisterSpaceByContacts(
     const std::vector<int>& contact_joints,
     const ContactDetectionSettings& settings);
 
+struct DtwRefineSettings {
+    int window_size = 5;            // frames per point cloud in the DTW cost
+    int max_knots_per_segment = 3;  // interior warp knots added per anchor segment
+};
+
+// Refine installed contact-anchor warps with dynamic time warping. Contact
+// anchors stay fixed; inside each canonical segment, the example closest to
+// the parameter centroid serves as the timing reference and every other
+// example is matched to it frame by frame (aligned point-cloud distance, DTW
+// with matched segment endpoints). Up to max_knots_per_segment knots are
+// inserted per segment so within-segment timing differences, e.g. swing-leg
+// acceleration, line up instead of being interpolated linearly between
+// contacts. Requires space.HasExampleTimeWarps(); no-op below two examples.
+void RefineRegistrationByDtw(
+    ParametricMotionSpace& space,
+    const Skeleton& skeleton,
+    const DtwRefineSettings& settings = {});
+
 // Cut `clip` at the strikes of `cycle_joint` and return the first complete
 // gait cycle (strike to next strike, inclusive). Normalizes multi-cycle
 // corpus clips into single-cycle examples so their contact structures match

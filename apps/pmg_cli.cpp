@@ -1036,6 +1036,9 @@ struct SpaceSweepOptions {
     float max_foot_slide = -1.0f;
     float max_adjacent_step = -1.0f;
     bool assert_no_regression = false;  // registered must not be worse than naive
+    // Also measure a DTW-refined registration and gate it against the
+    // contact-anchor registration the same way.
+    bool dtw_refine = false;
 };
 
 struct SweepMetrics {
@@ -1258,6 +1261,16 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
         registered_space, skeleton, contact_joints, settings, options.sweep_steps,
         generated_frame_count, frames_per_second, "registered");
 
+    std::optional<SweepMetrics> dtw;
+    if (options.dtw_refine) {
+        pmg::ParametricMotionSpace dtw_space = registered_space;
+        pmg::RefineRegistrationByDtw(dtw_space, skeleton, {});
+        std::cout << "dtw_refined=yes\n";
+        dtw = MeasureSpaceSweep(
+            dtw_space, skeleton, contact_joints, settings, options.sweep_steps,
+            generated_frame_count, frames_per_second, "dtw");
+    }
+
     bool failed = false;
     auto fail_if = [&failed](bool condition, const std::string& message) {
         if (condition) {
@@ -1293,6 +1306,36 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
                 "registration increased slide rate: " +
                     std::to_string(registered.max_slide_rate) + " > " +
                     std::to_string(naive.max_slide_rate));
+    }
+    if (dtw.has_value()) {
+        if (options.min_contacts >= 0) {
+            fail_if(dtw->min_contacts < options.min_contacts,
+                    "dtw_min_contacts=" + std::to_string(dtw->min_contacts) + " < " +
+                        std::to_string(options.min_contacts));
+        }
+        if (options.max_foot_slide >= 0.0f) {
+            fail_if(dtw->max_foot_slide > options.max_foot_slide,
+                    "dtw_max_foot_slide=" + std::to_string(dtw->max_foot_slide) + " > " +
+                        std::to_string(options.max_foot_slide));
+        }
+        if (options.max_adjacent_step >= 0.0f) {
+            fail_if(dtw->max_adjacent_step > options.max_adjacent_step,
+                    "dtw_max_adjacent_step=" + std::to_string(dtw->max_adjacent_step) +
+                        " > " + std::to_string(options.max_adjacent_step));
+        }
+        if (options.assert_no_regression) {
+            fail_if(dtw->min_contacts < registered.min_contacts,
+                    "dtw refinement lost contacts: " + std::to_string(dtw->min_contacts) +
+                        " < " + std::to_string(registered.min_contacts));
+            fail_if(dtw->min_contact_coverage < registered.min_contact_coverage,
+                    "dtw refinement lost contact coverage: " +
+                        std::to_string(dtw->min_contact_coverage) + " < " +
+                        std::to_string(registered.min_contact_coverage));
+            fail_if(dtw->max_slide_rate > registered.max_slide_rate * 1.05f + 1.0e-4f,
+                    "dtw refinement increased slide rate: " +
+                        std::to_string(dtw->max_slide_rate) + " > " +
+                        std::to_string(registered.max_slide_rate));
+        }
     }
 
     std::cout << (failed ? "RESULT=FAIL" : "RESULT=PASS") << "\n";
@@ -2103,6 +2146,8 @@ SpaceSweepOptions ParseSpaceSweepOptions(int argc, char** argv) {
             options.max_adjacent_step = std::stof(require_value("--max-adjacent-step"));
         } else if (option == "--assert-no-regression") {
             options.assert_no_regression = true;
+        } else if (option == "--dtw-refine") {
+            options.dtw_refine = true;
         } else {
             throw std::runtime_error("unknown space-sweep option '" + option + "'");
         }
@@ -2129,6 +2174,7 @@ void PrintUsage() {
               << "  pmg_cli --space-sweep graph_spec.txt node [--contact-joints a,b]\n"
               << "      [--cycle-joint name] [--sweep-steps N] [--min-contacts N]\n"
               << "      [--max-foot-slide X] [--max-adjacent-step X] [--assert-no-regression]\n"
+              << "      [--dtw-refine]\n"
               << "  pmg_cli --validate-graph graph_spec.txt [--cycle-joint name]\n"
               << "      [--tgood X --tbad Y --source-samples N --target-samples N --seed S]\n"
               << "      [--min-edge-samples N] [--min-good-fraction F] [--assert-no-regression]\n"
