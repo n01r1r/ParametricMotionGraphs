@@ -1495,6 +1495,7 @@ int ValidateGraphCommand(const ValidateGraphOptions& options) {
 
         pmg::ParametricMotionSpace registered = space;
         pmg::RegisterSpaceByContacts(registered, skeleton, contact_joints, settings);
+        pmg::RefineRegistrationByDtw(registered, skeleton, {});
 
         naive_spaces.emplace(node.name, std::move(space));
         registered_spaces.emplace(node.name, std::move(registered));
@@ -1658,6 +1659,7 @@ RuntimeGraphBundle BuildRegisteredGraph(
             bundle.skeleton, space.Examples().front().clip, contact_joints);
         settings.min_contact_frames = min_contact_frames;
         pmg::RegisterSpaceByContacts(space, bundle.skeleton, contact_joints, settings);
+        pmg::RefineRegistrationByDtw(space, bundle.skeleton, {});
 
         bundle.generated_frame_count = space.Examples().front().clip.NumFrames();
         bundle.frames_per_second = space.Examples().front().clip.frames_per_second;

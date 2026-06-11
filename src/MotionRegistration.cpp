@@ -13,10 +13,14 @@ namespace pmg {
 
 namespace {
 
-// Monotone mapping from reference frame row -> mean matched example frame,
-// extracted from the optimal DTW path between two cloud sequences. Indices are
-// relative to the sequences (row 0 = first reference cloud). Endpoints are
-// pinned by the DTW boundary condition.
+// Monotone mapping from reference frame row -> matched example frame column,
+// extracted from a slope-constrained DTW path between two cloud sequences
+// (steps (1,1), (1,2), (2,1); local slope in [1/2, 2]). Unconstrained DTW
+// can hug the pinned endpoints with flat runs, fabricating timing jumps that
+// degrade the blend; the slope limit forbids flat runs entirely. Indices are
+// relative to the sequences (row 0 = first reference cloud). Returns empty
+// when the sequence lengths are too dissimilar for any valid path; callers
+// keep the linear warp for that segment.
 std::vector<float> DtwMeanExampleFrames(
     const std::vector<PointCloud>& reference_clouds,
     const std::vector<PointCloud>& example_clouds) {
@@ -33,57 +37,80 @@ std::vector<float> DtwMeanExampleFrames(
     }
 
     constexpr float kInfinity = std::numeric_limits<float>::infinity();
+    constexpr int kSteps[3][2] = {{1, 1}, {1, 2}, {2, 1}};  // (d_row, d_col)
     std::vector<float> accumulated(cost.size(), kInfinity);
+    accumulated[0] = cost[0];
     for (int row = 0; row < rows; ++row) {
         for (int col = 0; col < cols; ++col) {
-            const float best_previous =
-                (row == 0 && col == 0)
-                    ? 0.0f
-                    : std::min({row > 0 ? accumulated[(row - 1) * cols + col] : kInfinity,
-                                col > 0 ? accumulated[row * cols + col - 1] : kInfinity,
-                                row > 0 && col > 0
-                                    ? accumulated[(row - 1) * cols + col - 1]
-                                    : kInfinity});
-            accumulated[row * cols + col] = cost[row * cols + col] + best_previous;
+            if (row == 0 && col == 0) {
+                continue;
+            }
+            float best_previous = kInfinity;
+            for (const auto& step : kSteps) {
+                const int previous_row = row - step[0];
+                const int previous_col = col - step[1];
+                if (previous_row >= 0 && previous_col >= 0) {
+                    best_previous = std::min(
+                        best_previous, accumulated[previous_row * cols + previous_col]);
+                }
+            }
+            if (best_previous < kInfinity) {
+                accumulated[row * cols + col] = cost[row * cols + col] + best_previous;
+            }
         }
     }
+    if (!(accumulated[(rows - 1) * cols + cols - 1] < kInfinity)) {
+        return {};  // length ratio outside [1/2, 2]; no valid path
+    }
 
-    // Backtrack; a reference row matched to several example columns collapses
-    // to their mean so the per-row mapping stays single-valued.
-    std::vector<float> column_sum(rows, 0.0f);
-    std::vector<int> column_count(rows, 0);
+    // Backtrack the path nodes; rows strictly increase along the path, so the
+    // per-row mapping is single-valued after interpolating skipped rows.
+    std::vector<int> path_rows;
+    std::vector<int> path_cols;
     int row = rows - 1;
     int col = cols - 1;
     while (true) {
-        column_sum[row] += static_cast<float>(col);
-        ++column_count[row];
+        path_rows.push_back(row);
+        path_cols.push_back(col);
         if (row == 0 && col == 0) {
             break;
         }
-        const float up = row > 0 ? accumulated[(row - 1) * cols + col] : kInfinity;
-        const float left = col > 0 ? accumulated[row * cols + col - 1] : kInfinity;
-        const float diagonal =
-            row > 0 && col > 0 ? accumulated[(row - 1) * cols + col - 1] : kInfinity;
-        if (diagonal <= up && diagonal <= left) {
-            --row;
-            --col;
-        } else if (up <= left) {
-            --row;
-        } else {
-            --col;
+        float best_previous = kInfinity;
+        int best_row = -1;
+        int best_col = -1;
+        for (const auto& step : kSteps) {
+            const int previous_row = row - step[0];
+            const int previous_col = col - step[1];
+            if (previous_row >= 0 && previous_col >= 0 &&
+                accumulated[previous_row * cols + previous_col] < best_previous) {
+                best_previous = accumulated[previous_row * cols + previous_col];
+                best_row = previous_row;
+                best_col = previous_col;
+            }
         }
+        row = best_row;
+        col = best_col;
     }
+    std::reverse(path_rows.begin(), path_rows.end());
+    std::reverse(path_cols.begin(), path_cols.end());
 
     std::vector<float> mean_example_frames(rows, 0.0f);
+    std::size_t node = 0;
     for (int reference_row = 0; reference_row < rows; ++reference_row) {
-        mean_example_frames[reference_row] =
-            column_sum[reference_row] / static_cast<float>(column_count[reference_row]);
-    }
-    // The path is monotone but per-row means can locally tie; enforce
-    // non-decreasing so phase interpolation below stays well defined.
-    for (int reference_row = 1; reference_row < rows; ++reference_row) {
-        mean_example_frames[reference_row] = std::max(
-            mean_example_frames[reference_row], mean_example_frames[reference_row - 1]);
+        while (node + 1 < path_rows.size() && path_rows[node + 1] <= reference_row) {
+            ++node;
+        }
+        if (path_rows[node] == reference_row || node + 1 >= path_rows.size()) {
+            mean_example_frames[reference_row] = static_cast<float>(path_cols[node]);
+        } else {
+            // Row skipped by a (2,1) step: interpolate between its neighbors.
+            const float alpha =
+                static_cast<float>(reference_row - path_rows[node]) /
+                static_cast<float>(path_rows[node + 1] - path_rows[node]);
+            mean_example_frames[reference_row] =
+                static_cast<float>(path_cols[node]) +
+                alpha * static_cast<float>(path_cols[node + 1] - path_cols[node]);
+        }
     }
     return mean_example_frames;
 }
@@ -278,7 +305,9 @@ void RefineRegistrationByDtw(
                 const std::vector<float> mean_example_frames =
                     DtwMeanExampleFrames(reference_clouds, example_clouds);
 
-                for (int knot = 1; knot <= settings.max_knots_per_segment; ++knot) {
+                for (int knot = 1;
+                     !mean_example_frames.empty() && knot <= settings.max_knots_per_segment;
+                     ++knot) {
                     const float alpha =
                         static_cast<float>(knot) /
                         static_cast<float>(settings.max_knots_per_segment + 1);
