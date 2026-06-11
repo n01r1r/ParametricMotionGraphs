@@ -1,5 +1,5 @@
-// Real-time BVH skeleton viewer: lit floor with shadows, orbit camera, and an
-// ImGui control panel (playback, clip picker, camera, parametric blend).
+// Real-time parametric-motion viewer: lit floor with shadows, orbit camera,
+// motion-space diagnostics, transition inspection, and PMG runtime controls.
 //
 // Inputs:  BVH corpus directory (compiled in as PMG_BVH_DIRECTORY).
 // Outputs: an interactive window; no files are written.
@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_SAMPLES, 4);
 
     GLFWwindow* window = glfwCreateWindow(kInitialWindowWidth, kInitialWindowHeight,
-                                          "Parametric Motion Graphs - BVH Viewer",
+                                          "Parametric Motion Graphs",
                                           nullptr, nullptr);
     if (window == nullptr) {
         std::fprintf(stderr, "error: failed to create GLFW window\n");
@@ -154,6 +154,20 @@ int main(int argc, char** argv) {
     // of the main window into their own OS-level windows / second monitor.
     imgui_io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     ImGui::StyleColorsDark();
+    // Readability pass: the default 13px font + tight spacing reads as cramped on
+    // high-DPI displays. Enlarge text, loosen spacing, and lift text contrast so
+    // dense diagnostic panels stay legible.
+    imgui_io.FontGlobalScale = 1.30f;
+    {
+        ImGuiStyle& style = ImGui::GetStyle();
+        style.ItemSpacing = ImVec2(8.0f, 7.0f);
+        style.ItemInnerSpacing = ImVec2(6.0f, 5.0f);
+        style.FramePadding = ImVec2(7.0f, 4.0f);
+        style.FrameRounding = 3.0f;
+        style.WindowPadding = ImVec2(10.0f, 9.0f);
+        style.Colors[ImGuiCol_Text] = ImVec4(0.93f, 0.94f, 0.96f, 1.0f);
+        style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.62f, 0.65f, 0.70f, 1.0f);
+    }
     // When viewports are enabled, platform windows look best with opaque
     // backgrounds and square corners.
     if (imgui_io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {

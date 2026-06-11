@@ -120,8 +120,8 @@ int main() {
         graph.Edge(0).LookupInterpolated(
             {0.5f}, {0.5f})->source_transition_phase;
 
-    // Paper-faithful path: recompute the exact point-cloud alignment per
-    // transition (paper Sec 3.2 / Sec 5.2.1) instead of a root-only debug fallback.
+    // Paper-core path: recompute the Kovar-derived joint point-cloud alignment
+    // per transition instead of using the root-only debug adapter.
     pmg::PointCloudAlignment alignment(skeleton);
     pmg::RuntimeController controller(graph, alignment);
     controller.Start(node, {0.5f}, kFramesPerSecond);
@@ -134,6 +134,7 @@ int main() {
     std::vector<pmg::Vec3> world_positions;
     std::vector<float> facing_yaws;
     float first_transition_phase = -1.0f;
+    bool observed_transition_diagnostics = false;
 
     for (int step = 0; step < 360; ++step) {
         const bool was_transitioning = controller.IsTransitioning();
@@ -146,6 +147,26 @@ int main() {
             first_transition_phase = controller.CurrentPhase();
         }
 
+        assert(controller.CurrentParameter().size() == 1);
+        if (controller.IsTransitioning()) {
+            const std::optional<pmg::RuntimeTransitionDiagnostics> diagnostics =
+                controller.ActiveTransitionDiagnostics();
+            assert(diagnostics.has_value());
+            assert(diagnostics->source_node == node);
+            assert(diagnostics->target_node == node);
+            assert(diagnostics->source_parameter.size() == 1);
+            assert(diagnostics->requested_target_parameter == request.desired_parameter);
+            assert(diagnostics->actual_target_parameter.size() == 1);
+            assert(diagnostics->reachable_target_box.Contains(
+                diagnostics->actual_target_parameter));
+            assert(diagnostics->blend_duration_seconds > 0.0f);
+            assert(diagnostics->blend_progress >= 0.0f);
+            assert(diagnostics->blend_progress <= 1.0f);
+            observed_transition_diagnostics = true;
+        } else {
+            assert(!controller.ActiveTransitionDiagnostics().has_value());
+        }
+
         const pmg::Pose pose = controller.CurrentPose();
         world_positions.push_back(pose.root_position);
         facing_yaws.push_back(WorldFacingYaw(pose));
@@ -153,6 +174,7 @@ int main() {
 
     // At least a couple of self-transitions occurred over the run.
     assert(controller.CompletedTransitions() >= 2);
+    assert(observed_transition_diagnostics);
 
     // The blend window is centered on the optimal transition point: the
     // transition begins by the optimal phase (so its midpoint lands on it), and

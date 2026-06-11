@@ -71,6 +71,7 @@ void RuntimeController::Start(
     current_time_seconds_ = 0.0f;
     world_transform_ = RigidTransform2D{};
     transition_active_ = false;
+    transition_diagnostics_.reset();
     completed_transitions_ = 0;
 }
 
@@ -104,6 +105,7 @@ void RuntimeController::Update(float delta_seconds, const RuntimeControlRequest&
         current_time_seconds_ = next_time_seconds_;
         world_transform_ = next_world_transform_;
         transition_active_ = false;
+        transition_diagnostics_.reset();
         ++completed_transitions_;
         FoldCompletedCycles(current_clip_, current_time_seconds_, world_transform_);
     }
@@ -172,6 +174,14 @@ int RuntimeController::CurrentNode() const {
     return current_node_;
 }
 
+const ParameterVector& RuntimeController::CurrentParameter() const {
+    if (current_node_ < 0) {
+        throw std::runtime_error(
+            "RuntimeController::CurrentParameter: controller has not been started");
+    }
+    return current_parameter_;
+}
+
 float RuntimeController::CurrentPhase() const {
     return ClipPhase(current_clip_, current_time_seconds_);
 }
@@ -186,6 +196,23 @@ int RuntimeController::CompletedTransitions() const {
 
 const RigidTransform2D& RuntimeController::WorldTransform() const {
     return world_transform_;
+}
+
+std::optional<RuntimeTransitionDiagnostics>
+RuntimeController::ActiveTransitionDiagnostics() const {
+    if (!transition_active_ || !transition_diagnostics_.has_value()) {
+        return std::nullopt;
+    }
+    RuntimeTransitionDiagnostics diagnostics = *transition_diagnostics_;
+    diagnostics.blend_elapsed_seconds = transition_elapsed_seconds_;
+    diagnostics.blend_duration_seconds = transition_duration_seconds_;
+    diagnostics.blend_progress =
+        transition_duration_seconds_ <= kSmallEpsilon
+            ? 1.0f
+            : std::clamp(
+                  transition_elapsed_seconds_ / transition_duration_seconds_,
+                  0.0f, 1.0f);
+    return diagnostics;
 }
 
 void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& request) {
@@ -263,6 +290,20 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
         // Blend length exactly equals the metric window. Both clips loop
         // continuously through the window when it crosses a cycle boundary.
         transition_duration_seconds_ = blend_seconds;
+        transition_diagnostics_ = RuntimeTransitionDiagnostics{
+            current_node_,
+            next_node_,
+            current_parameter_,
+            request.desired_parameter,
+            next_parameter_,
+            transition->target_parameter_box,
+            transition->source_transition_phase,
+            transition->target_transition_phase,
+            alignment,
+            0.0f,
+            transition_duration_seconds_,
+            0.0f,
+        };
         return;
     }
 }

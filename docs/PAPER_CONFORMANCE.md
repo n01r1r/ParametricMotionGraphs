@@ -7,7 +7,7 @@ Kovar, Gleicher & Pighin 2002 (*Motion Graphs*).
 
 | Paper behavior | Implementation |
 |---|---|
-| Windowed point-cloud similarity and optimal floor alignment | `MotionDistance` |
+| Kovar-derived windowed point-cloud similarity and optimal floor alignment | `MotionDistance` |
 | Distance-grid optimal transition point | `BuildDistanceGrid` / `FindOptimalTransition` |
 | Seeded source and target sampling | `PmgBuilder` |
 | GOOD/NEUTRAL/BAD double threshold | `PmgBuilderConfig` |
@@ -42,9 +42,10 @@ serializes with the space (`PMG_GRAPH_V5`).
 `GenerateClip(parameter, fps)` derives its frame count from
 `BlendedDurationSeconds` (the weighted sum of example durations), so cycle
 time varies with the parameter as in the paper. The builder and runtime use
-this path; the explicit-frame-count overload remains for frame-aligned
-diagnostics only. Distance thresholds in the specs were recalibrated because
-duration-true clips raised absolute point-cloud distances.
+this path. Frame-aligned diagnostics use the isolated
+`pmg::legacy::GenerateClipWithFrameCount` compatibility API. Distance
+thresholds in the specs were recalibrated because duration-true clips raised
+absolute point-cloud distances.
 
 ### D3 — Source continues through cycle-crossing blends (resolved)
 
@@ -74,10 +75,15 @@ is `PMG_GRAPH_V6`; V2-V5 scalar phases remain readable as fallback values.
 
 Ordered by priority (impact on the paper's central claims first).
 
-### D6 — Point clouds are joint positions, not mesh points (low)
+### D6 — Point-cloud sampling and scale differ from Kovar 2002 (low)
 
-Kovar 2002 builds the point cloud from downsampled skin-mesh vertices. The
-implementation uses joint world positions, a coarser but common approximation.
+Kovar 2002 builds point clouds from downsampled skin-mesh vertices, uses a
+source window beginning at the candidate frame and a target window ending at
+the candidate frame, and defines an unnormalized weighted squared sum. The
+implementation uses joint world positions, centered endpoint-clamped windows
+for both clips, and weighted mean squared distance. The closed-form floor
+alignment is the same optimization, but thresholds and distance values are
+specific to this implementation.
 
 ### D7 — Optional velocity weighting is not in either paper (low)
 
