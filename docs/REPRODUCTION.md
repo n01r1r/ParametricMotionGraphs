@@ -262,7 +262,9 @@ Manual checks:
 5. PMG Runtime shows node/edge topology.
 6. During transition, requested parameter, reachable box, actual parameter,
    phase pair, alignment, and blend progress are visible.
-7. World root motion has no obvious position or facing discontinuity.
+7. Display scale changes geometry and travel together.
+8. Host camera follow, orbit, zoom, and reset remain independent of PMG state.
+9. World root motion has no obvious position or facing discontinuity.
 
 Viewer inspection is not part of headless CTest.
 
