@@ -252,6 +252,14 @@ if(PMG_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/transition_box_shrink.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
 
+    # Real-BVH multidimensional parameter calibration: straight/turning and
+    # regular/fast examples produce a V7 node calibrated against turn rate and
+    # travel speed. No graph edge is required for this motion-space test.
+    add_test(NAME cli_build_artifact_walk_2d
+        COMMAND pmg_cli --build-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature_speed.pmg_spec
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg)
+
     # Diagnose must honor the spec's per-edge edge_config: walk->jog needs
     # TGOOD=3.5, so default 0.5 would falsely report a reject (exit 1).
     add_test(NAME cli_diagnose_walk_jog_edge

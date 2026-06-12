@@ -25,38 +25,49 @@ pmg::MotionClip MakeClip(float root_x) {
 }
 
 pmg::ParametricMotionGraph MakeGraph(bool registered) {
-    pmg::ParametricMotionSpace space("walk", 1);
-    space.AddExample({0.0f}, MakeClip(0.0f));
-    space.AddExample({1.0f}, MakeClip(10.0f));
+    pmg::ParametricMotionSpace space("walk", 2);
+    space.AddExample({0.0f, 0.0f}, MakeClip(0.0f));
+    space.AddExample({1.0f, 0.0f}, MakeClip(10.0f));
+    space.AddExample({0.0f, 1.0f}, MakeClip(20.0f));
     if (registered) {
         space.SetExampleTimeWarps({
             pmg::TimeWarp::FromAnchors({0.5f}, {0.35f}),
             pmg::TimeWarp::FromAnchors({0.5f}, {0.65f}),
+            pmg::TimeWarp::FromAnchors({0.5f}, {0.55f}),
         });
         pmg::ParameterCalibration calibration;
-        calibration.metric = pmg::ParameterMetric::kTurnRate;
-        calibration.example_order = {0, 1};
-        calibration.example_measured = {-0.5f, 0.5f};
-        pmg::CalibrationSegment segment;
-        segment.left_example = 0;
-        segment.right_example = 1;
-        segment.samples = {{0.0f, -0.5f}, {0.5f, 0.2f}, {1.0f, 0.5f}};
-        calibration.segments.push_back(segment);
+        calibration.metrics = {
+            pmg::ParameterMetric::kTurnRate,
+            pmg::ParameterMetric::kTravelSpeed,
+        };
+        calibration.example_measured = {
+            {-0.5f, 1.0f},
+            {0.5f, 1.0f},
+            {0.0f, 2.0f},
+        };
+        calibration.metric_scales = {1.0f, 1.0f};
+        calibration.samples_per_axis = 5;
+        calibration.samples = {
+            {{-0.5f, 1.0f}, {1.0f, 0.0f, 0.0f}},
+            {{0.5f, 1.0f}, {0.0f, 1.0f, 0.0f}},
+            {{0.0f, 2.0f}, {0.0f, 0.0f, 1.0f}},
+            {{0.2f, 1.4f}, {0.2f, 0.4f, 0.4f}},
+        };
         space.SetParameterCalibration(calibration);
     }
 
     pmg::ParametricMotionGraph graph;
     const int node = graph.AddNode("walk", space);
     pmg::ParameterAabb box;
-    box.min_corner = {0.0f};
-    box.max_corner = {1.0f};
+    box.min_corner = {0.0f, 0.0f};
+    box.max_corner = {1.0f, 1.0f};
     pmg::PmgEdge edge;
     edge.source_node = node;
     edge.target_node = node;
-    edge.samples.push_back({{0.0f}, box, 0.8f, 0.1f});
+    edge.samples.push_back({{0.0f, 0.0f}, box, 0.8f, 0.1f});
     edge.samples.back().target_phase_samples = {
-        {{0.0f}, 0.75f, 0.05f},
-        {{1.0f}, 0.85f, 0.15f},
+        {{0.0f, 0.0f}, 0.75f, 0.05f},
+        {{1.0f, 1.0f}, 0.85f, 0.15f},
     };
     graph.AddEdge(edge);
     return graph;
@@ -96,7 +107,7 @@ pmg::BuiltPmgArtifact MakeArtifact() {
     edge.config.seed = 42;
     edge.report.edge_created = true;
     pmg::SourceSampleBuildReport report;
-    report.source_parameter = {0.25f};
+    report.source_parameter = {0.25f, 0.25f};
     report.good_count = 8;
     report.neutral_count = 2;
     report.bad_count = 1;
@@ -104,10 +115,10 @@ pmg::BuiltPmgArtifact MakeArtifact() {
     report.p25_distance = 0.3f;
     report.median_distance = 0.4f;
     report.max_distance = 0.9f;
-    report.target_box_before_shrink.min_corner = {0.0f};
-    report.target_box_before_shrink.max_corner = {1.0f};
-    report.target_box_after_shrink.min_corner = {0.0f};
-    report.target_box_after_shrink.max_corner = {0.8f};
+    report.target_box_before_shrink.min_corner = {0.0f, 0.0f};
+    report.target_box_before_shrink.max_corner = {1.0f, 1.0f};
+    report.target_box_after_shrink.min_corner = {0.0f, 0.0f};
+    report.target_box_after_shrink.max_corner = {0.8f, 0.8f};
     report.accepted = true;
     edge.report.source_reports.push_back(report);
     artifact.metadata.edge_builds.push_back(edge);
@@ -118,7 +129,7 @@ void CheckGraph(const pmg::ParametricMotionGraph& graph) {
     assert(graph.NumNodes() == 1);
     assert(graph.NumEdges() == 1);
     assert(graph.Node(0).name == "walk");
-    assert(graph.Node(0).motion_space.NumExamples() == 2);
+    assert(graph.Node(0).motion_space.NumExamples() == 3);
     assert(graph.Edge(0).samples.size() == 1);
 }
 
@@ -185,6 +196,31 @@ void WriteV5Fixture(const std::filesystem::path& path) {
            << "sample 1 0 1 0 1 1 0.8 0.1\n";
 }
 
+void WriteV6CalibrationFixture(const std::filesystem::path& path) {
+    std::ofstream output(path);
+    output << "PMG_GRAPH_V6\n"
+           << "runtime 3 30 \"BVH native units\"\n"
+           << "sources 0\n"
+           << "registrations 0\n"
+           << "edge_builds 0\n"
+           << "skeleton 1\n"
+           << "joint \"Hips\" -1 0 0 0 0\n"
+           << "nodes 1\n"
+           << "node \"walk\" 1 2\n"
+           << "example 1 0\n"
+           << "clip \"left\" 30 2\n"
+           << "frame 0 0 0 1 1 0 0 0\n"
+           << "frame 1 0 0 1 1 0 0 0\n"
+           << "example 1 1\n"
+           << "clip \"right\" 30 2\n"
+           << "frame 10 0 0 1 1 0 0 0\n"
+           << "frame 11 0 0 1 1 0 0 0\n"
+           << "warps 0\n"
+           << "calibration 1 2 0 1 -0.5 0.5 1\n"
+           << "segment 0 1 3 0 -0.5 0.5 0.2 1 0.5\n"
+           << "edges 0\n";
+}
+
 }  // namespace
 
 int main() {
@@ -217,7 +253,7 @@ int main() {
         std::ifstream input(path);
         std::string header;
         input >> header;
-        assert(header == "PMG_GRAPH_V6");
+        assert(header == "PMG_GRAPH_V7");
     }
     const pmg::BuiltPmgArtifact loaded =
         pmg::LoadPmgArtifactText(path.string());
@@ -242,13 +278,16 @@ int main() {
     {
         const pmg::ParameterCalibration& calibration =
             loaded.graph.Node(0).motion_space.ParameterCalibrationData();
-        assert(calibration.metric == pmg::ParameterMetric::kTurnRate);
-        assert(calibration.example_order == (std::vector<int>{0, 1}));
-        assert(calibration.segments.size() == 1);
-        assert(calibration.segments[0].samples.size() == 3);
-        assert(std::abs(calibration.segments[0].samples[1].blend_t - 0.5f) <
+        assert(calibration.metrics ==
+               (std::vector<pmg::ParameterMetric>{
+                   pmg::ParameterMetric::kTurnRate,
+                   pmg::ParameterMetric::kTravelSpeed}));
+        assert(calibration.example_measured.size() == 3);
+        assert(calibration.samples.size() == 4);
+        assert(calibration.samples_per_axis == 5);
+        assert(std::abs(calibration.samples[3].measured_parameter[0] - 0.2f) <
                1.0e-6f);
-        assert(std::abs(calibration.segments[0].samples[1].measured - 0.2f) <
+        assert(std::abs(calibration.samples[3].blend_weights[1] - 0.4f) <
                1.0e-6f);
     }
 
@@ -257,8 +296,10 @@ int main() {
     const pmg::ParametricMotionSpace& loaded_space =
         loaded.graph.Node(0).motion_space;
     for (const float phase : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
-        const pmg::Pose expected = original_space.EvaluatePose({0.5f}, phase);
-        const pmg::Pose actual = loaded_space.EvaluatePose({0.5f}, phase);
+        const pmg::Pose expected =
+            original_space.EvaluatePose({0.5f, 0.25f}, phase);
+        const pmg::Pose actual =
+            loaded_space.EvaluatePose({0.5f, 0.25f}, phase);
         assert(std::abs(expected.root_position.x - actual.root_position.x) <
                1.0e-5f);
     }
@@ -268,11 +309,11 @@ int main() {
     pmg::RuntimeController original_runtime(
         original.graph, original_alignment);
     pmg::RuntimeController loaded_runtime(loaded.graph, loaded_alignment);
-    original_runtime.Start(0, {0.5f}, 30.0f);
-    loaded_runtime.Start(0, {0.5f}, 30.0f);
+    original_runtime.Start(0, {0.5f, 0.25f}, 30.0f);
+    loaded_runtime.Start(0, {0.5f, 0.25f}, 30.0f);
     pmg::RuntimeControlRequest runtime_request;
     runtime_request.desired_node = 0;
-    runtime_request.desired_parameter = {0.5f};
+    runtime_request.desired_parameter = {0.5f, 0.25f};
     for (int frame = 0; frame < 60; ++frame) {
         original_runtime.Update(1.0f / 30.0f, runtime_request);
         loaded_runtime.Update(1.0f / 30.0f, runtime_request);
@@ -316,6 +357,25 @@ int main() {
                1.0e-6f);
         assert(std::abs(transition->target_transition_phase - 0.1f) <
                1.0e-6f);
+    }
+
+    {
+        WriteV6CalibrationFixture(path);
+        const pmg::BuiltPmgArtifact v6 =
+            pmg::LoadPmgArtifactText(path.string());
+        const pmg::ParametricMotionSpace& space =
+            v6.graph.Node(0).motion_space;
+        assert(space.HasParameterCalibration());
+        const pmg::ParameterCalibration& calibration =
+            space.ParameterCalibrationData();
+        assert(calibration.metrics ==
+               (std::vector<pmg::ParameterMetric>{
+                   pmg::ParameterMetric::kTurnRate}));
+        assert(calibration.samples.size() == 5);
+        const std::vector<float> weights =
+            space.ComputeLocalBlendWeights({0.5f});
+        assert(std::abs(weights[1] - (0.5f * (0.5f / 0.7f))) <
+               1.0e-5f);
     }
 
     std::filesystem::remove(path);

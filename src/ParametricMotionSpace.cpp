@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
@@ -14,6 +15,7 @@ namespace pmg {
 namespace {
 
 constexpr float kExactParameterThreshold = 1.0e-6f;
+constexpr std::size_t kMaximumCalibrationSampleCount = 100000;
 
 float WrapPi(float angle_radians) {
     return angle_radians - 2.0f * kPi * std::round(angle_radians / (2.0f * kPi));
@@ -30,6 +32,22 @@ float RootHeading(const Pose& pose) {
     }
     const Vec3 forward = Rotate(pose.local_rotations.front(), {0.0f, 0.0f, 1.0f});
     return std::atan2(forward.x, forward.z);
+}
+
+float NormalizedMetricDistance(
+    const ParameterVector& left,
+    const ParameterVector& right,
+    const ParameterVector& scales) {
+    RequireSameParameterDimension(left, right, "NormalizedMetricDistance");
+    RequireSameParameterDimension(left, scales, "NormalizedMetricDistance");
+
+    float squared_distance = 0.0f;
+    for (std::size_t dimension = 0; dimension < left.size(); ++dimension) {
+        const float normalized_delta =
+            (left[dimension] - right[dimension]) / scales[dimension];
+        squared_distance += normalized_delta * normalized_delta;
+    }
+    return std::sqrt(squared_distance);
 }
 
 }  // namespace
@@ -91,26 +109,89 @@ const std::vector<TimeWarp>& ParametricMotionSpace::ExampleTimeWarps() const {
 }
 
 void ParametricMotionSpace::SetParameterCalibration(ParameterCalibration calibration) {
-    if (calibration.metric == ParameterMetric::kNone) {
+    if (calibration.metrics.empty()) {
         throw std::runtime_error(
-            "ParametricMotionSpace::SetParameterCalibration: metric must not be kNone");
+            "ParametricMotionSpace::SetParameterCalibration: metrics must not be empty");
     }
-    if (parameter_dimension_ != 1) {
+    if (static_cast<int>(calibration.metrics.size()) != parameter_dimension_) {
         throw std::runtime_error(
-            "ParametricMotionSpace::SetParameterCalibration: requires a 1-D space");
+            "ParametricMotionSpace::SetParameterCalibration: metric count must match "
+            "parameter dimension");
     }
-    if (static_cast<int>(calibration.example_order.size()) != NumExamples() ||
-        calibration.example_measured.size() != calibration.example_order.size() ||
-        calibration.segments.size() + 1 != calibration.example_order.size()) {
+    for (const ParameterMetric metric : calibration.metrics) {
+        if (metric == ParameterMetric::kNone) {
+            throw std::runtime_error(
+                "ParametricMotionSpace::SetParameterCalibration: metrics must not "
+                "contain kNone");
+        }
+    }
+    for (std::size_t metric_index = 0;
+         metric_index < calibration.metrics.size(); ++metric_index) {
+        for (std::size_t previous_index = 0;
+             previous_index < metric_index; ++previous_index) {
+            if (calibration.metrics[previous_index] ==
+                calibration.metrics[metric_index]) {
+                throw std::runtime_error(
+                    "ParametricMotionSpace::SetParameterCalibration: metrics "
+                    "must be unique");
+            }
+        }
+    }
+    if (static_cast<int>(calibration.example_measured.size()) != NumExamples() ||
+        calibration.metric_scales.size() != calibration.metrics.size() ||
+        calibration.samples.empty() ||
+        calibration.samples_per_axis < 0) {
         throw std::runtime_error(
             "ParametricMotionSpace::SetParameterCalibration: table does not match examples");
     }
-    for (const CalibrationSegment& segment : calibration.segments) {
-        if (segment.left_example < 0 || segment.left_example >= NumExamples() ||
-            segment.right_example < 0 || segment.right_example >= NumExamples() ||
-            segment.samples.size() < 2) {
+    for (const ParameterVector& measured : calibration.example_measured) {
+        if (measured.size() != calibration.metrics.size()) {
             throw std::runtime_error(
-                "ParametricMotionSpace::SetParameterCalibration: invalid segment");
+                "ParametricMotionSpace::SetParameterCalibration: invalid example "
+                "measurement dimension");
+        }
+        for (const float value : measured) {
+            if (!std::isfinite(value)) {
+                throw std::runtime_error(
+                    "ParametricMotionSpace::SetParameterCalibration: example "
+                    "measurements must be finite");
+            }
+        }
+    }
+    for (const float scale : calibration.metric_scales) {
+        if (!std::isfinite(scale) || scale <= 0.0f) {
+            throw std::runtime_error(
+                "ParametricMotionSpace::SetParameterCalibration: metric scales "
+                "must be finite and positive");
+        }
+    }
+    for (const CalibrationSample& sample : calibration.samples) {
+        if (sample.measured_parameter.size() != calibration.metrics.size() ||
+            sample.blend_weights.size() != examples_.size()) {
+            throw std::runtime_error(
+                "ParametricMotionSpace::SetParameterCalibration: invalid sample "
+                "dimension");
+        }
+        for (const float value : sample.measured_parameter) {
+            if (!std::isfinite(value)) {
+                throw std::runtime_error(
+                    "ParametricMotionSpace::SetParameterCalibration: sample "
+                    "measurements must be finite");
+            }
+        }
+        float weight_sum = 0.0f;
+        for (const float weight : sample.blend_weights) {
+            if (!std::isfinite(weight) || weight < 0.0f) {
+                throw std::runtime_error(
+                    "ParametricMotionSpace::SetParameterCalibration: sample weights "
+                    "must be finite and nonnegative");
+            }
+            weight_sum += weight;
+        }
+        if (std::abs(weight_sum - 1.0f) > 1.0e-4f) {
+            throw std::runtime_error(
+                "ParametricMotionSpace::SetParameterCalibration: sample weights "
+                "must sum to one");
         }
     }
     parameter_calibration_ = std::move(calibration);
@@ -121,7 +202,7 @@ void ParametricMotionSpace::ClearParameterCalibration() {
 }
 
 bool ParametricMotionSpace::HasParameterCalibration() const {
-    return parameter_calibration_.metric != ParameterMetric::kNone;
+    return !parameter_calibration_.metrics.empty();
 }
 
 const ParameterCalibration& ParametricMotionSpace::ParameterCalibrationData() const {
@@ -131,78 +212,298 @@ const ParameterCalibration& ParametricMotionSpace::ParameterCalibrationData() co
 std::vector<float> ParametricMotionSpace::CalibratedBlendWeights(
     const ParameterVector& parameter) const {
     const ParameterCalibration& calibration = parameter_calibration_;
-    std::vector<float> weights(examples_.size(), 0.0f);
-    if (calibration.example_order.size() == 1) {
-        weights[calibration.example_order.front()] = 1.0f;
-        return weights;
-    }
+    const std::vector<float> authored_weights =
+        UncalibratedBlendWeights(parameter);
 
-    // Locate the parameter-adjacent example pair bracketing the request.
-    const float requested = parameter.front();
-    std::size_t segment_index = 0;
-    while (segment_index + 1 < calibration.segments.size() &&
-           requested >
-               examples_[calibration.example_order[segment_index + 1]].parameter.front()) {
-        ++segment_index;
-    }
-    const CalibrationSegment& segment = calibration.segments[segment_index];
-    const float parameter_left = examples_[segment.left_example].parameter.front();
-    const float parameter_right = examples_[segment.right_example].parameter.front();
-
-    // Target measured value: the requested parameter linearly interpolates the
-    // examples' measured anchors, so authored parameters keep their meaning
-    // while blends land on the measured curve.
-    const float span = parameter_right - parameter_left;
-    const float anchor_alpha =
-        span > kSmallEpsilon
-            ? std::clamp((requested - parameter_left) / span, 0.0f, 1.0f)
-            : 0.0f;
-    const float measured_left = calibration.example_measured[segment_index];
-    const float measured_right = calibration.example_measured[segment_index + 1];
-    const float target_measured =
-        measured_left + anchor_alpha * (measured_right - measured_left);
-
-    // Invert the sampled (t, measured) curve. Samples are monotone by
-    // construction (CalibrateParameterMetric enforces it).
-    float blend_t = anchor_alpha;
-    for (std::size_t sample = 0; sample + 1 < segment.samples.size(); ++sample) {
-        const float measured_a = segment.samples[sample].measured;
-        const float measured_b = segment.samples[sample + 1].measured;
-        if ((target_measured - measured_a) * (target_measured - measured_b) > 0.0f) {
-            continue;
+    ParameterVector target_measured(calibration.metrics.size(), 0.0f);
+    for (std::size_t example_index = 0;
+         example_index < examples_.size(); ++example_index) {
+        for (std::size_t metric_index = 0;
+             metric_index < calibration.metrics.size(); ++metric_index) {
+            target_measured[metric_index] +=
+                authored_weights[example_index] *
+                calibration.example_measured[example_index][metric_index];
         }
-        const float measured_span = measured_b - measured_a;
-        const float local_alpha =
-            std::abs(measured_span) > kSmallEpsilon
-                ? (target_measured - measured_a) / measured_span
-                : 0.0f;
-        blend_t = segment.samples[sample].blend_t +
-                  local_alpha * (segment.samples[sample + 1].blend_t -
-                                 segment.samples[sample].blend_t);
-        break;
     }
-    blend_t = std::clamp(blend_t, 0.0f, 1.0f);
 
-    weights[segment.left_example] = 1.0f - blend_t;
-    weights[segment.right_example] = blend_t;
-    return weights;
+    std::vector<float> distances(calibration.samples.size(), 0.0f);
+    std::vector<std::size_t> order(calibration.samples.size());
+    std::iota(order.begin(), order.end(), std::size_t{0});
+    for (std::size_t sample_index = 0;
+         sample_index < calibration.samples.size(); ++sample_index) {
+        distances[sample_index] = NormalizedMetricDistance(
+            target_measured,
+            calibration.samples[sample_index].measured_parameter,
+            calibration.metric_scales);
+    }
+    std::sort(order.begin(), order.end(),
+              [&](std::size_t left, std::size_t right) {
+                  return distances[left] < distances[right];
+              });
+
+    std::vector<float> result(examples_.size(), 0.0f);
+    std::size_t exact_count = 0;
+    while (exact_count < order.size() &&
+           distances[order[exact_count]] <= kExactParameterThreshold) {
+        ++exact_count;
+    }
+    if (exact_count > 0) {
+        const float exact_weight = 1.0f / static_cast<float>(exact_count);
+        for (std::size_t exact_index = 0;
+             exact_index < exact_count; ++exact_index) {
+            const CalibrationSample& sample =
+                calibration.samples[order[exact_index]];
+            for (std::size_t example_index = 0;
+                 example_index < examples_.size(); ++example_index) {
+                result[example_index] +=
+                    exact_weight * sample.blend_weights[example_index];
+            }
+        }
+        return result;
+    }
+
+    const std::size_t neighbor_count = std::min<std::size_t>(
+        calibration.metrics.size() + 1, calibration.samples.size());
+    float inverse_distance_sum = 0.0f;
+    for (std::size_t neighbor = 0; neighbor < neighbor_count; ++neighbor) {
+        inverse_distance_sum += 1.0f / distances[order[neighbor]];
+    }
+    if (!std::isfinite(inverse_distance_sum) ||
+        inverse_distance_sum <= kSmallEpsilon) {
+        return calibration.samples[order.front()].blend_weights;
+    }
+
+    for (std::size_t neighbor = 0; neighbor < neighbor_count; ++neighbor) {
+        const CalibrationSample& sample =
+            calibration.samples[order[neighbor]];
+        const float sample_weight =
+            (1.0f / distances[order[neighbor]]) / inverse_distance_sum;
+        for (std::size_t example_index = 0;
+             example_index < examples_.size(); ++example_index) {
+            result[example_index] +=
+                sample_weight * sample.blend_weights[example_index];
+        }
+    }
+    return result;
 }
 
 float MeasureParameterMetric(ParameterMetric metric, const MotionClip& clip) {
-    if (metric != ParameterMetric::kTurnRate) {
-        throw std::runtime_error("MeasureParameterMetric: unsupported metric");
-    }
     clip.RequireNotEmpty("MeasureParameterMetric");
     const float duration = clip.DurationSeconds();
     if (duration <= kSmallEpsilon) {
         return 0.0f;
     }
-    float unwrapped_heading = 0.0f;
-    for (int frame = 0; frame + 1 < clip.NumFrames(); ++frame) {
-        unwrapped_heading += WrapPi(RootHeading(clip.frames[frame + 1]) -
-                                    RootHeading(clip.frames[frame]));
+
+    if (metric == ParameterMetric::kTurnRate) {
+        float unwrapped_heading = 0.0f;
+        for (int frame = 0; frame + 1 < clip.NumFrames(); ++frame) {
+            unwrapped_heading += WrapPi(RootHeading(clip.frames[frame + 1]) -
+                                        RootHeading(clip.frames[frame]));
+        }
+        return unwrapped_heading / duration;
     }
-    return unwrapped_heading / duration;
+    if (metric == ParameterMetric::kTravelSpeed) {
+        float path_length = 0.0f;
+        for (int frame = 0; frame + 1 < clip.NumFrames(); ++frame) {
+            const float delta_x =
+                clip.frames[frame + 1].root_position.x -
+                clip.frames[frame].root_position.x;
+            const float delta_z =
+                clip.frames[frame + 1].root_position.z -
+                clip.frames[frame].root_position.z;
+            path_length += std::sqrt(delta_x * delta_x + delta_z * delta_z);
+        }
+        return path_length / duration;
+    }
+    throw std::runtime_error("MeasureParameterMetric: unsupported metric");
+}
+
+ParameterCalibration CalibrateParameterMetrics(
+    const ParametricMotionSpace& space,
+    const std::vector<ParameterMetric>& metrics,
+    float frames_per_second,
+    int samples_per_axis) {
+    if (static_cast<int>(metrics.size()) != space.ParameterDimension()) {
+        throw std::runtime_error(
+            "CalibrateParameterMetrics: metric count must match parameter dimension");
+    }
+    for (const ParameterMetric metric : metrics) {
+        if (metric == ParameterMetric::kNone) {
+            throw std::runtime_error(
+                "CalibrateParameterMetrics: metrics must not contain kNone");
+        }
+    }
+    for (std::size_t metric_index = 0;
+         metric_index < metrics.size(); ++metric_index) {
+        for (std::size_t previous_index = 0;
+             previous_index < metric_index; ++previous_index) {
+            if (metrics[previous_index] == metrics[metric_index]) {
+                throw std::runtime_error(
+                    "CalibrateParameterMetrics: metrics must be unique");
+            }
+        }
+    }
+    if (space.NumExamples() == 0) {
+        throw std::runtime_error("CalibrateParameterMetrics: space has no examples");
+    }
+    if (frames_per_second <= 0.0f || samples_per_axis < 2) {
+        throw std::runtime_error(
+            "CalibrateParameterMetrics: invalid sampling settings");
+    }
+
+    std::size_t grid_sample_count = 1;
+    for (int dimension = 0;
+         dimension < space.ParameterDimension(); ++dimension) {
+        if (grid_sample_count >
+            kMaximumCalibrationSampleCount /
+                static_cast<std::size_t>(samples_per_axis)) {
+            throw std::runtime_error(
+                "CalibrateParameterMetrics: calibration grid exceeds sample limit");
+        }
+        grid_sample_count *= static_cast<std::size_t>(samples_per_axis);
+    }
+
+    const auto generate_and_measure =
+        [&](const std::vector<float>& weights) {
+        float duration = 0.0f;
+        for (std::size_t example_index = 0;
+             example_index < space.Examples().size(); ++example_index) {
+            duration +=
+                weights[example_index] *
+                space.Examples()[example_index].clip.DurationSeconds();
+        }
+        const int frame_count = std::max(
+            2, static_cast<int>(std::lround(duration * frames_per_second)) + 1);
+        const MotionClip clip = space.GenerateClipFromWeights(
+            weights, frame_count, frames_per_second);
+        ParameterVector measured;
+        measured.reserve(metrics.size());
+        for (const ParameterMetric metric : metrics) {
+            measured.push_back(MeasureParameterMetric(metric, clip));
+        }
+        return measured;
+    };
+
+    ParameterCalibration calibration;
+    calibration.metrics = metrics;
+    calibration.samples_per_axis = samples_per_axis;
+    calibration.example_measured.reserve(space.Examples().size());
+    for (std::size_t example_index = 0;
+         example_index < space.Examples().size(); ++example_index) {
+        std::vector<float> weights(space.Examples().size(), 0.0f);
+        weights[example_index] = 1.0f;
+        calibration.example_measured.push_back(generate_and_measure(weights));
+        calibration.samples.push_back(
+            {calibration.example_measured.back(), std::move(weights)});
+    }
+
+    const auto compute_metric_scales = [&]() {
+        calibration.metric_scales.assign(metrics.size(), 1.0f);
+        for (std::size_t metric_index = 0;
+             metric_index < metrics.size(); ++metric_index) {
+            float minimum = std::numeric_limits<float>::infinity();
+            float maximum = -std::numeric_limits<float>::infinity();
+            for (const CalibrationSample& sample : calibration.samples) {
+                minimum = std::min(
+                    minimum, sample.measured_parameter[metric_index]);
+                maximum = std::max(
+                    maximum, sample.measured_parameter[metric_index]);
+            }
+            const float range = maximum - minimum;
+            calibration.metric_scales[metric_index] =
+                range > kSmallEpsilon ? range : 1.0f;
+        }
+    };
+
+    if (space.ParameterDimension() == 1) {
+        std::vector<int> example_order(space.NumExamples());
+        std::iota(example_order.begin(), example_order.end(), 0);
+        std::sort(
+            example_order.begin(), example_order.end(),
+            [&](int left, int right) {
+                return space.Examples()[left].parameter.front() <
+                       space.Examples()[right].parameter.front();
+            });
+        for (std::size_t pair = 0;
+             pair + 1 < example_order.size(); ++pair) {
+            const int left_example = example_order[pair];
+            const int right_example = example_order[pair + 1];
+            std::vector<CalibrationSample> segment_samples;
+            segment_samples.reserve(
+                static_cast<std::size_t>(samples_per_axis));
+            for (int sample_index = 0;
+                 sample_index < samples_per_axis; ++sample_index) {
+                const float blend_t =
+                    static_cast<float>(sample_index) /
+                    static_cast<float>(samples_per_axis - 1);
+                std::vector<float> weights(
+                    space.Examples().size(), 0.0f);
+                weights[left_example] = 1.0f - blend_t;
+                weights[right_example] = blend_t;
+                ParameterVector measured =
+                    sample_index == 0
+                        ? calibration.example_measured[left_example]
+                        : sample_index + 1 == samples_per_axis
+                              ? calibration.example_measured[right_example]
+                              : generate_and_measure(weights);
+                segment_samples.push_back(
+                    {std::move(measured), std::move(weights)});
+            }
+
+            const bool increasing =
+                segment_samples.back().measured_parameter.front() >=
+                segment_samples.front().measured_parameter.front();
+            for (std::size_t sample_index = 1;
+                 sample_index < segment_samples.size(); ++sample_index) {
+                float& measured =
+                    segment_samples[sample_index].measured_parameter.front();
+                const float previous =
+                    segment_samples[sample_index - 1]
+                        .measured_parameter.front();
+                measured = increasing
+                               ? std::max(measured, previous)
+                               : std::min(measured, previous);
+            }
+            calibration.samples.insert(
+                calibration.samples.end(),
+                std::make_move_iterator(segment_samples.begin()),
+                std::make_move_iterator(segment_samples.end()));
+        }
+        compute_metric_scales();
+        return calibration;
+    }
+
+    const ParameterDomain domain = space.Domain();
+    const ParameterAabb& bounds = domain.Bounds();
+    for (std::size_t grid_index = 0;
+         grid_index < grid_sample_count; ++grid_index) {
+        std::size_t remaining_index = grid_index;
+        ParameterVector parameter(
+            static_cast<std::size_t>(space.ParameterDimension()), 0.0f);
+        for (int dimension = 0;
+             dimension < space.ParameterDimension(); ++dimension) {
+            const int coordinate =
+                static_cast<int>(
+                    remaining_index %
+                    static_cast<std::size_t>(samples_per_axis));
+            remaining_index /= static_cast<std::size_t>(samples_per_axis);
+            const float alpha =
+                static_cast<float>(coordinate) /
+                static_cast<float>(samples_per_axis - 1);
+            parameter[static_cast<std::size_t>(dimension)] =
+                bounds.min_corner[static_cast<std::size_t>(dimension)] +
+                alpha *
+                    (bounds.max_corner[static_cast<std::size_t>(dimension)] -
+                     bounds.min_corner[static_cast<std::size_t>(dimension)]);
+        }
+        std::vector<float> weights =
+            space.UncalibratedBlendWeights(parameter);
+        calibration.samples.push_back(
+            {generate_and_measure(weights), std::move(weights)});
+    }
+
+    compute_metric_scales();
+    return calibration;
 }
 
 ParameterCalibration CalibrateParameterMetric(
@@ -210,83 +511,12 @@ ParameterCalibration CalibrateParameterMetric(
     ParameterMetric metric,
     float frames_per_second,
     int samples_per_segment) {
-    if (metric == ParameterMetric::kNone) {
-        throw std::runtime_error("CalibrateParameterMetric: metric must not be kNone");
-    }
     if (space.ParameterDimension() != 1) {
-        throw std::runtime_error("CalibrateParameterMetric: requires a 1-D space");
+        throw std::runtime_error(
+            "CalibrateParameterMetric: requires a 1-D space");
     }
-    if (space.NumExamples() == 0) {
-        throw std::runtime_error("CalibrateParameterMetric: space has no examples");
-    }
-    if (frames_per_second <= 0.0f || samples_per_segment < 2) {
-        throw std::runtime_error("CalibrateParameterMetric: invalid sampling settings");
-    }
-
-    ParameterCalibration calibration;
-    calibration.metric = metric;
-    calibration.example_order.resize(space.NumExamples());
-    std::iota(calibration.example_order.begin(), calibration.example_order.end(), 0);
-    std::sort(calibration.example_order.begin(), calibration.example_order.end(),
-              [&](int left, int right) {
-                  return space.Examples()[left].parameter.front() <
-                         space.Examples()[right].parameter.front();
-              });
-
-    const auto generate_and_measure = [&](int left_example, int right_example,
-                                          float blend_t) {
-        std::vector<float> weights(space.Examples().size(), 0.0f);
-        weights[left_example] += 1.0f - blend_t;
-        weights[right_example] += blend_t;
-        const float duration =
-            (1.0f - blend_t) *
-                space.Examples()[left_example].clip.DurationSeconds() +
-            blend_t * space.Examples()[right_example].clip.DurationSeconds();
-        const int frame_count = std::max(
-            2, static_cast<int>(std::lround(duration * frames_per_second)) + 1);
-        return MeasureParameterMetric(
-            metric,
-            space.GenerateClipFromWeights(weights, frame_count, frames_per_second));
-    };
-
-    for (const int example_index : calibration.example_order) {
-        calibration.example_measured.push_back(
-            generate_and_measure(example_index, example_index, 0.0f));
-    }
-
-    for (std::size_t pair = 0; pair + 1 < calibration.example_order.size(); ++pair) {
-        CalibrationSegment segment;
-        segment.left_example = calibration.example_order[pair];
-        segment.right_example = calibration.example_order[pair + 1];
-        segment.samples.push_back({0.0f, calibration.example_measured[pair]});
-        for (int sample = 1; sample + 1 < samples_per_segment; ++sample) {
-            const float blend_t = static_cast<float>(sample) /
-                                  static_cast<float>(samples_per_segment - 1);
-            segment.samples.push_back(
-                {blend_t,
-                 generate_and_measure(segment.left_example, segment.right_example,
-                                      blend_t)});
-        }
-        segment.samples.push_back({1.0f, calibration.example_measured[pair + 1]});
-
-        // Force the curve monotone toward its endpoint so inversion is well
-        // defined; small non-monotone wiggles come from contact-phase noise in
-        // the generated blends, not from a real direction change.
-        const bool increasing =
-            segment.samples.back().measured >= segment.samples.front().measured;
-        for (std::size_t sample = 1; sample < segment.samples.size(); ++sample) {
-            float& measured = segment.samples[sample].measured;
-            const float previous = segment.samples[sample - 1].measured;
-            if (increasing) {
-                measured = std::max(measured, previous);
-            } else {
-                measured = std::min(measured, previous);
-            }
-        }
-        calibration.segments.push_back(std::move(segment));
-    }
-
-    return calibration;
+    return CalibrateParameterMetrics(
+        space, {metric}, frames_per_second, samples_per_segment);
 }
 
 std::vector<float> ParametricMotionSpace::ComputeLocalBlendWeights(
@@ -301,7 +531,11 @@ std::vector<float> ParametricMotionSpace::ComputeLocalBlendWeights(
     if (HasParameterCalibration()) {
         return CalibratedBlendWeights(parameter);
     }
+    return UncalibratedBlendWeights(parameter);
+}
 
+std::vector<float> ParametricMotionSpace::UncalibratedBlendWeights(
+    const ParameterVector& parameter) const {
     std::vector<float> weights(examples_.size(), 0.0f);
     std::vector<std::size_t> order(examples_.size());
     std::vector<float> distances(examples_.size(), 0.0f);

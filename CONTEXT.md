@@ -33,11 +33,12 @@ _Avoid_: blend tree, blendspace, motion set, inverse-distance weighting (the
 old global scheme, replaced by the local stencil).
 
 **ParameterCalibration**:
-The KG04-style accuracy table of a 1-D space: per parameter-adjacent example
-pair, sampled (blend weight, measured metric) points, anchored at the
-examples' measured values. Built offline by `CalibrateParameterMetric` from a
-declared ParameterMetric (currently turn rate); inverted at evaluation time so
-a requested parameter achieves its anchor-interpolated measured value.
+The KG04-style sampled inverse map from measured parameter vectors to full
+example-weight vectors. Built offline by `CalibrateParameterMetrics` from one
+declared `ParameterMetric` per parameter axis (`turn_rate` in rad/s or
+`travel_speed` in native BVH units/s). Runtime first anchor-interpolates the
+requested authored coordinate into measured space, then locally inverts the
+normalized measured-space samples.
 _Avoid_: weight LUT, steering calibration (that is the goal-directed module's
 separate streamed-rate table).
 
@@ -118,7 +119,7 @@ _Avoid_: state machine, blend graph.
 The complete offline output consumed online: Skeleton, registered
 ParametricMotionGraph, parameter calibrations, runtime sampling rate, source
 paths, registration settings, edge sampling configuration, seeds, and build
-reports. Serialized as PMG_GRAPH_V6 (V2-V5 stay readable).
+reports. Serialized as PMG_GRAPH_V7 (V2-V6 stay readable).
 _Avoid_: graph file, cached graph (those omit the complete runtime contract).
 
 **TransitionSample**:

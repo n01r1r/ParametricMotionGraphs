@@ -61,6 +61,23 @@ std::vector<std::string> SplitCommaList(const std::string& text) {
     return values;
 }
 
+ParameterMetric ParseParameterMetric(
+    const std::string& metric_name,
+    int line_number) {
+    if (metric_name == "turn_rate") {
+        return ParameterMetric::kTurnRate;
+    }
+    if (metric_name == "travel_speed") {
+        return ParameterMetric::kTravelSpeed;
+    }
+    if (metric_name == "none") {
+        return ParameterMetric::kNone;
+    }
+    throw std::runtime_error(
+        "LoadGraphSpec line " + std::to_string(line_number) +
+        ": unknown parameter metric '" + metric_name + "'");
+}
+
 }  // namespace
 
 GraphSpec LoadGraphSpec(const std::string& path) {
@@ -175,13 +192,12 @@ GraphSpec LoadGraphSpec(const std::string& path) {
             continue;
         }
 
-        if (keyword == "parameter_metric") {
+        if (keyword == "parameter_metric" || keyword == "parameter_metrics") {
             std::string node_name;
-            std::string metric_name;
-            if (!(line >> node_name >> metric_name)) {
+            if (!(line >> node_name)) {
                 throw std::runtime_error(
                     "LoadGraphSpec line " + std::to_string(line_number) +
-                    ": expected parameter_metric <node> <turn_rate|none>");
+                    ": expected parameter metric node name");
             }
             auto node_it = std::find_if(
                 spec.nodes.begin(), spec.nodes.end(),
@@ -189,24 +205,104 @@ GraphSpec LoadGraphSpec(const std::string& path) {
             if (node_it == spec.nodes.end()) {
                 throw std::runtime_error("LoadGraphSpec line " +
                                          std::to_string(line_number) +
-                                         ": parameter_metric references unknown node '" +
+                                         ": parameter metric references unknown node '" +
                                          node_name + "'");
             }
-            if (metric_name == "turn_rate") {
-                node_it->parameter_metric = ParameterMetric::kTurnRate;
-            } else if (metric_name == "none") {
-                node_it->parameter_metric = ParameterMetric::kNone;
-            } else {
+            if (node_it->has_parameter_metrics_config) {
                 throw std::runtime_error(
                     "LoadGraphSpec line " + std::to_string(line_number) +
-                    ": unknown parameter metric '" + metric_name + "'");
+                    ": duplicate parameter metric declaration for node '" +
+                    node_name + "'");
             }
-            if (node_it->parameter_metric != ParameterMetric::kNone &&
+
+            std::vector<ParameterMetric> metrics;
+            std::string metric_name;
+            while (line >> metric_name) {
+                metrics.push_back(
+                    ParseParameterMetric(metric_name, line_number));
+            }
+            if (metrics.empty()) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": parameter metric declaration requires at least one metric");
+            }
+            if (keyword == "parameter_metric" &&
                 node_it->parameter_dimension != 1) {
                 throw std::runtime_error(
                     "LoadGraphSpec line " + std::to_string(line_number) +
-                    ": parameter_metric requires a one-dimensional node");
+                    ": parameter_metric is the legacy one-dimensional form; "
+                    "use parameter_metrics");
             }
+            const bool disables_calibration =
+                metrics.size() == 1 &&
+                metrics.front() == ParameterMetric::kNone;
+            if (!disables_calibration &&
+                static_cast<int>(metrics.size()) !=
+                    node_it->parameter_dimension) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": metric count must match node parameter dimension");
+            }
+            node_it->has_parameter_metrics_config = true;
+            if (!disables_calibration) {
+                for (std::size_t metric_index = 0;
+                     metric_index < metrics.size(); ++metric_index) {
+                    const ParameterMetric metric = metrics[metric_index];
+                    if (metric == ParameterMetric::kNone) {
+                        throw std::runtime_error(
+                            "LoadGraphSpec line " +
+                            std::to_string(line_number) +
+                            ": none cannot be mixed with active metrics");
+                    }
+                    for (std::size_t previous_index = 0;
+                         previous_index < metric_index; ++previous_index) {
+                        if (metrics[previous_index] == metric) {
+                            throw std::runtime_error(
+                                "LoadGraphSpec line " +
+                                std::to_string(line_number) +
+                                ": parameter metrics must be unique");
+                        }
+                    }
+                }
+                node_it->parameter_metrics = std::move(metrics);
+            }
+            continue;
+        }
+
+        if (keyword == "parameter_calibration") {
+            std::string node_name;
+            int samples_per_axis = 0;
+            if (!(line >> node_name >> samples_per_axis)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": expected parameter_calibration <node> "
+                    "<samples_per_axis>");
+            }
+            auto node_it = std::find_if(
+                spec.nodes.begin(), spec.nodes.end(),
+                [&](const GraphSpecNode& node) {
+                    return node.name == node_name;
+                });
+            if (node_it == spec.nodes.end()) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": parameter_calibration references unknown node '" +
+                    node_name + "'");
+            }
+            if (samples_per_axis < 2) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": parameter_calibration samples_per_axis must be at "
+                    "least 2");
+            }
+            if (node_it->has_calibration_sampling_config) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": duplicate parameter_calibration for node '" +
+                    node_name + "'");
+            }
+            node_it->has_calibration_sampling_config = true;
+            node_it->calibration_samples_per_axis = samples_per_axis;
             continue;
         }
 
@@ -265,6 +361,14 @@ GraphSpec LoadGraphSpec(const std::string& path) {
 
     if (spec.nodes.empty()) {
         throw std::runtime_error("LoadGraphSpec: spec contains no nodes");
+    }
+    for (const GraphSpecNode& node : spec.nodes) {
+        if (node.has_calibration_sampling_config &&
+            node.parameter_metrics.empty()) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' configures parameter_calibration without active metrics");
+        }
     }
     return spec;
 }

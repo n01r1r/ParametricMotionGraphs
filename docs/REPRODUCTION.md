@@ -119,7 +119,9 @@ reject_reason
   .\outputs\paper_core_walk\artifact.pmg
 ```
 
-The runtime requires a V4+ artifact with a skeleton. Current writes use V6.
+The runtime requires a V4+ artifact with a skeleton. Current writes use V7.
+Multidimensional calibration grid density is declared per node with
+`parameter_calibration <node> <samples_per_axis>`; omitted declarations use 9.
 
 ## Run Paper Applications
 
@@ -237,6 +239,7 @@ preparation assumptions.
 | Spec | Purpose |
 |---|---|
 | `walk_curvature.pmg_spec` | canonical 1-D walk self-transition runtime |
+| `walk_curvature_speed.pmg_spec` | 2-D real-BVH turn-rate/travel-speed calibration |
 | `walk_jog.pmg_spec` | two-node walk/jog cross-transition graph |
 | `walk_curvature_selective.pmg_spec` | selective GOOD/NEUTRAL/BAD classification |
 | `transition_box_shrink.pmg_spec` | non-convex target stress case for BAD exclusion |

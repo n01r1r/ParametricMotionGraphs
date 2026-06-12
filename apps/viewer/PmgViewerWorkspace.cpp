@@ -944,9 +944,18 @@ void PmgViewerWorkspace::DrawParameterSpace(float query_parameter) {
     if (pmg_space_.HasParameterCalibration()) {
         const pmg::ParameterCalibration& calibration =
             pmg_space_.ParameterCalibrationData();
-        ImGui::TextDisabled(
-            "Parameter accuracy: calibrated turn-rate inversion (%zu segments)",
-            calibration.segments.size());
+        if (calibration.samples_per_axis > 0) {
+            ImGui::TextDisabled(
+                "Parameter accuracy: calibrated inversion (%zu metrics, %zu "
+                "samples, %d/axis)",
+                calibration.metrics.size(), calibration.samples.size(),
+                calibration.samples_per_axis);
+        } else {
+            ImGui::TextDisabled(
+                "Parameter accuracy: calibrated inversion (%zu metrics, %zu "
+                "imported samples)",
+                calibration.metrics.size(), calibration.samples.size());
+        }
     } else {
         ImGui::TextDisabled("Parameter accuracy: local Shepard interpolation");
     }

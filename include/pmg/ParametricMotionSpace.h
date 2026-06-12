@@ -25,36 +25,38 @@ struct ExampleMotion {
     MotionClip clip;
 };
 
-// Measurable motion property used to make blends parameter-accurate.
+// Measurable motion properties used to make blends parameter-accurate.
 // kTurnRate: signed mean root-heading rate in radians per second.
-enum class ParameterMetric { kNone = 0, kTurnRate = 1 };
+// kTravelSpeed: mean root path speed in native BVH distance units per second.
+enum class ParameterMetric {
+    kNone = 0,
+    kTurnRate = 1,
+    kTravelSpeed = 2,
+};
 
+// One sampled inverse-calibration point. measured_parameter has one value per
+// configured metric. blend_weights has one value per authored example and
+// sums to one.
 struct CalibrationSample {
-    float blend_t = 0.0f;   // weight on the segment's right example
-    float measured = 0.0f;  // metric value of the blend generated at blend_t
+    ParameterVector measured_parameter;
+    std::vector<float> blend_weights;
 };
 
-// Sampled measured-metric curve between two parameter-adjacent examples.
-struct CalibrationSegment {
-    int left_example = -1;
-    int right_example = -1;
-    std::vector<CalibrationSample> samples;  // ascending blend_t, includes 0 and 1
-};
-
-// Kovar-Gleicher 2004 style accuracy table for a one-dimensional space:
-// requested parameter -> target measured value (piecewise-linear over the
-// examples' measured anchors) -> the blend weight that actually achieves it
-// (inverted from the sampled curve). Without it, weights are Shepard
-// interpolation and the parameter is only approximately achieved.
+// Kovar-Gleicher style sampled inverse map:
+// requested authored coordinate -> anchor-interpolated measured coordinate ->
+// blend weights that achieve that coordinate. Metric distances are normalized
+// by metric_scales so unlike units (for example rad/s and BVH units/s) remain
+// comparable during local inversion.
 struct ParameterCalibration {
-    ParameterMetric metric = ParameterMetric::kNone;
-    std::vector<int> example_order;       // example indices sorted by parameter
-    std::vector<float> example_measured;  // measured metric per sorted example
-    std::vector<CalibrationSegment> segments;  // one per adjacent sorted pair
+    std::vector<ParameterMetric> metrics;  // exactly one metric per parameter axis
+    std::vector<ParameterVector> example_measured;  // indexed by authored example
+    ParameterVector metric_scales;  // positive normalization scale per metric
+    std::vector<CalibrationSample> samples;
+    int samples_per_axis = 0;  // 0 for imported/manual tables
 };
 
-// Measured metric of one generated clip (kTurnRate: net wrapped root-heading
-// change divided by clip duration).
+// Measured property of one generated clip. Throws for kNone or an unsupported
+// metric.
 float MeasureParameterMetric(ParameterMetric metric, const MotionClip& clip);
 
 class ParametricMotionSpace {
@@ -78,9 +80,9 @@ public:
     // Empty when unregistered; otherwise one warp per example.
     const std::vector<TimeWarp>& ExampleTimeWarps() const;
 
-    // Calibration makes 1-D blends parameter-accurate: when present,
-    // ComputeLocalBlendWeights inverts the measured-metric table instead of
-    // assuming the parameter is linear in the weights.
+    // Calibration makes multidimensional blends parameter-accurate: when
+    // present, ComputeLocalBlendWeights inverts the sampled measured-parameter
+    // map instead of assuming authored coordinates are linear in blend weights.
     void SetParameterCalibration(ParameterCalibration calibration);
     void ClearParameterCalibration();
     bool HasParameterCalibration() const;
@@ -117,6 +119,8 @@ public:
 
 private:
     std::vector<float> CalibratedBlendWeights(const ParameterVector& parameter) const;
+    std::vector<float> UncalibratedBlendWeights(
+        const ParameterVector& parameter) const;
     Pose EvaluatePoseFromWeights(
         const std::vector<float>& weights, float normalized_phase) const;
     MotionClip GenerateClipFromWeights(
@@ -129,9 +133,14 @@ private:
     std::vector<ExampleMotion> examples_;
     // Empty = unregistered (every example sampled at the raw phase).
     std::vector<TimeWarp> example_time_warps_;
-    // metric == kNone means uncalibrated (Shepard weights).
+    // Empty metrics means uncalibrated (Shepard weights).
     ParameterCalibration parameter_calibration_;
 
+    friend ParameterCalibration CalibrateParameterMetrics(
+        const ParametricMotionSpace& space,
+        const std::vector<ParameterMetric>& metrics,
+        float frames_per_second,
+        int samples_per_axis);
     friend ParameterCalibration CalibrateParameterMetric(
         const ParametricMotionSpace& space,
         ParameterMetric metric,
@@ -144,10 +153,17 @@ private:
         float frames_per_second);
 };
 
-// Offline calibration: for every parameter-adjacent example pair, sample the
-// blend weight t in [0, 1], generate each blend, and measure the metric. The
-// sampled curve is forced monotone toward its endpoint so the runtime
-// inversion is well defined. Requires a one-dimensional space.
+// Offline multidimensional calibration. Samples a deterministic regular grid
+// over the authored parameter domain, generates each uncalibrated blend, and
+// records the resulting metric vector and full example-weight vector.
+// metrics.size() must equal the space parameter dimension.
+ParameterCalibration CalibrateParameterMetrics(
+    const ParametricMotionSpace& space,
+    const std::vector<ParameterMetric>& metrics,
+    float frames_per_second,
+    int samples_per_axis = 9);
+
+// Compatibility wrapper for one-dimensional callers.
 ParameterCalibration CalibrateParameterMetric(
     const ParametricMotionSpace& space,
     ParameterMetric metric,

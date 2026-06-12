@@ -18,20 +18,31 @@ parameter range (deviation D2).
 
 ## Decision
 
-- `CalibrateParameterMetric` samples the blend weight between every
-  parameter-adjacent example pair of a 1-D space, generates each blend,
-  measures a declared metric (`turn_rate`: net wrapped root-heading change per
-  second), and stores the curve forced monotone toward its endpoints.
-- `ComputeLocalBlendWeights` inverts that table: a requested parameter maps to
-  the anchor-interpolated measured value, and the blend weight that achieves
-  it. Spaces without a declared metric keep Shepard weights.
+- `CalibrateParameterMetrics` accepts one metric per parameter axis. For
+  multidimensional spaces it samples a deterministic regular grid over the
+  authored parameter domain, generates each local blend, and stores its
+  measured metric vector plus full example-weight vector.
+- Measured-space distances are normalized by each metric's sampled range.
+  Implemented metrics are `turn_rate` (signed wrapped root-heading change per
+  second) and `travel_speed` (mean root floor-path speed in native BVH
+  units/second).
+- The one-dimensional path retains parameter-adjacent, monotone-segment
+  sampling.
+- `ComputeLocalBlendWeights` maps a requested authored coordinate to the
+  anchor-interpolated measured vector, then locally inverts the sampled map.
+  Spaces without declared metrics keep Shepard weights.
 - `GenerateClip(parameter, fps)` derives its frame count from
   `BlendedDurationSeconds` (weighted example durations). Frame-aligned
   diagnostics use `pmg::legacy::GenerateClipWithFrameCount`.
-- The calibration serializes with the space; introduced in `PMG_GRAPH_V5`.
-  Current `PMG_GRAPH_V6` adds per-target transition phases.
-- Spec syntax: `parameter_metric <node> <turn_rate|none>`, restricted to
-  one-dimensional nodes.
+- Scalar calibration serialization was introduced in `PMG_GRAPH_V5`; V6 added
+  per-target transition phases. `PMG_GRAPH_V7` stores vector metrics, measured
+  samples, metric scales, and full example weights. V5/V6 scalar tables are
+  converted while reading.
+- Spec syntax: `parameter_metric <node> <turn_rate|travel_speed|none>` remains
+  as the one-dimensional compatibility form. Multidimensional nodes use
+  `parameter_metrics <node> <metric0> ... <metricN-1>`.
+  `parameter_calibration <node> <samples_per_axis>` exposes deterministic grid
+  density; the default is 9.
 
 ## Consequences
 
@@ -45,5 +56,7 @@ parameter range (deviation D2).
   self-transitions replay only a phase slice, so achieved streamed rates still
   differ from clip rates. Retiring it depends on transition-window work
   (D3-D5), not on weight accuracy.
-- Multi-dimensional spaces and additional metrics require extending the
-  segment table; this ADR covers the 1-D turn-rate case.
+- Calibration cost grows as `samples_per_axis ^ parameter_dimension` and is
+  capped at 100,000 grid samples. Local scattered inversion estimates
+  parameter accuracy under this motion-space model; it does not establish a
+  globally one-to-one parameterization.

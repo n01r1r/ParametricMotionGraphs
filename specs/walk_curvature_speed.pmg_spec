@@ -1,0 +1,14 @@
+# Two-dimensional real-BVH calibration fixture.
+# Axis 0: authored turn class (0 = wide, 1 = tight).
+# Axis 1: authored gait class (0 = walk, 1 = jog).
+# The authored labels are categorical anchors; parameter_metrics calibrates
+# generated behavior against measured turn rate and travel speed.
+node walk_2d 2
+registration walk_2d - - 3 0
+parameter_metrics walk_2d turn_rate travel_speed
+parameter_calibration walk_2d 5
+example walk_2d 0.0 0.0 ../BVH/walkCurve.bvh
+example walk_2d 1.0 0.0 ../BVH/walkTightCurve.bvh
+example walk_2d 0.0 1.0 ../BVH/jogCurve.bvh
+edge walk_2d walk_2d
+edge_config walk_2d walk_2d 10.0 20.0 3 6 41

@@ -128,9 +128,11 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
                                      "' enables DTW refinement without contact joints");
         }
 
-        if (node.parameter_metric != ParameterMetric::kNone) {
-            production.SetParameterCalibration(CalibrateParameterMetric(
-                production, node.parameter_metric, config.calibration_frames_per_second));
+        if (!node.parameter_metrics.empty()) {
+            production.SetParameterCalibration(CalibrateParameterMetrics(
+                production, node.parameter_metrics,
+                config.calibration_frames_per_second,
+                node.calibration_samples_per_axis));
         }
 
         stages.production = std::move(production);

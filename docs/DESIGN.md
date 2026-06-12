@@ -15,7 +15,7 @@ GraphSpec
       -> optional DTW refinement
       -> PmgBuilder edge sampling
   -> BuiltPmgArtifact
-      -> GraphIo V6
+      -> GraphIo V7
       -> RuntimeController
       -> GoalDirectedLocomotion
 ```
@@ -67,8 +67,9 @@ goal-directed nodes.
 The full prioritized deviation list lives in
 [PAPER_CONFORMANCE.md](PAPER_CONFORMANCE.md). Structural highlights:
 
-- Parameter-accuracy calibration covers one-dimensional nodes with the
-  turn-rate metric; other dimensions/metrics fall back to Shepard weights.
+- Parameter-accuracy calibration supports one metric per parameter axis using
+  deterministic sampled inversion. Implemented metrics are signed turn rate
+  and mean root travel speed.
 - Manual GraphSpec parameterization replaces Kovar-Gleicher automatic database
   extraction and parameterization.
 - The included corpus validates walking/jogging behavior, not the original
