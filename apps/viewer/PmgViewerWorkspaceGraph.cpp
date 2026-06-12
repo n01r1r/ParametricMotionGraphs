@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -11,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "pmg/GraphSpec.h"
 #include "pmg/MathTypes.h"
 
 namespace pmgviewer {
@@ -106,13 +108,10 @@ void DrawArrowHead(
 
 // --- Graph runtime (PMG streaming) -----------------------------------------
 
-void PmgViewerWorkspace::LoadGraphArtifact(const std::string& artifact_path) {
-    steering_.reset();
-    graph_controller_.reset();
-    graph_alignment_.reset();
-
-    pmg::BuiltPmgArtifact artifact =
-        pmg::LoadPmgArtifactText(artifact_path);
+void PmgViewerWorkspace::AdoptArtifact(
+    pmg::BuiltPmgArtifact artifact, const std::string& status_label) {
+    // Validate the incoming artifact before disturbing any live runtime state,
+    // so a rejected load/build leaves the current graph intact.
     if (artifact.skeleton.NumJoints() == 0) {
         throw std::runtime_error(
             "viewer runtime requires a complete artifact with a Skeleton");
@@ -122,26 +121,35 @@ void PmgViewerWorkspace::LoadGraphArtifact(const std::string& artifact_path) {
         throw std::runtime_error(
             "viewer runtime artifact has incomplete graph/frame metadata");
     }
+    if (artifact.graph.Node(0).motion_space.ParameterDimension() != 1) {
+        throw std::runtime_error(
+            "viewer runtime currently requires a one-dimensional first node");
+    }
 
-    artifact_units_ = artifact.metadata.units;
+    steering_.reset();
+    graph_controller_.reset();
+    graph_alignment_.reset();
+
+    // Retain the whole artifact so "Save artifact" is lossless; the live members
+    // below are copies derived from it (load is rare and user-driven).
+    source_artifact_ = std::move(artifact);
+    const pmg::BuiltPmgArtifact& adopted = *source_artifact_;
+
+    artifact_units_ = adopted.metadata.units;
     contact_joint_names_.clear();
-    const std::string first_node_name = artifact.graph.Node(0).name;
+    const std::string first_node_name = adopted.graph.Node(0).name;
     for (const pmg::NodeRegistrationMetadata& registration :
-         artifact.metadata.node_registrations) {
+         adopted.metadata.node_registrations) {
         if (registration.node_name == first_node_name) {
             contact_joint_names_ = registration.contact_joints;
             break;
         }
     }
 
-    pmg_skeleton_ = std::move(artifact.skeleton);
-    graph_ = std::move(artifact.graph);
-    graph_fps_ = artifact.metadata.frames_per_second;
+    pmg_skeleton_ = adopted.skeleton;
+    graph_ = adopted.graph;
+    graph_fps_ = adopted.metadata.frames_per_second;
     pmg_space_ = graph_.Node(0).motion_space;
-    if (pmg_space_.ParameterDimension() != 1) {
-        throw std::runtime_error(
-            "viewer runtime currently requires a one-dimensional first node");
-    }
     pmg_examples_.clear();
     for (const pmg::ExampleMotion& example : pmg_space_.Examples()) {
         PmgExample viewer_example{
@@ -160,7 +168,7 @@ void PmgViewerWorkspace::LoadGraphArtifact(const std::string& artifact_path) {
     selected_graph_edge_ = graph_.NumEdges() > 0 ? 0 : -1;
 
     graph_runtime_config_ =
-        pmg::RuntimeControllerConfigFromArtifact(artifact);
+        pmg::RuntimeControllerConfigFromArtifact(adopted);
     graph_alignment_.emplace(
         pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
     graph_controller_.emplace(
@@ -169,13 +177,56 @@ void PmgViewerWorkspace::LoadGraphArtifact(const std::string& artifact_path) {
     graph_ready_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
     playing_ = true;
-    graph_status_ = "Loaded artifact: " + artifact_path;
+    graph_status_ = status_label;
     status_message_ = graph_status_;
+}
+
+void PmgViewerWorkspace::LoadGraphArtifact(const std::string& artifact_path) {
+    AdoptArtifact(pmg::LoadPmgArtifactText(artifact_path),
+                  "Loaded artifact: " + artifact_path);
+}
+
+void PmgViewerWorkspace::BuildArtifactFromSpec(const std::string& spec_path) {
+    // Same core path as the CLI --build-graph: the spec's per-edge config is
+    // authoritative (the Transition Grid TGOOD/TBAD sliders do not override it).
+    try {
+        const pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
+        AdoptArtifact(pmg::BuildPmgArtifactFromSpec(spec),
+                      "Built graph from spec: " + spec_path);
+    } catch (const std::exception& error) {
+        graph_status_ = std::string("Spec build failed: ") + error.what();
+    }
+}
+
+void PmgViewerWorkspace::SaveArtifact(const std::string& name) {
+    if (!source_artifact_.has_value()) {
+        graph_status_ = "No built graph to save.";
+        return;
+    }
+    try {
+        std::filesystem::path path(name);
+        if (path.is_relative()) {
+            path = std::filesystem::path(PMG_OUTPUT_DIRECTORY) / path;
+        }
+        if (path.extension().empty()) {
+            path += ".pmg";
+        }
+        if (path.has_parent_path()) {
+            std::filesystem::create_directories(path.parent_path());
+        }
+        pmg::SavePmgArtifactText(*source_artifact_, path.string());
+        graph_status_ = "Saved artifact: " + path.string();
+    } catch (const std::exception& error) {
+        graph_status_ = std::string("Save failed: ") + error.what();
+    }
 }
 
 void PmgViewerWorkspace::BuildGraphRuntime() {
     graph_ready_ = false;
     graph_controller_.reset();
+    // The sandbox self-edge graph has no backing artifact; drop any retained one
+    // so "Save artifact" cannot write stale metadata from a prior build/load.
+    source_artifact_.reset();
     // A new graph invalidates the achieved-turn-rate table and any active goto.
     steering_.reset();
     goto_active_ = false;
@@ -462,8 +513,52 @@ void PmgViewerWorkspace::BuildGraphSection() {
         "interpolates its reachable target region and transition phases, aligns "
         "the target motion, then blends through the metric window.");
     ImGui::Text("Nodes: %d   edges: %d", graph_.NumNodes(), graph_.NumEdges());
+
+    // Build a full multi-node graph from a spec file (same core path as the CLI
+    // --build-graph), then optionally save the artifact for later launch/load.
+    ImGui::Separator();
+    ImGui::TextDisabled("Build multi-node graph from a .pmg_spec");
+    if (spec_files_.empty()) {
+        ImGui::TextDisabled("No .pmg_spec files found in the spec directory.");
+    } else {
+        if (selected_spec_index_ < 0 ||
+            selected_spec_index_ >= static_cast<int>(spec_files_.size())) {
+            selected_spec_index_ = 0;
+        }
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::BeginCombo(
+                "##spec_select",
+                spec_files_[selected_spec_index_].filename().string().c_str())) {
+            for (int i = 0; i < static_cast<int>(spec_files_.size()); ++i) {
+                const bool selected = (i == selected_spec_index_);
+                if (ImGui::Selectable(
+                        spec_files_[i].filename().string().c_str(), selected)) {
+                    selected_spec_index_ = i;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (ImGui::Button("Build graph from spec")) {
+            BuildArtifactFromSpec(spec_files_[selected_spec_index_].string());
+        }
+        if (source_artifact_.has_value()) {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(180.0f);
+            ImGui::InputTextWithHint("##save_name", "artifact filename",
+                                     save_artifact_name_,
+                                     sizeof(save_artifact_name_));
+            ImGui::SameLine();
+            if (ImGui::Button("Save artifact") &&
+                save_artifact_name_[0] != '\0') {
+                SaveArtifact(save_artifact_name_);
+            }
+        }
+    }
+
+    ImGui::Separator();
     ImGui::TextDisabled(
-        "Interactive build uses TGOOD/TBAD from Transition Grid.");
+        "Self-edge sandbox: builds one node + self-transition from the live "
+        "Motion Space, using TGOOD/TBAD from Transition Grid.");
     if (ImGui::Button("Build single-node graph from Motion Space")) {
         BuildGraphRuntime();
     }

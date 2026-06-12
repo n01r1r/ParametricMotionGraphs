@@ -351,9 +351,12 @@ if(PMG_BUILD_VIEWER)
         PRIVATE pmg_core
     )
 
-    # Resolve the BVH corpus next to the source tree at runtime.
+    # Resolve the BVH corpus and spec library next to the source tree at
+    # runtime; write built artifacts into the (always-writable) build tree.
     target_compile_definitions(pmg_viewer_workspace PRIVATE
-        PMG_BVH_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/BVH")
+        PMG_BVH_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/BVH"
+        PMG_SPEC_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/specs"
+        PMG_OUTPUT_DIRECTORY="${CMAKE_BINARY_DIR}/viewer_out")
 
     add_executable(pmg_viewer apps/viewer/main.cpp)
     target_link_libraries(pmg_viewer PRIVATE
