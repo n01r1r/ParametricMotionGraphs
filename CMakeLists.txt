@@ -251,6 +251,12 @@ if(PMG_BUILD_TESTS)
         COMMAND pmg_cli --build-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/transition_box_shrink.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
+
+    # Diagnose must honor the spec's per-edge edge_config: walk->jog needs
+    # TGOOD=3.5, so default 0.5 would falsely report a reject (exit 1).
+    add_test(NAME cli_diagnose_walk_jog_edge
+        COMMAND pmg_cli --diagnose-graph-edge
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_jog.pmg_spec walk jog)
 endif()
 
 # ---------------------------------------------------------------------------
