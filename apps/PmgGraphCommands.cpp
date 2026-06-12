@@ -515,6 +515,13 @@ int BuildGraphCommand(const std::string& spec_path,
     std::cout << "format=PMG_GRAPH_V6\n";
     std::cout << "nodes=" << artifact.graph.NumNodes()
               << " edges=" << artifact.graph.NumEdges() << "\n";
+    for (const pmg::EdgeBuildMetadata& edge_build : artifact.metadata.edge_builds) {
+        if (!edge_build.report.edge_created) {
+            std::cout << "warning: dropped edge '" << edge_build.source_node
+                      << " -> " << edge_build.target_node << "': "
+                      << edge_build.report.reject_reason << "\n";
+        }
+    }
     std::cout << "skeleton_joints=" << artifact.skeleton.NumJoints() << "\n";
     std::cout << "generated_frame_count="
               << artifact.metadata.generated_frame_count << "\n";
