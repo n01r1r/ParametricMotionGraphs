@@ -53,6 +53,10 @@ struct GraphSpec {
 // whitespace.
 GraphSpec LoadGraphSpec(const std::string& path);
 
+// Graph-only compatibility build. Motion spaces use the same production
+// preparation as BuiltPmgArtifact, but this result omits the Skeleton and
+// reproducibility metadata required by ADR-0001. Prefer
+// BuildPmgArtifactFromSpec for offline/online workflows.
 ParametricMotionGraph BuildGraphFromSpec(
     const GraphSpec& spec,
     const PmgBuilderConfig& builder_config,

@@ -1,7 +1,6 @@
 #include "PmgCommandModules.h"
 
 #include "pmg/AlignmentStrategy.h"
-#include "pmg/BvhLoader.h"
 #include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
@@ -9,13 +8,12 @@
 #include "pmg/GraphSpec.h"
 #include "pmg/MotionDistance.h"
 #include "pmg/MotionRegistration.h"
+#include "pmg/MotionSpacePreparation.h"
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/RuntimeController.h"
-#include "pmg/SkeletonCompatibility.h"
 #include "pmg/legacy/FrameCountClipGeneration.h"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -34,27 +32,6 @@
 namespace {
 
 
-std::string LowercaseCopy(std::string text) {
-    std::transform(
-        text.begin(), text.end(), text.begin(),
-        [](unsigned char character) {
-            return static_cast<char>(std::tolower(character));
-        });
-    return text;
-}
-
-std::optional<int> FindJointExact(
-    const pmg::Skeleton& skeleton,
-    const std::string& joint_name) {
-    const std::string target = LowercaseCopy(joint_name);
-    for (int joint_index = 0; joint_index < skeleton.NumJoints(); ++joint_index) {
-        if (LowercaseCopy(skeleton.joints[joint_index].name) == target) {
-            return joint_index;
-        }
-    }
-    return std::nullopt;
-}
-
 float HorizontalLength(const pmg::Vec3& value) {
     return std::sqrt(value.x * value.x + value.z * value.z);
 }
@@ -71,43 +48,18 @@ std::vector<std::string> SplitCommaList(const std::string& text) {
     return items;
 }
 
-std::vector<int> ResolveJointList(
-    const pmg::Skeleton& skeleton,
-    const std::string& comma_names) {
-    std::vector<int> indices;
-    for (const std::string& name : SplitCommaList(comma_names)) {
-        const std::optional<int> index = FindJointExact(skeleton, name);
-        if (!index) {
-            throw std::runtime_error("unknown joint '" + name + "'");
-        }
-        indices.push_back(*index);
-    }
-    if (indices.empty()) {
-        throw std::runtime_error("no contact joints given");
-    }
-    return indices;
-}
-
-const pmg::GraphSpecNode& FindSpecNodeForCli(
-    const pmg::GraphSpec& spec,
-    const std::string& name) {
-    for (const pmg::GraphSpecNode& node : spec.nodes) {
-        if (node.name == name) {
-            return node;
-        }
-    }
-    throw std::runtime_error("GraphSpec CLI: unknown node '" + name + "'");
-}
-
 struct SpaceSweepOptions {
     std::string spec_path;
     std::string node_name;
     std::string contact_joints_csv = "LeftAnkle,RightAnkle";
     std::string cycle_joint;  // empty = use example clips as authored
+    bool contact_joints_set = false;
+    bool cycle_joint_set = false;
     int sweep_steps = 11;
     // Floor for contact run length; real mocap shows spurious 1-2 frame
     // grazes that would break anchor-structure matching across examples.
     int min_contact_frames = 3;
+    bool min_contact_frames_set = false;
     // Assert thresholds; negative = report only.
     int min_contacts = -1;
     float max_foot_slide = -1.0f;
@@ -120,6 +72,37 @@ struct SpaceSweepOptions {
     // generated clips and require it to cut the residual slide.
     bool foot_lock = false;
 };
+
+void RequireMatchingProductionRegistration(
+    const pmg::NodeRegistrationMetadata& registration,
+    const std::string& node_name,
+    const std::string& cycle_joint,
+    bool cycle_joint_set,
+    const std::vector<std::string>& contact_joints,
+    bool contact_joints_set,
+    int min_contact_frames,
+    bool min_contact_frames_set,
+    const char* command) {
+    if (cycle_joint_set && registration.cycle_joint != cycle_joint) {
+        throw std::runtime_error(
+            std::string(command) + ": --cycle-joint does not match node '" +
+            node_name + "' production registration");
+    }
+    if (contact_joints_set &&
+        registration.contact_joints != contact_joints) {
+        throw std::runtime_error(
+            std::string(command) +
+            ": --contact-joints does not match node '" + node_name +
+            "' production registration");
+    }
+    if (min_contact_frames_set &&
+        registration.min_contact_frames != min_contact_frames) {
+        throw std::runtime_error(
+            std::string(command) +
+            ": --min-contact-frames does not match node '" + node_name +
+            "' production registration");
+    }
+}
 
 struct SweepMetrics {
     int min_contacts = 0;
@@ -257,67 +240,44 @@ SweepMetrics MeasureSpaceSweep(
     return metrics;
 }
 
-// Build one node's motion space from a graph spec, optionally normalizing
-// every example to its first gait cycle.
-pmg::ParametricMotionSpace BuildSpaceForSweep(
-    const pmg::GraphSpec& spec,
-    const std::string& node_name,
-    const std::string& cycle_joint,
-    pmg::Skeleton& skeleton_out) {
-    const pmg::GraphSpecNode& node = FindSpecNodeForCli(spec, node_name);
-    pmg::ParametricMotionSpace space(node.name, node.parameter_dimension);
-
-    std::optional<pmg::Skeleton> reference_skeleton;
-    for (const pmg::GraphSpecExample& example : spec.examples) {
-        if (example.node_name != node_name) {
-            continue;
-        }
-        const pmg::BvhData data = pmg::BvhLoader::Load(example.bvh_path);
-        if (!reference_skeleton.has_value()) {
-            reference_skeleton = data.skeleton;
-        } else {
-            pmg::RequireSkeletonCompatible(*reference_skeleton, data.skeleton,
-                                           "--space-sweep", 1.0e-4f);
-        }
-
-        pmg::MotionClip clip = data.clip;
-        if (!cycle_joint.empty()) {
-            const std::optional<int> joint = FindJointExact(data.skeleton, cycle_joint);
-            if (!joint) {
-                throw std::runtime_error("--space-sweep: unknown cycle joint '" + cycle_joint + "'");
-            }
-            const pmg::ContactDetectionSettings cycle_settings =
-                pmg::EstimateContactSettings(data.skeleton, data.clip, {*joint});
-            clip = pmg::ExtractFirstCycle(data.skeleton, data.clip, *joint, cycle_settings);
-            std::cout << "cycle " << example.bvh_path << ": frames " << data.clip.NumFrames()
-                      << " -> " << clip.NumFrames() << "\n";
-        }
-        space.AddExample(example.parameter, std::move(clip));
-    }
-
-    if (space.NumExamples() == 0) {
-        throw std::runtime_error("--space-sweep: node '" + node_name + "' has no examples");
-    }
-    skeleton_out = *reference_skeleton;
-    return space;
-}
-
 // Phase 2 diagnostic: numerically verify that a parametric motion space
 // produces smooth, contact-preserving motion across its parameter range, and
 // that contact registration does not regress the naive blend. Exit code is
 // nonzero when an assert threshold is violated.
 int SpaceSweepCommand(const SpaceSweepOptions& options) {
     const pmg::GraphSpec spec = pmg::LoadGraphSpec(options.spec_path);
+    pmg::MotionSpacePreparationConfig preparation_config;
+    preparation_config.default_cycle_joint = options.cycle_joint;
+    preparation_config.default_contact_joints =
+        SplitCommaList(options.contact_joints_csv);
+    preparation_config.default_min_contact_frames =
+        options.min_contact_frames;
+    preparation_config.default_dtw_refine = options.dtw_refine;
+    const pmg::PreparedMotionSpaces prepared =
+        pmg::PrepareMotionSpaces(spec, preparation_config);
+    const pmg::PreparedMotionSpace& prepared_node =
+        prepared.Node(options.node_name);
+    RequireMatchingProductionRegistration(
+        prepared_node.registration, options.node_name,
+        options.cycle_joint, options.cycle_joint_set,
+        SplitCommaList(options.contact_joints_csv),
+        options.contact_joints_set, options.min_contact_frames,
+        options.min_contact_frames_set, "--space-sweep");
+    if (!prepared_node.contact_registered.has_value() ||
+        !prepared_node.contact_settings.has_value()) {
+        throw std::runtime_error(
+            "--space-sweep: node '" + options.node_name +
+            "' has no contact Registration");
+    }
 
-    pmg::Skeleton skeleton;
-    pmg::ParametricMotionSpace naive_space =
-        BuildSpaceForSweep(spec, options.node_name, options.cycle_joint, skeleton);
-
-    const std::vector<int> contact_joints =
-        ResolveJointList(skeleton, options.contact_joints_csv);
-    pmg::ContactDetectionSettings settings = pmg::EstimateContactSettings(
-        skeleton, naive_space.Examples().front().clip, contact_joints);
-    settings.min_contact_frames = options.min_contact_frames;
+    const pmg::Skeleton& skeleton = prepared.skeleton;
+    const pmg::ParametricMotionSpace& naive_space = prepared_node.authored;
+    const pmg::ParametricMotionSpace& registered_space =
+        *prepared_node.contact_registered;
+    const std::vector<int>& contact_joints =
+        prepared_node.contact_joint_indices;
+    const pmg::ContactDetectionSettings& settings =
+        *prepared_node.contact_settings;
     std::cout << "contact settings: height_threshold=" << settings.height_threshold
               << " speed_threshold=" << settings.speed_threshold
               << " min_contact_frames=" << settings.min_contact_frames << "\n";
@@ -336,8 +296,6 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
     const int generated_frame_count = naive_space.Examples().front().clip.NumFrames();
     const float frames_per_second = naive_space.Examples().front().clip.frames_per_second;
 
-    pmg::ParametricMotionSpace registered_space = naive_space;
-    pmg::RegisterSpaceByContacts(registered_space, skeleton, contact_joints, settings);
     std::cout << "registered=yes\n";
 
     const SweepMetrics naive = MeasureSpaceSweep(
@@ -350,7 +308,13 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
     std::optional<SweepMetrics> dtw;
     pmg::ParametricMotionSpace best_space = registered_space;
     if (options.dtw_refine) {
-        pmg::RefineRegistrationByDtw(best_space, skeleton, {});
+        if (!prepared_node.dtw_refined.has_value()) {
+            throw std::runtime_error(
+                "--space-sweep: --dtw-refine requested, but node '" +
+                options.node_name +
+                "' disables DTW refinement in its production registration");
+        }
+        best_space = *prepared_node.dtw_refined;
         std::cout << "dtw_refined=yes\n";
         dtw = MeasureSpaceSweep(
             best_space, skeleton, contact_joints, settings, options.sweep_steps,
@@ -475,7 +439,10 @@ struct ValidateGraphOptions {
     std::string spec_path;
     std::string contact_joints_csv = "LeftAnkle,RightAnkle";
     std::string cycle_joint;
+    bool contact_joints_set = false;
+    bool cycle_joint_set = false;
     int min_contact_frames = 3;
+    bool min_contact_frames_set = false;
     pmg::PmgBuilderConfig builder;
     // Assert thresholds on the registered build; negative = report only.
     int min_edge_samples = -1;
@@ -554,27 +521,33 @@ void PrintEdgeQuality(const char* label, const EdgeQuality& quality) {
 
 int ValidateGraphCommand(const ValidateGraphOptions& options) {
     const pmg::GraphSpec spec = pmg::LoadGraphSpec(options.spec_path);
+    pmg::MotionSpacePreparationConfig preparation_config;
+    preparation_config.default_cycle_joint = options.cycle_joint;
+    preparation_config.default_contact_joints =
+        SplitCommaList(options.contact_joints_csv);
+    preparation_config.default_min_contact_frames =
+        options.min_contact_frames;
+    preparation_config.default_dtw_refine = true;
+    preparation_config.calibration_frames_per_second =
+        options.builder.generated_frames_per_second;
+    const pmg::PreparedMotionSpaces prepared =
+        pmg::PrepareMotionSpaces(spec, preparation_config);
 
-    // Build every node's space twice: as-authored (naive) and registered.
+    // Compare authored inputs against the exact production motion spaces
+    // consumed by artifact edge construction.
     std::map<std::string, pmg::ParametricMotionSpace> naive_spaces;
-    std::map<std::string, pmg::ParametricMotionSpace> registered_spaces;
-    pmg::Skeleton skeleton;
+    std::map<std::string, pmg::ParametricMotionSpace> production_spaces;
     for (const pmg::GraphSpecNode& node : spec.nodes) {
-        pmg::ParametricMotionSpace space =
-            BuildSpaceForSweep(spec, node.name, options.cycle_joint, skeleton);
-
-        const std::vector<int> contact_joints =
-            ResolveJointList(skeleton, options.contact_joints_csv);
-        pmg::ContactDetectionSettings settings = pmg::EstimateContactSettings(
-            skeleton, space.Examples().front().clip, contact_joints);
-        settings.min_contact_frames = options.min_contact_frames;
-
-        pmg::ParametricMotionSpace registered = space;
-        pmg::RegisterSpaceByContacts(registered, skeleton, contact_joints, settings);
-        pmg::RefineRegistrationByDtw(registered, skeleton, {});
-
-        naive_spaces.emplace(node.name, std::move(space));
-        registered_spaces.emplace(node.name, std::move(registered));
+        const pmg::PreparedMotionSpace& prepared_node =
+            prepared.Node(node.name);
+        RequireMatchingProductionRegistration(
+            prepared_node.registration, node.name, options.cycle_joint,
+            options.cycle_joint_set,
+            SplitCommaList(options.contact_joints_csv),
+            options.contact_joints_set, options.min_contact_frames,
+            options.min_contact_frames_set, "--validate-graph");
+        naive_spaces.emplace(node.name, prepared_node.authored);
+        production_spaces.emplace(node.name, prepared_node.production);
     }
 
     std::cout << "builder: TGOOD=" << options.builder.good_transition_threshold
@@ -595,55 +568,58 @@ int ValidateGraphCommand(const ValidateGraphOptions& options) {
         std::cout << "=== edge " << edge.source_node << " -> " << edge.target_node << " ===\n";
 
         const pmg::EdgeBuildResult naive_result = pmg::PmgBuilder::BuildEdgeWithReport(
-            skeleton, 0, 0, naive_spaces.at(edge.source_node),
+            prepared.skeleton, 0, 0, naive_spaces.at(edge.source_node),
             naive_spaces.at(edge.target_node), options.builder);
-        const pmg::EdgeBuildResult registered_result = pmg::PmgBuilder::BuildEdgeWithReport(
-            skeleton, 0, 0, registered_spaces.at(edge.source_node),
-            registered_spaces.at(edge.target_node), options.builder);
+        const pmg::EdgeBuildResult production_result =
+            pmg::PmgBuilder::BuildEdgeWithReport(
+                prepared.skeleton, 0, 0,
+                production_spaces.at(edge.source_node),
+                production_spaces.at(edge.target_node), options.builder);
 
         const EdgeQuality naive = MeasureEdgeQuality(
             naive_result, naive_spaces.at(edge.target_node));
-        const EdgeQuality registered = MeasureEdgeQuality(
-            registered_result, registered_spaces.at(edge.target_node));
+        const EdgeQuality production = MeasureEdgeQuality(
+            production_result, production_spaces.at(edge.target_node));
 
         PrintEdgeQuality("naive", naive);
-        PrintEdgeQuality("registered", registered);
-        if (!registered_result.report.edge_created) {
-            std::cout << "registered_reject_reason=" << registered_result.report.reject_reason
+        PrintEdgeQuality("production", production);
+        if (!production_result.report.edge_created) {
+            std::cout << "production_reject_reason="
+                      << production_result.report.reject_reason
                       << "\n";
         }
 
-        fail_if(!registered.created, "registered edge not created");
+        fail_if(!production.created, "production edge not created");
         if (options.min_edge_samples >= 0) {
-            fail_if(registered.samples < options.min_edge_samples,
-                    "registered_samples=" + std::to_string(registered.samples) + " < " +
+            fail_if(production.samples < options.min_edge_samples,
+                    "production_samples=" + std::to_string(production.samples) + " < " +
                         std::to_string(options.min_edge_samples));
         }
         if (options.min_good_fraction >= 0.0f) {
-            fail_if(registered.mean_good_fraction < options.min_good_fraction,
-                    "registered_mean_good_fraction=" +
-                        std::to_string(registered.mean_good_fraction) + " < " +
+            fail_if(production.mean_good_fraction < options.min_good_fraction,
+                    "production_mean_good_fraction=" +
+                        std::to_string(production.mean_good_fraction) + " < " +
                         std::to_string(options.min_good_fraction));
         }
         // Distribution comparisons are only meaningful when both builds
         // covered the same source samples (a rejected build aborts early).
         if (options.assert_no_regression) {
-            fail_if(!naive.created || !registered.created,
+            fail_if(!naive.created || !production.created,
                     "no-regression comparison needs both builds to complete; "
                     "loosen --tgood/--tbad");
-            if (naive.created && registered.created) {
-                fail_if(registered.mean_good_fraction < naive.mean_good_fraction * 0.95f,
-                        "registration shrank GOOD fraction: " +
-                            std::to_string(registered.mean_good_fraction) + " < " +
+            if (naive.created && production.created) {
+                fail_if(production.mean_good_fraction < naive.mean_good_fraction * 0.95f,
+                        "production preparation shrank GOOD fraction: " +
+                            std::to_string(production.mean_good_fraction) + " < " +
                             std::to_string(naive.mean_good_fraction));
                 // Gate only on the BEST transition per source sample: that is
                 // what the runtime schedules. Median/p25 are reported but not
                 // gated: registration de-smears the targets' timing, so far
                 // parameters legitimately become more distant while the best
                 // transition improves.
-                fail_if(registered.mean_min_distance > naive.mean_min_distance * 1.05f,
-                        "registration worsened best transition distance: " +
-                            std::to_string(registered.mean_min_distance) + " > " +
+                fail_if(production.mean_min_distance > naive.mean_min_distance * 1.05f,
+                        "production preparation worsened best transition distance: " +
+                            std::to_string(production.mean_min_distance) + " > " +
                             std::to_string(naive.mean_min_distance));
             }
         }
@@ -670,10 +646,13 @@ ValidateGraphOptions ParseValidateGraphOptions(int argc, char** argv) {
         };
         if (option == "--contact-joints") {
             options.contact_joints_csv = require_value("--contact-joints");
+            options.contact_joints_set = true;
         } else if (option == "--cycle-joint") {
             options.cycle_joint = require_value("--cycle-joint");
+            options.cycle_joint_set = true;
         } else if (option == "--min-contact-frames") {
             options.min_contact_frames = std::stoi(require_value("--min-contact-frames"));
+            options.min_contact_frames_set = true;
         } else if (option == "--tgood") {
             options.builder.good_transition_threshold = std::stof(require_value("--tgood"));
         } else if (option == "--tbad") {
@@ -716,12 +695,15 @@ SpaceSweepOptions ParseSpaceSweepOptions(int argc, char** argv) {
         };
         if (option == "--contact-joints") {
             options.contact_joints_csv = require_value("--contact-joints");
+            options.contact_joints_set = true;
         } else if (option == "--cycle-joint") {
             options.cycle_joint = require_value("--cycle-joint");
+            options.cycle_joint_set = true;
         } else if (option == "--sweep-steps") {
             options.sweep_steps = std::stoi(require_value("--sweep-steps"));
         } else if (option == "--min-contact-frames") {
             options.min_contact_frames = std::stoi(require_value("--min-contact-frames"));
+            options.min_contact_frames_set = true;
         } else if (option == "--min-contacts") {
             options.min_contacts = std::stoi(require_value("--min-contacts"));
         } else if (option == "--max-foot-slide") {

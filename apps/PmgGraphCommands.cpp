@@ -1,17 +1,16 @@
 #include "PmgCommandModules.h"
 
 #include "pmg/AlignmentStrategy.h"
-#include "pmg/BvhLoader.h"
 #include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
 #include "pmg/GraphIo.h"
 #include "pmg/GraphSpec.h"
 #include "pmg/MotionDistance.h"
+#include "pmg/MotionSpacePreparation.h"
 #include "pmg/MotionRegistration.h"
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/RuntimeController.h"
-#include "pmg/SkeletonCompatibility.h"
 
 #include <algorithm>
 #include <cctype>
@@ -21,7 +20,6 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <map>
 #include <optional>
 #include <random>
 #include <sstream>
@@ -31,11 +29,6 @@
 
 
 namespace {
-
-struct GraphSpecBuildInputs {
-    pmg::Skeleton skeleton;
-    std::map<std::string, pmg::ParametricMotionSpace> spaces;
-};
 
 void PrintParameterVector(const pmg::ParameterVector& parameter) {
     std::cout << "[";
@@ -70,44 +63,6 @@ const pmg::GraphSpecNode& FindSpecNodeForCli(
     throw std::runtime_error("GraphSpec CLI: unknown node '" + name + "'");
 }
 
-GraphSpecBuildInputs LoadSpecInputsForCli(
-    const pmg::GraphSpec& spec,
-    float skeleton_offset_tolerance = 1.0e-4f) {
-    if (spec.nodes.empty()) {
-        throw std::runtime_error("GraphSpec CLI: spec contains no nodes");
-    }
-
-    GraphSpecBuildInputs inputs;
-    for (const pmg::GraphSpecNode& node : spec.nodes) {
-        inputs.spaces.emplace(node.name,
-                              pmg::ParametricMotionSpace(node.name, node.parameter_dimension));
-    }
-
-    std::optional<pmg::Skeleton> reference_skeleton;
-    for (const pmg::GraphSpecExample& example : spec.examples) {
-        const auto space_it = inputs.spaces.find(example.node_name);
-        if (space_it == inputs.spaces.end()) {
-            throw std::runtime_error("GraphSpec CLI: example references unknown node '" +
-                                     example.node_name + "'");
-        }
-
-        const pmg::BvhData data = pmg::BvhLoader::Load(example.bvh_path);
-        if (!reference_skeleton.has_value()) {
-            reference_skeleton = data.skeleton;
-        } else {
-            pmg::RequireSkeletonCompatible(*reference_skeleton, data.skeleton,
-                                           "GraphSpec CLI", skeleton_offset_tolerance);
-        }
-        space_it->second.AddExample(example.parameter, data.clip);
-    }
-
-    if (!reference_skeleton.has_value()) {
-        throw std::runtime_error("GraphSpec CLI: spec contains no examples");
-    }
-    inputs.skeleton = *reference_skeleton;
-    return inputs;
-}
-
 int ValidateGraphSpecCommand(const std::string& spec_path) {
     const pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
     std::cout << "graph spec: " << spec_path << "\n";
@@ -123,11 +78,12 @@ int ValidateGraphSpecCommand(const std::string& spec_path) {
                   << " examples=" << example_count << "\n";
     }
 
-    const GraphSpecBuildInputs inputs = LoadSpecInputsForCli(spec);
-    std::cout << "skeleton: joints=" << inputs.skeleton.NumJoints()
+    const pmg::PreparedMotionSpaces prepared =
+        pmg::PrepareMotionSpaces(spec);
+    std::cout << "skeleton: joints=" << prepared.skeleton.NumJoints()
               << " compatible=yes\n";
-    for (const auto& item : inputs.spaces) {
-        const pmg::ParametricMotionSpace& space = item.second;
+    for (const auto& item : prepared.nodes) {
+        const pmg::ParametricMotionSpace& space = item.second.production;
         std::cout << "space " << item.first
                   << ": dim=" << space.ParameterDimension()
                   << " examples=" << space.NumExamples();
@@ -183,16 +139,13 @@ int DiagnoseGraphEdgeCommand(
     const std::string& target_node,
     const pmg::PmgBuilderConfig& config) {
     const pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
-    const GraphSpecBuildInputs inputs = LoadSpecInputsForCli(spec);
-
-    const auto source_it = inputs.spaces.find(source_node);
-    const auto target_it = inputs.spaces.find(target_node);
-    if (source_it == inputs.spaces.end()) {
-        throw std::runtime_error("--diagnose-graph-edge: unknown source node '" + source_node + "'");
-    }
-    if (target_it == inputs.spaces.end()) {
-        throw std::runtime_error("--diagnose-graph-edge: unknown target node '" + target_node + "'");
-    }
+    pmg::MotionSpacePreparationConfig preparation_config;
+    preparation_config.calibration_frames_per_second =
+        config.generated_frames_per_second;
+    const pmg::PreparedMotionSpaces prepared =
+        pmg::PrepareMotionSpaces(spec, preparation_config);
+    const pmg::PreparedMotionSpace& source = prepared.Node(source_node);
+    const pmg::PreparedMotionSpace& target = prepared.Node(target_node);
 
     std::cout << "diagnose edge: " << source_node << " -> " << target_node << "\n";
     std::cout << "config: TGOOD=" << config.good_transition_threshold
@@ -201,7 +154,7 @@ int DiagnoseGraphEdgeCommand(
               << " target_samples=" << config.target_sample_count << "\n";
 
     const pmg::EdgeBuildResult result = pmg::PmgBuilder::BuildEdgeWithReport(
-        inputs.skeleton, 0, 1, source_it->second, target_it->second, config);
+        prepared.skeleton, 0, 1, source.production, target.production, config);
     std::cout << "transition_samples=" << result.edge.samples.size() << "\n";
     PrintEdgeBuildReport(result.report);
     return result.edge.samples.empty() ? 1 : 0;

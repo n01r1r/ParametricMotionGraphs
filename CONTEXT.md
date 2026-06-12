@@ -52,6 +52,14 @@ _Avoid_: fixed frame count except through the isolated
 The control coordinates of a motion space (e.g. turn rate, speed).
 _Avoid_: feature, input, control vector.
 
+**Motion-space preparation**:
+The offline Module that loads GraphSpec examples against one compatible
+Skeleton, optionally extracts one cycle, installs contact Registration and DTW
+refinement, and calibrates the declared ParameterMetric. It exposes authored
+and registered snapshots for diagnostics while the production snapshot is the
+one inserted into BuiltPmgArtifact.
+_Avoid_: spec loading, diagnostic space build, registration pipeline.
+
 ### Registration
 
 **ContactInterval**:
