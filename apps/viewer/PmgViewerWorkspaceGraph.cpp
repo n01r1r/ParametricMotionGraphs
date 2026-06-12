@@ -1,4 +1,4 @@
-#include "ViewerApp.h"
+#include "PmgViewerWorkspace.h"
 
 #include <imgui.h>
 
@@ -106,7 +106,7 @@ void DrawArrowHead(
 
 // --- Graph runtime (PMG streaming) -----------------------------------------
 
-void ViewerApp::LoadGraphArtifact(const std::string& artifact_path) {
+void PmgViewerWorkspace::LoadGraphArtifact(const std::string& artifact_path) {
     steering_.reset();
     graph_controller_.reset();
     graph_alignment_.reset();
@@ -173,7 +173,7 @@ void ViewerApp::LoadGraphArtifact(const std::string& artifact_path) {
     status_message_ = graph_status_;
 }
 
-void ViewerApp::BuildGraphRuntime() {
+void PmgViewerWorkspace::BuildGraphRuntime() {
     graph_ready_ = false;
     graph_controller_.reset();
     // A new graph invalidates the achieved-turn-rate table and any active goto.
@@ -233,7 +233,7 @@ void ViewerApp::BuildGraphRuntime() {
     }
 }
 
-void ViewerApp::DrawGraphCanvas() {
+void PmgViewerWorkspace::DrawGraphCanvas() {
     if (!graph_ready_ || graph_.NumNodes() == 0) {
         return;
     }
@@ -456,7 +456,7 @@ void ViewerApp::DrawGraphCanvas() {
         "click = inspect   double-click node = set runtime target");
 }
 
-void ViewerApp::BuildGraphSection() {
+void PmgViewerWorkspace::BuildGraphSection() {
     ImGui::TextWrapped(
         "ParametricMotionGraph selects an edge from the active motion space, "
         "interpolates its reachable target region and transition phases, aligns "
@@ -586,7 +586,7 @@ void ViewerApp::BuildGraphSection() {
     }
 }
 
-void ViewerApp::DrawTransitionPipeline() {
+void PmgViewerWorkspace::DrawTransitionPipeline() {
     if (!graph_ready_ || !graph_controller_.has_value()) {
         return;
     }

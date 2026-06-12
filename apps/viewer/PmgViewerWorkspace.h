@@ -19,8 +19,7 @@
 #include "pmg/RuntimeController.h"
 #include "pmg/Skeleton.h"
 
-#include "Camera.h"
-#include "SkeletonRenderer.h"
+#include "ViewerWorkspace.h"
 
 namespace pmgviewer {
 
@@ -35,28 +34,28 @@ enum class ViewerPlaybackMode {
     GraphRuntime,
 };
 
-// Top-level viewer state: owns the loaded BVH motion, playback clock, the live
-// parametric-blend control, and produces a RenderScene each frame.
+// PMG Adapter: owns loaded BVH motion, playback, graph diagnostics, and the
+// conversion from pmg_core data into an algorithm-neutral RenderScene.
 //
-// Purpose: drive the skeleton renderer from pmg_core data and expose one
+// Purpose: drive the viewer workspace from pmg_core data and expose one
 // tabbed ImGui control window (workflow + transport on top; clips, blend,
-// distance grid, graph, and view settings as tabs).
+// distance grid, graph, and PMG display settings as tabs).
 // Assumptions: world is Y-up; a clip's lowest point over its whole duration is
 // rested on y = 0 so vertical dynamics are preserved.
-class ViewerApp {
+class PmgViewerWorkspace final : public ViewerWorkspace {
 public:
-    void Initialize(const std::string& artifact_path = {});
+    void Initialize(const std::string& artifact_path = {}) override;
 
-    void Update(float delta_seconds);
-    void BuildUi();
+    void Update(float delta_seconds) override;
+    void BuildUi() override;
 
     // Ray pick (display-space, e.g. from a right-click unprojected by main):
     // intersects the ground plane and, in graph runtime, places the goto
     // target there. Returns true when the click was consumed.
-    bool HandleGroundClick(const glm::vec3& ray_origin, const glm::vec3& ray_direction);
+    bool HandleGroundClick(
+        const glm::vec3& ray_origin, const glm::vec3& ray_direction) override;
 
-    const RenderScene& Scene() const { return scene_; }
-    OrbitCamera& Camera() { return camera_; }
+    const RenderScene& Scene() const override { return scene_; }
 
 private:
     struct PmgExample {
@@ -82,7 +81,7 @@ private:
     void BuildWorkflowSection();
     void BuildTransportSection();
     void BuildInputsSection();
-    void BuildViewSection();
+    void BuildDisplaySection();
     void BuildMotionSpaceSection();
     void BuildDistanceGridSection();
     void BuildGraphSection();
@@ -125,7 +124,6 @@ private:
     bool playing_ = true;
     float playback_speed_ = 1.0f;
     float current_time_seconds_ = 0.0f;
-    bool follow_centroid_ = true;
     float skeleton_scale_ = 1.0f;
     // Render-only display scale: BVH is loaded in native units (small), so the
     // viewer scales geometry up for display. The metric/core stay native; this
@@ -193,7 +191,6 @@ private:
     bool root_heading_initialized_ = false;
 
     RenderScene scene_;
-    OrbitCamera camera_;
 };
 
 }  // namespace pmgviewer
