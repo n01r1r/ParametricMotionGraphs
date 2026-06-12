@@ -93,7 +93,14 @@ private:
     void RecomputeHeatmap();
     void SaveHeatmapCsv();
     void BuildGraphRuntime();
+    void DiscoverSpecFiles();
+    void BuildArtifactFromSpec(const std::string& spec_path);
+    void SaveArtifact(const std::string& name);
     void LoadGraphArtifact(const std::string& artifact_path);
+    // Shared post-build/-load wiring: installs an artifact as the live runtime
+    // (skeleton, graph, controller) and retains it for lossless re-save.
+    void AdoptArtifact(pmg::BuiltPmgArtifact artifact,
+                       const std::string& status_label);
 
     // Goto steering delegates to the same core module as the CLI.
     void CalibrateSteering();
@@ -116,6 +123,13 @@ private:
     int selected_file_index_ = -1;
     char clip_filter_[64] = "";  // case-insensitive substring filter for the clip list
     std::string status_message_ = "No clip loaded.";
+
+    // Spec library (multi-node graph authoring source) and the artifact most
+    // recently built/loaded, kept whole so "Save artifact" is lossless.
+    std::vector<std::filesystem::path> spec_files_;
+    int selected_spec_index_ = -1;
+    char save_artifact_name_[128] = "viewer_graph.pmg";
+    std::optional<pmg::BuiltPmgArtifact> source_artifact_;
 
     pmg::Skeleton skeleton_;
     pmg::MotionClip clip_;

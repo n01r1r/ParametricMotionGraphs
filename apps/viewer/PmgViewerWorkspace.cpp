@@ -87,6 +87,7 @@ std::unique_ptr<ViewerWorkspace> CreatePmgViewerWorkspace() {
 
 void PmgViewerWorkspace::Initialize(const std::string& artifact_path) {
     DiscoverBvhFiles();
+    DiscoverSpecFiles();
     if (!bvh_files_.empty()) {
         LoadClip(0);
     }
@@ -109,6 +110,23 @@ void PmgViewerWorkspace::DiscoverBvhFiles() {
         }
     }
     std::sort(bvh_files_.begin(), bvh_files_.end());
+}
+
+void PmgViewerWorkspace::DiscoverSpecFiles() {
+    spec_files_.clear();
+    const std::filesystem::path directory(PMG_SPEC_DIRECTORY);
+    std::error_code error;
+    if (!std::filesystem::exists(directory, error)) {
+        return;
+    }
+    for (const auto& entry :
+         std::filesystem::directory_iterator(directory, error)) {
+        if (entry.is_regular_file() &&
+            entry.path().extension() == ".pmg_spec") {
+            spec_files_.push_back(entry.path());
+        }
+    }
+    std::sort(spec_files_.begin(), spec_files_.end());
 }
 
 float PmgViewerWorkspace::ComputeGroundOffset(
