@@ -4,6 +4,7 @@
 #include <cmath>
 #include <random>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace pmg {
@@ -178,7 +179,18 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
             sample_report.reject_reason = "no GOOD target samples";
             result.report.source_reports.push_back(sample_report);
             result.report.edge_created = false;
-            result.report.reject_reason = "source sample has no GOOD target samples";
+            // Paper Sec 6: an edge requires every source sample to reach the
+            // target. Surface the achievable distance vs threshold so the cause
+            // (incompatible spaces vs a too-low threshold) is self-evident
+            // instead of the bare "no GOOD target samples".
+            result.report.reject_reason =
+                "a source sample cannot transition to the target space (best "
+                "distance " + std::to_string(sample_report.min_distance) +
+                " > TGOOD " +
+                std::to_string(config.good_transition_threshold) +
+                "): spaces not transition-compatible over the whole source "
+                "range (paper Sec 6) -- restrict the source range, pick "
+                "compatible clips, or raise TGOOD";
             return result;
         }
 
