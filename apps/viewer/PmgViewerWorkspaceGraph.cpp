@@ -712,10 +712,27 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     ImGui::Separator();
     ImGui::TextDisabled("PMG transition chain");
 
+    constexpr const char* kSourceParameterLabel = "1  SOURCE PARAMETER";
+    constexpr const char* kReachableTargetLabel = "2  REACHABLE TARGET AABB";
+    constexpr const char* kTransitionPhasesLabel = "3  TRANSITION PHASES";
+    constexpr const char* kAlignmentTransformLabel = "4  ALIGNMENT TRANSFORM";
+    constexpr const char* kRuntimeBlendWindowLabel =
+        "5  RUNTIME BLEND WINDOW";
+    const float widest_label_width = std::max({
+        ImGui::CalcTextSize(kSourceParameterLabel).x,
+        ImGui::CalcTextSize(kReachableTargetLabel).x,
+        ImGui::CalcTextSize(kTransitionPhasesLabel).x,
+        ImGui::CalcTextSize(kAlignmentTransformLabel).x,
+        ImGui::CalcTextSize(kRuntimeBlendWindowLabel).x,
+    });
+    const float value_column_x =
+        ImGui::GetCursorPosX() + widest_label_width +
+        ImGui::GetStyle().ItemSpacing.x;
+
     ImGui::TextColored(
         ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        "1  SOURCE PARAMETER");
-    ImGui::SameLine(190.0f);
+        kSourceParameterLabel);
+    ImGui::SameLine(value_column_x);
     if (!source_parameter.empty()) {
         ImGui::Text(
             "%s  p=%.3f",
@@ -725,8 +742,8 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
 
     ImGui::TextColored(
         ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        "2  REACHABLE TARGET AABB");
-    ImGui::SameLine(190.0f);
+        kReachableTargetLabel);
+    ImGui::SameLine(value_column_x);
     const pmg::ParameterAabb* reachable_box = nullptr;
     if (active.has_value()) {
         reachable_box = &active->reachable_target_box;
@@ -750,8 +767,8 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
 
     ImGui::TextColored(
         ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        "3  TRANSITION PHASES");
-    ImGui::SameLine(190.0f);
+        kTransitionPhasesLabel);
+    ImGui::SameLine(value_column_x);
     if (active.has_value()) {
         ImGui::Text(
             "source %.3f -> target %.3f",
@@ -793,8 +810,8 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
 
     ImGui::TextColored(
         ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        "4  ALIGNMENT TRANSFORM");
-    ImGui::SameLine(190.0f);
+        kAlignmentTransformLabel);
+    ImGui::SameLine(value_column_x);
     if (active.has_value()) {
         ImGui::Text(
             "yaw %.3f rad   dx %.3f   dz %.3f",
@@ -807,8 +824,8 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
 
     ImGui::TextColored(
         ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        "5  RUNTIME BLEND WINDOW");
-    ImGui::SameLine(190.0f);
+        kRuntimeBlendWindowLabel);
+    ImGui::SameLine(value_column_x);
     if (active.has_value()) {
         ImGui::Text(
             "%d frames   %.3f / %.3f s",
