@@ -319,25 +319,45 @@ if(PMG_BUILD_VIEWER)
     )
     target_link_libraries(imgui_backend PUBLIC glfw OpenGL::GL)
 
-    add_executable(pmg_viewer
-        apps/viewer/main.cpp
+    add_library(viewer_host STATIC
         apps/viewer/Camera.cpp
         apps/viewer/MeshPrimitives.cpp
         apps/viewer/SkeletonRenderer.cpp
-        apps/viewer/ViewerApp.cpp
-        apps/viewer/ViewerGraphInspection.cpp
+        apps/viewer/ViewerHost.cpp
     )
-    target_link_libraries(pmg_viewer PRIVATE
-        pmg_core
+    target_include_directories(viewer_host PUBLIC apps/viewer)
+    target_link_libraries(viewer_host PUBLIC
         glfw
         libglew_static
         glm::glm
         imgui_backend
         OpenGL::GL
     )
-    target_compile_definitions(pmg_viewer PRIVATE GLEW_STATIC)
+    target_compile_definitions(viewer_host PUBLIC GLEW_STATIC)
+
+    add_library(pmg_viewer_workspace STATIC
+        apps/viewer/PmgViewerWorkspace.cpp
+        apps/viewer/PmgViewerWorkspaceGraph.cpp
+    )
+    target_include_directories(pmg_viewer_workspace PUBLIC apps/viewer)
+    target_link_libraries(pmg_viewer_workspace
+        PUBLIC viewer_host
+        PRIVATE pmg_core
+    )
 
     # Resolve the BVH corpus next to the source tree at runtime.
-    target_compile_definitions(pmg_viewer PRIVATE
+    target_compile_definitions(pmg_viewer_workspace PRIVATE
         PMG_BVH_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/BVH")
+
+    add_executable(pmg_viewer apps/viewer/main.cpp)
+    target_link_libraries(pmg_viewer PRIVATE
+        viewer_host
+        pmg_viewer_workspace
+    )
+
+    if(PMG_BUILD_TESTS)
+        add_executable(test_viewer_host tests/test_viewer_host.cpp)
+        target_link_libraries(test_viewer_host PRIVATE viewer_host)
+        add_test(NAME test_viewer_host COMMAND test_viewer_host)
+    endif()
 endif()

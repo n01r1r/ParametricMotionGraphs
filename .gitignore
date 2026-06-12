@@ -1,9 +1,6 @@
-# Build directories (CMake out-of-source; build/ pulls FetchContent deps ~500MB)
-/build/
-/build_*/
-build/
-build*/
-cmake-build-*/
+# Build directories (CMake out-of-source; viewer builds pull FetchContent deps)
+/build*/
+/cmake-build-*/
 
 # CMake artifacts
 CMakeCache.txt
@@ -40,7 +37,7 @@ Testing/
 *.swp
 *~
 
-# Viewer runtime output (layout + exported data)
+# Viewer runtime output and generated research artifacts
 imgui.ini
 distance_grid.csv
 /outputs/
@@ -49,15 +46,13 @@ distance_grid.csv
 *.bak
 *.zip
 
-# Claude Code / agent-local (machine-specific, not for the repo)
+# Agent-local files
 .claude/
+docs/STATUS.md
 
-# Source paper (copyright) + agent-local extract — kept locally, not tracked
+# Source papers and local extracts
 *.pdf
 PMGFullPaper.txt
-
-# Agent-local status / handoff doc — local working notes, not tracked
-docs/STATUS.md
 
 # OS noise
 .DS_Store

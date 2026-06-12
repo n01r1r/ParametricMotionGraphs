@@ -1,0 +1,43 @@
+#pragma once
+
+#include <memory>
+#include <string>
+
+#include "Camera.h"
+#include "SkeletonRenderer.h"
+#include "ViewerWorkspace.h"
+
+namespace pmgviewer {
+
+// Owns viewer-level camera, rendering, and input dispatch. Algorithm state and
+// diagnostics stay behind the ViewerWorkspace Interface.
+class ViewerHost {
+public:
+    explicit ViewerHost(std::unique_ptr<ViewerWorkspace> workspace);
+    ~ViewerHost();
+
+    ViewerHost(const ViewerHost&) = delete;
+    ViewerHost& operator=(const ViewerHost&) = delete;
+
+    void Initialize(const std::string& bootstrap_path);
+    void Shutdown();
+    void Update(float delta_seconds);
+    void BuildUi();
+    void Render(int framebuffer_width, int framebuffer_height);
+
+    bool HandleGroundClick(
+        const glm::vec3& ray_origin, const glm::vec3& ray_direction);
+
+    OrbitCamera& Camera() { return camera_; }
+
+private:
+    void BuildViewUi();
+
+    std::unique_ptr<ViewerWorkspace> workspace_;
+    OrbitCamera camera_;
+    SkeletonRenderer renderer_;
+    bool follow_scene_focus_ = true;
+    bool renderer_initialized_ = false;
+};
+
+}  // namespace pmgviewer

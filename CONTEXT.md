@@ -166,6 +166,16 @@ runtime turn rates rather than assuming authored clip curvature equals streamed
 behavior.
 _Avoid_: goto hack, steering helper.
 
+### Viewer
+
+**ViewerWorkspace**:
+The compile-time Interface between the algorithm-neutral ViewerHost and an
+algorithm-specific Adapter. A workspace owns algorithm state and diagnostics,
+updates them once per frame, consumes optional world-space pointer rays, and
+produces a neutral RenderScene. The ViewerHost owns camera, rendering, and
+window input; it does not include or link PMG Implementation.
+_Avoid_: viewer app, PMG viewer core, runtime plugin (loading is compile-time).
+
 ### Distance metric
 
 **Point-cloud metric**:

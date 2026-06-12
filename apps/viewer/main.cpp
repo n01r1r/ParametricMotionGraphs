@@ -20,8 +20,8 @@
 #include <exception>
 
 #include "Camera.h"
-#include "SkeletonRenderer.h"
-#include "ViewerApp.h"
+#include "PmgViewerWorkspaceFactory.h"
+#include "ViewerHost.h"
 
 namespace {
 
@@ -31,7 +31,7 @@ constexpr float kOrbitRadiansPerPixel = 0.01f;
 
 struct InputState {
     pmgviewer::OrbitCamera* camera = nullptr;
-    pmgviewer::ViewerApp* app = nullptr;
+    pmgviewer::ViewerHost* host = nullptr;
     bool dragging = false;
     double last_cursor_x = 0.0;
     double last_cursor_y = 0.0;
@@ -63,7 +63,7 @@ void ForwardGroundClick(GLFWwindow* window, const InputState& input) {
     far_point /= far_point.w;
     const glm::vec3 origin(near_point);
     const glm::vec3 direction = glm::normalize(glm::vec3(far_point) - origin);
-    input.app->HandleGroundClick(origin, direction);
+    input.host->HandleGroundClick(origin, direction);
 }
 
 void CursorPositionCallback(GLFWwindow* window, double x, double y) {
@@ -89,7 +89,7 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
         return;
     }
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS &&
-        !ImGui::GetIO().WantCaptureMouse && input->app != nullptr &&
+        !ImGui::GetIO().WantCaptureMouse && input->host != nullptr &&
         input->camera != nullptr) {
         ForwardGroundClick(window, *input);
         return;
@@ -179,15 +179,12 @@ int main(int argc, char** argv) {
     ImGui_ImplOpenGL3_Init("#version 330");
 
     try {
-        pmgviewer::ViewerApp app;
+        pmgviewer::ViewerHost app(pmgviewer::CreatePmgViewerWorkspace());
         app.Initialize(argc >= 2 ? argv[1] : "");
-
-        pmgviewer::SkeletonRenderer renderer;
-        renderer.Initialize();
 
         InputState input;
         input.camera = &app.Camera();
-        input.app = &app;
+        input.host = &app;
         glfwSetWindowUserPointer(window, &input);
         glfwSetCursorPosCallback(window, CursorPositionCallback);
         glfwSetMouseButtonCallback(window, MouseButtonCallback);
@@ -213,17 +210,7 @@ int main(int argc, char** argv) {
             int framebuffer_width = 0;
             int framebuffer_height = 0;
             glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
-            if (framebuffer_height > 0) {
-                app.Camera().SetAspectRatio(static_cast<float>(framebuffer_width) /
-                                            static_cast<float>(framebuffer_height));
-            }
-
-            renderer.Render(app.Scene(),
-                            app.Camera().ViewMatrix(),
-                            app.Camera().ProjectionMatrix(),
-                            app.Camera().Position(),
-                            framebuffer_width,
-                            framebuffer_height);
+            app.Render(framebuffer_width, framebuffer_height);
 
             ImGui::Render();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -240,7 +227,7 @@ int main(int argc, char** argv) {
             glfwSwapBuffers(window);
         }
 
-        renderer.Shutdown();
+        app.Shutdown();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "error: %s\n", error.what());
         ImGui_ImplOpenGL3_Shutdown();

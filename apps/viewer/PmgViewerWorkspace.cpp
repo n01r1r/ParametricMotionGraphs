@@ -1,4 +1,6 @@
-#include "ViewerApp.h"
+#include "PmgViewerWorkspace.h"
+
+#include "PmgViewerWorkspaceFactory.h"
 
 #include <imgui.h>
 
@@ -7,6 +9,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <string>
 
 #include "pmg/ForwardKinematics.h"
@@ -78,7 +81,11 @@ void DrawPhaseMarker(ImDrawList* draw_list, float phase, float left, float top,
 
 }  // namespace
 
-void ViewerApp::Initialize(const std::string& artifact_path) {
+std::unique_ptr<ViewerWorkspace> CreatePmgViewerWorkspace() {
+    return std::make_unique<PmgViewerWorkspace>();
+}
+
+void PmgViewerWorkspace::Initialize(const std::string& artifact_path) {
     DiscoverBvhFiles();
     if (!bvh_files_.empty()) {
         LoadClip(0);
@@ -88,7 +95,7 @@ void ViewerApp::Initialize(const std::string& artifact_path) {
     }
 }
 
-void ViewerApp::DiscoverBvhFiles() {
+void PmgViewerWorkspace::DiscoverBvhFiles() {
     bvh_files_.clear();
     const std::filesystem::path directory(PMG_BVH_DIRECTORY);
     std::error_code error;
@@ -104,8 +111,8 @@ void ViewerApp::DiscoverBvhFiles() {
     std::sort(bvh_files_.begin(), bvh_files_.end());
 }
 
-float ViewerApp::ComputeGroundOffset(const pmg::Skeleton& skeleton,
-                                     const pmg::MotionClip& clip) {
+float PmgViewerWorkspace::ComputeGroundOffset(
+    const pmg::Skeleton& skeleton, const pmg::MotionClip& clip) {
     float min_y = std::numeric_limits<float>::infinity();
     for (const pmg::Pose& frame : clip.frames) {
         if (frame.NumJoints() != skeleton.NumJoints()) {
@@ -121,7 +128,7 @@ float ViewerApp::ComputeGroundOffset(const pmg::Skeleton& skeleton,
     return -min_y;  // raise the lowest point onto y = 0
 }
 
-void ViewerApp::LoadClip(int file_index) {
+void PmgViewerWorkspace::LoadClip(int file_index) {
     if (file_index < 0 || file_index >= static_cast<int>(bvh_files_.size())) {
         return;
     }
@@ -139,16 +146,16 @@ void ViewerApp::LoadClip(int file_index) {
     }
 }
 
-bool ViewerApp::ParametricBlendActive() const {
+bool PmgViewerWorkspace::ParametricBlendActive() const {
     return mode_ == ViewerPlaybackMode::ParametricBlend && pmg_space_ready_;
 }
 
-bool ViewerApp::GraphRuntimeActive() const {
+bool PmgViewerWorkspace::GraphRuntimeActive() const {
     return mode_ == ViewerPlaybackMode::GraphRuntime && graph_ready_ &&
            graph_controller_.has_value();
 }
 
-const char* ViewerApp::ModeName(ViewerPlaybackMode mode) {
+const char* PmgViewerWorkspace::ModeName(ViewerPlaybackMode mode) {
     switch (mode) {
         case ViewerPlaybackMode::ClipPlayback:
             return "Clip playback";
@@ -160,20 +167,20 @@ const char* ViewerApp::ModeName(ViewerPlaybackMode mode) {
     return "Unknown";
 }
 
-void ViewerApp::ResetPlayback() {
+void PmgViewerWorkspace::ResetPlayback() {
     current_time_seconds_ = 0.0f;
     playback_speed_ = 1.0f;
     playing_ = true;
 }
 
-const pmg::Skeleton& ViewerApp::ActiveSkeleton() const {
+const pmg::Skeleton& PmgViewerWorkspace::ActiveSkeleton() const {
     if (ParametricBlendActive() || GraphRuntimeActive()) {
         return pmg_skeleton_;
     }
     return skeleton_;
 }
 
-float ViewerApp::ActiveReferenceDuration() const {
+float PmgViewerWorkspace::ActiveReferenceDuration() const {
     if (ParametricBlendActive() && !pmg_examples_.empty()) {
         return pmg_examples_.front().clip.DurationSeconds();
     }
@@ -183,7 +190,7 @@ float ViewerApp::ActiveReferenceDuration() const {
     return 0.0f;
 }
 
-pmg::Pose ViewerApp::CurrentPose() const {
+pmg::Pose PmgViewerWorkspace::CurrentPose() const {
     const float phase = NormalizedPhase(current_time_seconds_, ActiveReferenceDuration());
     if (ParametricBlendActive()) {
         return pmg_space_.EvaluatePose({pmg_parameter_}, phase);
@@ -194,7 +201,7 @@ pmg::Pose ViewerApp::CurrentPose() const {
     return clip_.SampleNormalizedPhase(phase);
 }
 
-void ViewerApp::RebuildScene(const pmg::Pose& pose) {
+void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     const pmg::Skeleton& skeleton = ActiveSkeleton();
     if (pose.NumJoints() != skeleton.NumJoints() || skeleton.NumJoints() == 0) {
         return;
@@ -270,9 +277,6 @@ void ViewerApp::RebuildScene(const pmg::Pose& pose) {
     }
 
     scene_.focus_point = centroid;
-    if (follow_centroid_) {
-        camera_.SetTarget(centroid);
-    }
 }
 
 // --- Goto steering (viewer port of CLI --goto) ------------------------------
@@ -281,7 +285,7 @@ void ViewerApp::RebuildScene(const pmg::Pose& pose) {
 // Differs from the example clips' own turn rates: each self-transition plays
 // only the target-phase -> source-gate slice per cycle, so the net heading
 // advance per hop is that slice's heading change (including sway).
-void ViewerApp::CalibrateSteering() {
+void PmgViewerWorkspace::CalibrateSteering() {
     steering_.reset();
     if (!graph_ready_ || pmg_examples_.empty()) {
         goto_status_ = "Build a graph first.";
@@ -303,7 +307,7 @@ void ViewerApp::CalibrateSteering() {
     }
 }
 
-void ViewerApp::UpdateGotoSteering(const pmg::Pose& pose) {
+void PmgViewerWorkspace::UpdateGotoSteering(const pmg::Pose& pose) {
     const float dx = goto_target_.x - pose.root_position.x;
     const float dz = goto_target_.y - pose.root_position.z;
     const float distance = std::sqrt(dx * dx + dz * dz);
@@ -319,7 +323,7 @@ void ViewerApp::UpdateGotoSteering(const pmg::Pose& pose) {
         steering_->RequestForPose(pose, goal).desired_parameter.front();
 }
 
-void ViewerApp::UpdateRootMotionDiagnostics(
+void PmgViewerWorkspace::UpdateRootMotionDiagnostics(
     const pmg::Pose& pose, float delta_seconds) {
     if (pose.local_rotations.empty()) {
         root_heading_initialized_ = false;
@@ -343,7 +347,7 @@ void ViewerApp::UpdateRootMotionDiagnostics(
     root_heading_initialized_ = true;
 }
 
-bool ViewerApp::HandleGroundClick(const glm::vec3& ray_origin,
+bool PmgViewerWorkspace::HandleGroundClick(const glm::vec3& ray_origin,
                                   const glm::vec3& ray_direction) {
     if (!GraphRuntimeActive()) {
         if (graph_ready_) {
@@ -376,7 +380,7 @@ bool ViewerApp::HandleGroundClick(const glm::vec3& ray_origin,
     return true;
 }
 
-void ViewerApp::Update(float delta_seconds) {
+void PmgViewerWorkspace::Update(float delta_seconds) {
     // Graph runtime: drive the RuntimeController and render its streamed pose.
     if (GraphRuntimeActive()) {
         if (playing_) {
@@ -404,7 +408,7 @@ void ViewerApp::Update(float delta_seconds) {
     RebuildScene(pose);
 }
 
-void ViewerApp::AddCurrentClipToSpace(float parameter) {
+void PmgViewerWorkspace::AddCurrentClipToSpace(float parameter) {
     if (clip_.NumFrames() == 0) {
         status_message_ = "Load a clip before adding it to the PMG space.";
         return;
@@ -433,7 +437,7 @@ void ViewerApp::AddCurrentClipToSpace(float parameter) {
     status_message_ = "Added '" + label + "' at parameter " + std::to_string(parameter);
 }
 
-std::vector<int> ViewerApp::ResolveContactJointIndices() const {
+std::vector<int> PmgViewerWorkspace::ResolveContactJointIndices() const {
     std::vector<int> joint_indices;
     for (int joint_index = 0; joint_index < pmg_skeleton_.NumJoints(); ++joint_index) {
         const std::string& joint_name = pmg_skeleton_.joints[joint_index].name;
@@ -459,7 +463,7 @@ std::vector<int> ViewerApp::ResolveContactJointIndices() const {
     return joint_indices;
 }
 
-void ViewerApp::RefreshExampleContacts(PmgExample& example) {
+void PmgViewerWorkspace::RefreshExampleContacts(PmgExample& example) {
     example.contact_intervals.clear();
     const std::vector<int> contact_joints = ResolveContactJointIndices();
     if (contact_joints.empty()) {
@@ -478,7 +482,7 @@ void ViewerApp::RefreshExampleContacts(PmgExample& example) {
     }
 }
 
-void ViewerApp::RebuildPmgSpace() {
+void PmgViewerWorkspace::RebuildPmgSpace() {
     if (pmg_examples_.empty()) {
         pmg_space_ready_ = false;
         mode_ = ViewerPlaybackMode::ClipPlayback;
@@ -512,7 +516,7 @@ void ViewerApp::RebuildPmgSpace() {
 // top (they are needed in every mode), the rest is tabbed. Seven floating
 // windows buried the 3D view and each other.
 
-void ViewerApp::BuildUi() {
+void PmgViewerWorkspace::BuildUi() {
     HandleShortcuts();
 
     ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
@@ -541,8 +545,8 @@ void ViewerApp::BuildUi() {
             BuildGraphSection();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("View")) {
-            BuildViewSection();
+        if (ImGui::BeginTabItem("Display")) {
+            BuildDisplaySection();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
@@ -551,7 +555,7 @@ void ViewerApp::BuildUi() {
     ImGui::End();
 }
 
-void ViewerApp::HandleShortcuts() {
+void PmgViewerWorkspace::HandleShortcuts() {
     const ImGuiIO& io = ImGui::GetIO();
     if (io.WantTextInput) {
         return;  // don't steal keys while the user types into an input
@@ -570,7 +574,7 @@ void ViewerApp::HandleShortcuts() {
     }
 }
 
-void ViewerApp::StepFrame(int direction) {
+void PmgViewerWorkspace::StepFrame(int direction) {
     if (GraphRuntimeActive()) {
         return;  // graph runtime is controller-driven; stepping is for clip/blend
     }
@@ -602,7 +606,7 @@ void ViewerApp::StepFrame(int direction) {
     current_time_seconds_ = time;
 }
 
-bool ViewerApp::ParameterSliderWithTicks(const char* label, float* value,
+bool PmgViewerWorkspace::ParameterSliderWithTicks(const char* label, float* value,
                                          float min_value, float max_value) {
     const float frame_width = ImGui::CalcItemWidth();
     const bool changed = ImGui::SliderFloat(label, value, min_value, max_value, "%.3f");
@@ -632,7 +636,7 @@ bool ViewerApp::ParameterSliderWithTicks(const char* label, float* value,
     return changed;
 }
 
-void ViewerApp::BuildWorkflowSection() {
+void PmgViewerWorkspace::BuildWorkflowSection() {
     ImGui::TextWrapped("%s", status_message_.c_str());
     ImGui::Separator();
 
@@ -686,7 +690,7 @@ void ViewerApp::BuildWorkflowSection() {
     mode_ = static_cast<ViewerPlaybackMode>(mode_int);
 }
 
-void ViewerApp::BuildTransportSection() {
+void PmgViewerWorkspace::BuildTransportSection() {
     ImGui::Text("Mode: %s", ModeName(mode_));
     if (clip_.NumFrames() > 0) {
         ImGui::SameLine();
@@ -740,7 +744,7 @@ void ViewerApp::BuildTransportSection() {
     ImGui::TextDisabled("space play/pause   .   arrows step   .   R reset");
 }
 
-void ViewerApp::BuildInputsSection() {
+void PmgViewerWorkspace::BuildInputsSection() {
     ImGui::TextWrapped(
         "Input and BVH diagnostics. BVH is the current asset format; playback, "
         "blending, and transitions operate on motion clips and motion spaces.");
@@ -799,22 +803,15 @@ void ViewerApp::BuildInputsSection() {
     }
 }
 
-void ViewerApp::BuildViewSection() {
-    ImGui::Checkbox("Follow motion centroid", &follow_centroid_);
-    const glm::vec3 target = camera_.Target();
-    ImGui::Text("Camera target: %.1f, %.1f, %.1f", target.x, target.y, target.z);
-    ImGui::TextDisabled("Drag left mouse to orbit, scroll to zoom.");
-    if (ImGui::Button("Reset camera")) {
-        camera_.Reset();
-        follow_centroid_ = true;
-    }
-    ImGui::Separator();
+void PmgViewerWorkspace::BuildDisplaySection() {
+    ImGui::TextWrapped(
+        "PMG motion is converted from native units into the neutral viewer scene.");
     ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
     ImGui::SliderFloat("Display scale", &display_scale_, 1.0f, 40.0f, "%.1fx");
     ImGui::TextDisabled("Display scale magnifies the whole world, travel included.");
 }
 
-void ViewerApp::BuildMotionSpaceSection() {
+void PmgViewerWorkspace::BuildMotionSpaceSection() {
     ImGui::TextWrapped(
         "ParametricMotionSpace = authored motion samples + semantic parameters + "
         "local blend weights + canonical phase registration.");
@@ -852,7 +849,7 @@ void ViewerApp::BuildMotionSpaceSection() {
     }
 }
 
-void ViewerApp::DrawParameterSpace(float query_parameter) {
+void PmgViewerWorkspace::DrawParameterSpace(float query_parameter) {
     if (!pmg_space_ready_ || pmg_examples_.empty()) {
         return;
     }
@@ -937,7 +934,7 @@ void ViewerApp::DrawParameterSpace(float query_parameter) {
     }
 }
 
-void ViewerApp::DrawPhaseTimeline(float canonical_phase) {
+void PmgViewerWorkspace::DrawPhaseTimeline(float canonical_phase) {
     if (!pmg_space_ready_ || pmg_examples_.empty()) {
         return;
     }
@@ -1005,7 +1002,7 @@ void ViewerApp::DrawPhaseTimeline(float canonical_phase) {
 
 // --- Distance Grid heatmap (transition visualization) ----------------------
 
-void ViewerApp::RecomputeHeatmap() {
+void PmgViewerWorkspace::RecomputeHeatmap() {
     heatmap_ready_ = false;
     heatmap_min_source_index_ = -1;
     heatmap_min_target_index_ = -1;
@@ -1074,7 +1071,7 @@ void ViewerApp::RecomputeHeatmap() {
                       std::to_string(heatmap_grid_.TargetCount()) + " built.";
 }
 
-void ViewerApp::SaveHeatmapCsv() {
+void PmgViewerWorkspace::SaveHeatmapCsv() {
     if (!heatmap_ready_) {
         heatmap_status_ = "Nothing to save; Recompute first.";
         return;
@@ -1095,7 +1092,7 @@ void ViewerApp::SaveHeatmapCsv() {
     heatmap_status_ = "Saved distance_grid.csv";
 }
 
-void ViewerApp::BuildDistanceGridSection() {
+void PmgViewerWorkspace::BuildDistanceGridSection() {
     if (selected_file_index_ >= 0 &&
         selected_file_index_ < static_cast<int>(bvh_files_.size())) {
         ImGui::Text("Source: %s",
