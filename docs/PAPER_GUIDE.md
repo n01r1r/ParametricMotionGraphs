@@ -172,9 +172,9 @@ The paper stores, per source sample:
 - reachable target bounding box;
 - average normalized source/target transition point.
 
-The V6 artifact stores those scalar averages for compatibility and also stores
-the retained GOOD target phase samples. Runtime can therefore vary the phase
-pair with the requested target parameter.
+V6 introduced retained GOOD target phase samples alongside scalar compatibility
+fields. V7 retains both, so runtime can vary the phase pair with the requested
+target parameter.
 
 ### 4. Runtime interpolation
 
@@ -198,11 +198,11 @@ when all weights sum to one.
 - BVH loading and skeleton compatibility checks.
 - Contact-based cycle extraction and canonical phase registration.
 - Optional slope-constrained DTW registration refinement.
-- Local parameter interpolation and 1-D turn-rate calibration.
+- Local parameter interpolation and vector metric calibration.
 - Parameter-dependent generated clip duration.
 - Point-cloud transition distance and floor alignment.
 - Sampled PMG edge construction and lookup.
-- Complete V6 offline artifact.
+- Complete V7 offline artifact.
 - Runtime alignment, blend, random walk, and goal-directed locomotion.
 
 ### Local extensions

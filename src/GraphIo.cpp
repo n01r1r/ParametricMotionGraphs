@@ -1,7 +1,10 @@
 #include "pmg/GraphIo.h"
 
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -18,17 +21,19 @@ struct GraphPayloadFormat {
     bool has_metadata_and_skeleton;  // V4+ precede the graph with metadata + skeleton
     bool has_warp_records;           // V3+ store per-example time warps
     bool has_calibration_records;    // V5+ store parameter calibration
+    bool has_vector_calibration;     // V7+ store multidimensional calibration
     bool has_target_phase_samples;   // V6+ store per-target transition phases
     bool quoted_names;               // V4+ quote node/clip/joint names
 };
 
 std::optional<GraphPayloadFormat> FormatForHeader(const std::string& header) {
-    //                                       meta+skel  warp   calib  target quoted
-    if (header == "PMG_GRAPH_V6") return GraphPayloadFormat{true,  true,  true,  true,  true};
-    if (header == "PMG_GRAPH_V5") return GraphPayloadFormat{true,  true,  true,  false, true};
-    if (header == "PMG_GRAPH_V4") return GraphPayloadFormat{true,  true,  false, false, true};
-    if (header == "PMG_GRAPH_V3") return GraphPayloadFormat{false, true,  false, false, false};
-    if (header == "PMG_GRAPH_V2") return GraphPayloadFormat{false, false, false, false, false};
+    //                                       meta+skel warp  calib vector target quoted
+    if (header == "PMG_GRAPH_V7") return GraphPayloadFormat{true,  true,  true,  true,  true,  true};
+    if (header == "PMG_GRAPH_V6") return GraphPayloadFormat{true,  true,  true,  false, true,  true};
+    if (header == "PMG_GRAPH_V5") return GraphPayloadFormat{true,  true,  true,  false, false, true};
+    if (header == "PMG_GRAPH_V4") return GraphPayloadFormat{true,  true,  false, false, false, true};
+    if (header == "PMG_GRAPH_V3") return GraphPayloadFormat{false, true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V2") return GraphPayloadFormat{false, false, false, false, false, false};
     return std::nullopt;
 }
 
@@ -192,27 +197,35 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
             WritePhaseList(output, warp.InteriorToPhases());
             output << '\n';
         }
-        const ParameterCalibration& calibration = space.ParameterCalibrationData();
-        output << "calibration " << static_cast<int>(calibration.metric);
+        const ParameterCalibration& calibration =
+            space.ParameterCalibrationData();
+        output << "calibration " << calibration.metrics.size();
+        for (const ParameterMetric metric : calibration.metrics) {
+            output << ' ' << static_cast<int>(metric);
+        }
+        output << ' ' << calibration.samples_per_axis;
+        output << '\n';
         if (space.HasParameterCalibration()) {
-            output << ' ' << calibration.example_order.size();
-            for (const int example_index : calibration.example_order) {
-                output << ' ' << example_index;
-            }
-            for (const float measured : calibration.example_measured) {
-                output << ' ' << measured;
-            }
-            output << ' ' << calibration.segments.size() << '\n';
-            for (const CalibrationSegment& segment : calibration.segments) {
-                output << "segment " << segment.left_example << ' '
-                       << segment.right_example << ' ' << segment.samples.size();
-                for (const CalibrationSample& sample : segment.samples) {
-                    output << ' ' << sample.blend_t << ' ' << sample.measured;
-                }
+            output << "metric_scales ";
+            WriteParameter(output, calibration.metric_scales);
+            output << '\n';
+            output << "example_metrics "
+                   << calibration.example_measured.size() << '\n';
+            for (const ParameterVector& measured :
+                 calibration.example_measured) {
+                output << "example_metric ";
+                WriteParameter(output, measured);
                 output << '\n';
             }
-        } else {
-            output << '\n';
+            output << "calibration_samples "
+                   << calibration.samples.size() << '\n';
+            for (const CalibrationSample& sample : calibration.samples) {
+                output << "calibration_sample ";
+                WriteParameter(output, sample.measured_parameter);
+                output << ' ';
+                WriteParameter(output, sample.blend_weights);
+                output << '\n';
+            }
         }
     }
 
@@ -301,6 +314,92 @@ ParametricMotionGraph ReadGraphPayload(
             }
         }
         if (format.has_calibration_records) {
+            if (format.has_vector_calibration) {
+                std::size_t metric_count = 0;
+                input >> keyword >> metric_count;
+                if (keyword != "calibration" ||
+                    metric_count > static_cast<std::size_t>(parameter_dimension) ||
+                    !input) {
+                    throw std::runtime_error(
+                        "LoadPmgArtifactText: invalid calibration record");
+                }
+                if (metric_count > 0) {
+                    ParameterCalibration calibration;
+                    calibration.metrics.reserve(metric_count);
+                    for (std::size_t metric_index = 0;
+                         metric_index < metric_count; ++metric_index) {
+                        int metric_value = 0;
+                        input >> metric_value;
+                        if (metric_value < 1 || metric_value > 2) {
+                            throw std::runtime_error(
+                                "LoadPmgArtifactText: invalid parameter metric");
+                        }
+                        calibration.metrics.push_back(
+                            static_cast<ParameterMetric>(metric_value));
+                    }
+                    input >> calibration.samples_per_axis;
+                    if (!input || calibration.samples_per_axis < 0) {
+                        throw std::runtime_error(
+                            "LoadPmgArtifactText: invalid calibration sampling "
+                            "configuration");
+                    }
+                    input >> keyword;
+                    if (keyword != "metric_scales") {
+                        throw std::runtime_error(
+                            "LoadPmgArtifactText: expected metric_scales record");
+                    }
+                    calibration.metric_scales = ReadParameter(input);
+
+                    std::size_t example_metric_count = 0;
+                    input >> keyword >> example_metric_count;
+                    if (keyword != "example_metrics" ||
+                        example_metric_count !=
+                            static_cast<std::size_t>(example_count)) {
+                        throw std::runtime_error(
+                            "LoadPmgArtifactText: invalid example_metrics record");
+                    }
+                    for (std::size_t example_index = 0;
+                         example_index < example_metric_count; ++example_index) {
+                        input >> keyword;
+                        if (keyword != "example_metric") {
+                            throw std::runtime_error(
+                                "LoadPmgArtifactText: expected example_metric record");
+                        }
+                        calibration.example_measured.push_back(
+                            ReadParameter(input));
+                    }
+
+                    std::size_t calibration_sample_count = 0;
+                    input >> keyword >> calibration_sample_count;
+                    if (keyword != "calibration_samples") {
+                        throw std::runtime_error(
+                            "LoadPmgArtifactText: invalid calibration_samples record");
+                    }
+                    for (std::size_t sample_index = 0;
+                         sample_index < calibration_sample_count; ++sample_index) {
+                        input >> keyword;
+                        if (keyword != "calibration_sample") {
+                            throw std::runtime_error(
+                                "LoadPmgArtifactText: expected calibration_sample record");
+                        }
+                        CalibrationSample sample;
+                        sample.measured_parameter = ReadParameter(input);
+                        sample.blend_weights = ReadParameter(input);
+                        calibration.samples.push_back(std::move(sample));
+                    }
+                    space.SetParameterCalibration(std::move(calibration));
+                } else {
+                    int samples_per_axis = 0;
+                    input >> samples_per_axis;
+                    if (!input || samples_per_axis != 0) {
+                        throw std::runtime_error(
+                            "LoadPmgArtifactText: invalid empty calibration record");
+                    }
+                }
+                graph.AddNode(node_name, std::move(space));
+                continue;
+            }
+
             int metric_value = -1;
             input >> keyword >> metric_value;
             if (keyword != "calibration" || metric_value < 0 || metric_value > 1 ||
@@ -310,16 +409,41 @@ ParametricMotionGraph ReadGraphPayload(
             }
             if (metric_value != 0) {
                 ParameterCalibration calibration;
-                calibration.metric = static_cast<ParameterMetric>(metric_value);
+                calibration.metrics.push_back(
+                    static_cast<ParameterMetric>(metric_value));
                 std::size_t ordered_count = 0;
                 input >> ordered_count;
-                calibration.example_order.resize(ordered_count);
-                for (int& example_index : calibration.example_order) {
+                if (ordered_count !=
+                    static_cast<std::size_t>(example_count)) {
+                    throw std::runtime_error(
+                        "LoadPmgArtifactText: calibration example count mismatch");
+                }
+                std::vector<int> example_order(ordered_count);
+                for (int& example_index : example_order) {
                     input >> example_index;
                 }
-                calibration.example_measured.resize(ordered_count);
-                for (float& measured : calibration.example_measured) {
+                std::vector<float> ordered_measured(ordered_count);
+                for (float& measured : ordered_measured) {
                     input >> measured;
+                }
+                calibration.example_measured.assign(
+                    static_cast<std::size_t>(example_count),
+                    ParameterVector(1, 0.0f));
+                for (std::size_t ordered_index = 0;
+                     ordered_index < ordered_count; ++ordered_index) {
+                    const int example_index = example_order[ordered_index];
+                    if (example_index < 0 || example_index >= example_count) {
+                        throw std::runtime_error(
+                            "LoadPmgArtifactText: invalid calibration example index");
+                    }
+                    calibration.example_measured[example_index][0] =
+                        ordered_measured[ordered_index];
+                    std::vector<float> weights(
+                        static_cast<std::size_t>(example_count), 0.0f);
+                    weights[example_index] = 1.0f;
+                    calibration.samples.push_back(
+                        {{ordered_measured[ordered_index]},
+                         std::move(weights)});
                 }
                 std::size_t segment_count = 0;
                 input >> segment_count;
@@ -329,24 +453,52 @@ ParametricMotionGraph ReadGraphPayload(
                 }
                 for (std::size_t segment_index = 0; segment_index < segment_count;
                      ++segment_index) {
-                    CalibrationSegment segment;
+                    int left_example = -1;
+                    int right_example = -1;
                     std::size_t sample_count = 0;
-                    input >> keyword >> segment.left_example
-                          >> segment.right_example >> sample_count;
+                    input >> keyword >> left_example
+                          >> right_example >> sample_count;
                     if (keyword != "segment" || !input) {
                         throw std::runtime_error(
                             "LoadPmgArtifactText: invalid calibration segment");
                     }
-                    segment.samples.resize(sample_count);
-                    for (CalibrationSample& sample : segment.samples) {
-                        input >> sample.blend_t >> sample.measured;
+                    if (left_example < 0 || left_example >= example_count ||
+                        right_example < 0 || right_example >= example_count) {
+                        throw std::runtime_error(
+                            "LoadPmgArtifactText: invalid calibration segment "
+                            "example index");
+                    }
+                    for (std::size_t sample_index = 0;
+                         sample_index < sample_count; ++sample_index) {
+                        float blend_t = 0.0f;
+                        float measured = 0.0f;
+                        input >> blend_t >> measured;
+                        CalibrationSample sample;
+                        sample.measured_parameter = {measured};
+                        sample.blend_weights.assign(
+                            static_cast<std::size_t>(example_count), 0.0f);
+                        sample.blend_weights[left_example] = 1.0f - blend_t;
+                        sample.blend_weights[right_example] = blend_t;
+                        calibration.samples.push_back(std::move(sample));
                     }
                     if (!input) {
                         throw std::runtime_error(
                             "LoadPmgArtifactText: invalid calibration samples");
                     }
-                    calibration.segments.push_back(std::move(segment));
                 }
+                float minimum = std::numeric_limits<float>::infinity();
+                float maximum = -std::numeric_limits<float>::infinity();
+                for (const CalibrationSample& sample : calibration.samples) {
+                    minimum = std::min(
+                        minimum, sample.measured_parameter.front());
+                    maximum = std::max(
+                        maximum, sample.measured_parameter.front());
+                }
+                const float range = maximum - minimum;
+                calibration.metric_scales = {
+                    std::isfinite(range) && range > kSmallEpsilon
+                        ? range
+                        : 1.0f};
                 space.SetParameterCalibration(std::move(calibration));
             }
         }
@@ -605,7 +757,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V6\n";
+    output << "PMG_GRAPH_V7\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
@@ -623,7 +775,7 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     const std::optional<GraphPayloadFormat> format = FormatForHeader(header);
     if (!format) {
         throw std::runtime_error(
-            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V6");
+            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V7");
     }
 
     BuiltPmgArtifact artifact;

@@ -18,7 +18,7 @@ Kovar, Gleicher & Pighin 2002 (*Motion Graphs*).
 | Recompute alignment at runtime | `PointCloudAlignment` |
 | Random graph walk | outgoing-edge runtime selection |
 | Target-directed and interactive control | `GoalDirectedLocomotion` |
-| KG04-style parameter-accurate blend weights (D1) | `CalibrateParameterMetric` / `ParameterCalibration` |
+| KG04-style parameter-accurate blend weights (D1) | `CalibrateParameterMetrics` / `ParameterCalibration` |
 | Parameter-dependent blended clip duration (D2) | `BlendedDurationSeconds` / duration-derived `GenerateClip` |
 | Source playback through cycle-crossing transitions (D3) | `RuntimeController::FoldCompletedCycles` |
 | Metric/blend transition-window unification (D4) | `RuntimeControllerConfigFromArtifact` |
@@ -28,14 +28,15 @@ Kovar, Gleicher & Pighin 2002 (*Motion Graphs*).
 
 ### D1 — Blend weights calibrated against a measured metric (resolved)
 
-`ParametricMotionSpace` now supports KG04-style inversion: the offline build
-samples the blend-weight axis between parameter-adjacent examples, measures
-each blend (`parameter_metric <node> turn_rate` in the spec), and stores the
-monotone (weight, measured) table. `ComputeLocalBlendWeights` inverts the
-table so a requested parameter lands on the anchor-interpolated measured
-value. Nodes without a declared metric keep the Shepard fallback; only 1-D
-spaces and the turn-rate metric are implemented so far. The calibration
-serializes with the space (`PMG_GRAPH_V5`).
+`ParametricMotionSpace` supports KG04-style sampled inversion. One-dimensional
+spaces retain monotone parameter-adjacent sampling. Multidimensional spaces
+sample a deterministic authored-domain grid and store each generated metric
+vector with its full example weights. `ComputeLocalBlendWeights` maps the
+requested authored coordinate to anchor-interpolated measured space, then
+locally inverts normalized samples. Implemented metrics are `turn_rate` and
+`travel_speed`; nodes without declared metrics keep Shepard interpolation.
+Vector calibration serializes in `PMG_GRAPH_V7`; V5/V6 scalar tables remain
+readable.
 
 ### D2 — Generated clip duration follows the parameter (resolved)
 
@@ -68,8 +69,9 @@ are rejected explicitly.
 Each source sample stores the phase pair measured at every retained GOOD
 target sample inside its shrunk reachable box. Runtime lookup clamps the
 requested target to the interpolated box, interpolates phases in target
-parameter space, then interpolates across source samples. The artifact format
-is `PMG_GRAPH_V6`; V2-V5 scalar phases remain readable as fallback values.
+parameter space, then interpolates across source samples. Target phase samples
+were introduced in `PMG_GRAPH_V6` and remain in V7; V2-V5 scalar phases remain
+readable as fallback values.
 
 ## Known Deviations
 
@@ -104,7 +106,7 @@ here is an independent IK post-process.
   rigid alignment and constraint matching are approximated by root-delta
   blending and contact anchors; see D1/D2 for the remaining gap).
 - Root-delta blending and optional foot locking address observed BVH artifacts.
-- Complete (V6) artifacts and structured reports add reproducibility not
+- Complete (V7) artifacts and structured reports add reproducibility not
   specified by the original paper.
 
 ## Claim Limit

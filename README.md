@@ -12,7 +12,7 @@ BVH examples
   -> point-cloud transition distance grids
   -> sampled GOOD/NEUTRAL/BAD target regions
   -> interpolated PMG edges
-  -> V6 offline artifact
+  -> V7 offline artifact
   -> point-cloud-aligned online runtime
 ```
 
@@ -75,7 +75,21 @@ stores the inversion table so requested parameters achieve their measured
 meaning. Generated clips also derive their length from the blended example
 durations, so cycle time follows the parameter.
 
-Build a complete V6 artifact:
+Multidimensional nodes declare one measured property per parameter axis:
+
+```text
+node locomotion 2
+parameter_metrics locomotion turn_rate travel_speed
+parameter_calibration locomotion 7
+```
+
+The calibration samples a deterministic grid over the authored parameter
+domain, measures the generated metric vector, normalizes metric-space
+distances by sampled range, and stores the full example-weight vector.
+`parameter_calibration` exposes deterministic grid density; default is 9
+samples per axis.
+
+Build a complete V7 artifact:
 
 ```powershell
 .\build\Debug\pmg_cli.exe --build-graph `
@@ -95,11 +109,13 @@ outputs/paper_core_walk/
     `-- edge_samples.csv
 ```
 
-V6 stores the Skeleton, registered motion spaces, TimeWarps, parameter
-calibrations, transition samples, runtime sampling rate, source paths, seeds,
-thresholds, and edge build reports. V5 files remain readable with scalar
-transition-phase fallback; V4 also lacks parameter calibrations. V2/V3 remain
-readable but lack the Skeleton required for standalone point-cloud alignment.
+V7 stores the Skeleton, registered motion spaces, TimeWarps, multidimensional
+parameter calibrations, transition samples, runtime sampling rate, source
+paths, seeds, thresholds, and edge build reports. V5/V6 scalar calibration
+tables remain readable and are converted to the unified in-memory form; V5
+also uses scalar transition-phase fallback. V4 lacks parameter calibrations.
+V2/V3 remain readable but lack the Skeleton required for standalone
+point-cloud alignment.
 
 ## Runtime
 
@@ -126,6 +142,8 @@ parameter-to-achieved-turn-rate behavior through the runtime graph.
 
 - `specs/walk_curvature.pmg_spec`: permissive one-node runtime graph.
 - `specs/walk_jog.pmg_spec`: two-node walk/jog cross-transition graph.
+- `specs/walk_curvature_speed.pmg_spec`: real-BVH 2-D turn-rate/travel-speed
+  calibration fixture.
 - `specs/walk_curvature_selective.pmg_spec`: real-BVH
   GOOD/NEUTRAL/BAD classification.
 - `specs/transition_box_shrink.pmg_spec`: real-BVH non-convex target stress

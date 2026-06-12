@@ -59,7 +59,7 @@ threshold calibration.
 |---|---|---|---|
 | Parametric motion-space node | Adapted | `ParametricMotionSpace` | `test_parametric_motion_space` |
 | Smooth registered examples | Adapted | `RegisterSpaceByContacts`, `RefineRegistrationByDtw`, `TimeWarp` | `test_motion_registration`, `test_dtw_refine`, `test_registered_blending` |
-| Accurate motion parameterization | Adapted | `CalibrateParameterMetric` for 1-D turn rate | `test_parametric_motion_space`, `test_graph_io` |
+| Accurate motion parameterization | Adapted | `CalibrateParameterMetrics` for vector metrics | `test_parametric_motion_space`, `test_graph_io` |
 | Sec. 3.1 clip-pair transition test | Direct with point-cloud differences | `FindOptimalTransition` | `test_distance_grid` |
 | Sec. 3.2 source/target random sampling | Direct | `PmgBuilder::BuildEdgeWithReport` | `test_pmg_builder` |
 | GOOD / NEUTRAL / BAD thresholds | Direct | `PmgBuilderConfig` classification | `test_pmg_builder`, `cli_validate_graph_walk` |
@@ -109,7 +109,7 @@ GraphSpec
   -> ExtractFirstCycle
   -> RegisterSpaceByContacts
   -> RefineRegistrationByDtw
-  -> CalibrateParameterMetric
+  -> CalibrateParameterMetrics
   -> PmgBuilder::BuildEdgeWithReport
   -> BuiltPmgArtifact
   -> SavePmgArtifactText
@@ -156,7 +156,7 @@ Key files:
 | PMG lookup handles exact and interpolated queries | `test_edge_lookup` |
 | Registration preserves shared contact structure | `test_motion_registration`, `test_registered_blending` |
 | DTW refinement preserves contact anchors | `test_dtw_refine` |
-| V6 round-trip preserves runtime behavior | `test_graph_io` |
+| V7 round-trip preserves multidimensional calibration/runtime behavior | `test_graph_io` |
 | Runtime world placement remains continuous | `test_runtime_controller` |
 | Goal control maps world goals to achievable turn rates | `test_goal_directed_locomotion` |
 | Included BVH graph builds and streams | CTest CLI cases in `CMakeLists.txt` |

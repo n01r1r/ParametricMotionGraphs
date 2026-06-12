@@ -27,13 +27,13 @@ Use **motion clip** for the object and **frame** only for an index/sample.
 | Example motion | Authored clip and parameter | `ExampleMotion` | one per sample |
 | Parameter domain | Axis-aligned authored bounds | `ParameterDomain` | min/max `[d]` |
 | Blend weights | Non-negative example contributions | `ComputeLocalBlendWeights` | sum to 1 |
-| Parameter calibration | Requested value to measured blend inversion | `ParameterCalibration` | currently 1-D turn rate |
+| Parameter calibration | Requested vector to measured blend inversion | `ParameterCalibration` | one metric per parameter axis |
 | Blended duration | Weighted example clip duration | `BlendedDurationSeconds` | seconds |
 
-An authored parameter is not automatically a physical measurement. The
-`turn_rate` metric makes the generated behavior follow the
-anchor-interpolated measured turn-rate curve; the parameter coordinate itself
-can remain normalized.
+An authored parameter is not automatically a physical measurement.
+`turn_rate` measures rad/s; `travel_speed` measures root floor-path speed in
+native BVH units/s. Calibration maps authored coordinates to
+anchor-interpolated measured vectors, then inverts sampled generated behavior.
 
 ## Registration
 
@@ -87,7 +87,7 @@ They have no universal physical interpretation.
 | Term | Meaning | Code | Contract |
 |---|---|---|---|
 | Built PMG artifact | Complete offline output | `BuiltPmgArtifact` | skeleton + graph + metadata |
-| Artifact format | Text serialization version | `PMG_GRAPH_V6` | V2-V5 read compatibility |
+| Artifact format | Text serialization version | `PMG_GRAPH_V7` | V2-V6 read compatibility |
 | Runtime request | Desired node and parameter | `RuntimeControlRequest` | target coordinates |
 | Runtime controller | Streams, aligns, blends, places motion | `RuntimeController` | one active clip/transition |
 | World placement | Accumulated clip-local to world transform | `WorldTransform` | `RigidTransform2D` |

@@ -16,13 +16,13 @@ flowchart TD
     E --> F["Detect contact intervals"]
     F --> G["Build canonical phase TimeWarps"]
     G --> H["Optional slope-constrained DTW refinement"]
-    H --> I["Optional 1-D turn-rate calibration"]
+    H --> I["Optional vector metric calibration"]
     I --> J["Generate sampled source and target clips"]
     J --> K["Build aligned point-cloud distance grids"]
     K --> L["Classify GOOD / NEUTRAL / BAD"]
     L --> M["Build and shrink reachable target AABBs"]
     M --> N["Store transition phases"]
-    N --> O["Serialize PMG_GRAPH_V6 artifact"]
+    N --> O["Serialize PMG_GRAPH_V7 artifact"]
     O --> P["Write JSON, CSV, and Markdown reports"]
 ```
 
@@ -32,6 +32,7 @@ flowchart TD
 - BVH files referenced by the spec.
 - Parameter vector for every example.
 - Registration settings.
+- Parameter metrics and calibration samples per axis.
 - Edge thresholds, sample counts, and seed.
 - Runtime sampling rate and transition-window settings.
 
@@ -44,6 +45,7 @@ flowchart TD
 - Rotations: local joint quaternions.
 - Distance/unit scale: native BVH units.
 - Turn-rate metric: radians per second.
+- Travel-speed metric: native BVH units per second.
 
 ### Node construction
 
@@ -68,12 +70,15 @@ Uncalibrated spaces:
 - choose at most `dimension + 1` nearest examples;
 - apply normalized reciprocal-distance weights.
 
-Calibrated 1-D turn-rate spaces:
+Calibrated spaces:
 
-- locate the adjacent parameter segment;
-- derive the target measured turn rate from example anchors;
-- invert the sampled `(blend_t, measured_rate)` curve;
-- blend only the two segment examples.
+- declare one metric per parameter axis;
+- derive the target measured vector from authored example anchors;
+- normalize metric-space distances by sampled range;
+- invert nearby sampled measured vectors to full example weights.
+
+One-dimensional calibration retains monotone adjacent-segment sampling.
+Multidimensional calibration uses a deterministic regular authored-domain grid.
 
 Generated clip duration is the weighted example duration. Root floor movement
 is integrated from blended heading-local deltas.
@@ -123,7 +128,7 @@ BuiltPmgArtifact
     edge build reports
 ```
 
-V6 is the current writer format. V2-V5 remain readable with documented
+V7 is the current writer format. V2-V6 remain readable with documented
 fallbacks.
 
 ## Online Pipeline

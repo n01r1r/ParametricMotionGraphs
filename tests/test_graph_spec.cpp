@@ -64,6 +64,39 @@ int main() {
     assert(parsed.edges[0].has_build_config);
     assert(parsed.edges[0].build_config.seed == 99);
 
+    const std::filesystem::path multidimensional_spec_path =
+        directory / "multidimensional.txt";
+    {
+        std::ofstream multidimensional_spec(multidimensional_spec_path);
+        multidimensional_spec
+            << "node locomotion 2\n"
+            << "parameter_metrics locomotion turn_rate travel_speed\n"
+            << "parameter_calibration locomotion 7\n";
+    }
+    const pmg::GraphSpec multidimensional =
+        pmg::LoadGraphSpec(multidimensional_spec_path.string());
+    assert(multidimensional.nodes[0].parameter_metrics ==
+           (std::vector<pmg::ParameterMetric>{
+               pmg::ParameterMetric::kTurnRate,
+               pmg::ParameterMetric::kTravelSpeed}));
+    assert(multidimensional.nodes[0].calibration_samples_per_axis == 7);
+
+    const std::filesystem::path invalid_metrics_spec_path =
+        directory / "invalid_metrics.txt";
+    {
+        std::ofstream invalid_metrics_spec(invalid_metrics_spec_path);
+        invalid_metrics_spec
+            << "node locomotion 2\n"
+            << "parameter_metrics locomotion turn_rate\n";
+    }
+    bool invalid_metric_count_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(invalid_metrics_spec_path.string());
+    } catch (const std::runtime_error&) {
+        invalid_metric_count_threw = true;
+    }
+    assert(invalid_metric_count_threw);
+
     pmg::PmgBuilderConfig config;
     config.source_sample_count = 1;
     config.target_sample_count = 1;
