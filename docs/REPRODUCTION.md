@@ -198,6 +198,11 @@ turn-rate variation and a usable self-transition.
 
 ### Validate registered motion-space behavior
 
+Registration options are fallback values for nodes without an explicit
+`registration` entry. When the spec declares registration, supplied options
+must match it so the diagnostic and production artifact use the same
+preparation assumptions.
+
 ```powershell
 .\build\Debug\pmg_cli.exe --space-sweep `
   .\specs\walk_curvature.pmg_spec `
@@ -211,7 +216,7 @@ turn-rate variation and a usable self-transition.
   --foot-lock
 ```
 
-### Validate PMG edge construction
+### Validate production PMG edge construction
 
 ```powershell
 .\build\Debug\pmg_cli.exe --validate-graph `

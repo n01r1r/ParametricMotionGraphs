@@ -21,6 +21,7 @@ add_library(pmg_core
     src/MotionClip.cpp
     src/MotionDistance.cpp
     src/MotionRegistration.cpp
+    src/MotionSpacePreparation.cpp
     src/ParametricMotionGraph.cpp
     src/ParametricMotionSpace.cpp
     src/PmgArtifact.cpp
@@ -108,6 +109,10 @@ if(PMG_BUILD_TESTS)
     target_link_libraries(test_graph_spec PRIVATE pmg_core)
     add_test(NAME test_graph_spec COMMAND test_graph_spec)
 
+    add_executable(test_motion_space_preparation tests/test_motion_space_preparation.cpp)
+    target_link_libraries(test_motion_space_preparation PRIVATE pmg_core)
+    add_test(NAME test_motion_space_preparation COMMAND test_motion_space_preparation)
+
     add_executable(test_time_warp tests/test_time_warp.cpp)
     target_link_libraries(test_time_warp PRIVATE pmg_core)
     add_test(NAME test_time_warp COMMAND test_time_warp)
@@ -155,11 +160,11 @@ if(PMG_BUILD_TESTS)
             --dtw-refine
             --foot-lock)
 
-    # PMG edge construction on the registered Walk(curvature) space: the edge
-    # must build with full sample coverage, keep its GOOD fraction at the
-    # corpus-calibrated thresholds (TGOOD/TBAD from --calibrate-thresholds
-    # scale), and the best transition per source sample must not be worse
-    # than the naive build's.
+    # PMG edge construction on the production-prepared Walk(curvature) space:
+    # the edge must build with full sample coverage, keep its GOOD fraction at
+    # the corpus-calibrated thresholds (TGOOD/TBAD from
+    # --calibrate-thresholds scale), and the best transition per source sample
+    # must not be worse than the authored build's.
     add_test(NAME cli_validate_graph_walk
         COMMAND pmg_cli --validate-graph ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
             --cycle-joint LeftAnkle

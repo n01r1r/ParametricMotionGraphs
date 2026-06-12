@@ -1,15 +1,11 @@
 #include "pmg/GraphSpec.h"
 
-#include "pmg/BvhLoader.h"
-#include "pmg/ContactDetection.h"
-#include "pmg/MotionRegistration.h"
-#include "pmg/SkeletonCompatibility.h"
+#include "pmg/MotionSpacePreparation.h"
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <map>
-#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -63,16 +59,6 @@ std::vector<std::string> SplitCommaList(const std::string& text) {
         }
     }
     return values;
-}
-
-int FindJointIndex(const Skeleton& skeleton, const std::string& name,
-                   const std::string& context) {
-    for (int joint_index = 0; joint_index < skeleton.NumJoints(); ++joint_index) {
-        if (skeleton.joints[joint_index].name == name) {
-            return joint_index;
-        }
-    }
-    throw std::runtime_error(context + ": unknown joint '" + name + "'");
 }
 
 }  // namespace
@@ -287,52 +273,24 @@ ParametricMotionGraph BuildGraphFromSpec(
     const GraphSpec& spec,
     const PmgBuilderConfig& builder_config,
     float skeleton_offset_tolerance) {
-    if (spec.nodes.empty()) {
-        throw std::runtime_error("BuildGraphFromSpec: spec contains no nodes");
-    }
-
-    std::map<std::string, ParametricMotionSpace> spaces;
-    for (const GraphSpecNode& node : spec.nodes) {
-        spaces.emplace(node.name, ParametricMotionSpace(node.name, node.parameter_dimension));
-    }
-
-    std::optional<Skeleton> reference_skeleton;
-    for (const GraphSpecExample& example : spec.examples) {
-        const auto node_it = spaces.find(example.node_name);
-        if (node_it == spaces.end()) {
-            throw std::runtime_error("BuildGraphFromSpec: example references unknown node '" +
-                                     example.node_name + "'");
-        }
-
-        const BvhData bvh = BvhLoader::Load(example.bvh_path);
-        if (!reference_skeleton.has_value()) {
-            reference_skeleton = bvh.skeleton;
-        } else {
-            RequireSkeletonCompatible(*reference_skeleton, bvh.skeleton,
-                                      "BuildGraphFromSpec", skeleton_offset_tolerance);
-        }
-        node_it->second.AddExample(example.parameter, bvh.clip);
-    }
-
-    if (!reference_skeleton.has_value()) {
-        throw std::runtime_error("BuildGraphFromSpec: spec contains no examples");
-    }
+    MotionSpacePreparationConfig preparation_config;
+    preparation_config.calibration_frames_per_second =
+        builder_config.generated_frames_per_second;
+    preparation_config.skeleton_offset_tolerance =
+        skeleton_offset_tolerance;
+    const PreparedMotionSpaces prepared =
+        PrepareMotionSpaces(spec, preparation_config);
 
     ParametricMotionGraph graph;
     for (const GraphSpecNode& node : spec.nodes) {
-        const ParametricMotionSpace& space = spaces.at(node.name);
-        if (space.NumExamples() == 0) {
-            throw std::runtime_error("BuildGraphFromSpec: node '" + node.name +
-                                     "' has no examples");
-        }
-        graph.AddNode(node.name, space);
+        graph.AddNode(node.name, prepared.Node(node.name).production);
     }
 
     for (const GraphSpecEdge& edge_spec : spec.edges) {
         const int source_index = FindNodeIndex(graph, edge_spec.source_node);
         const int target_index = FindNodeIndex(graph, edge_spec.target_node);
         EdgeBuildResult edge_result = PmgBuilder::BuildEdgeWithReport(
-            *reference_skeleton,
+            prepared.skeleton,
             source_index,
             target_index,
             graph.Node(source_index).motion_space,
@@ -353,102 +311,31 @@ ParametricMotionGraph BuildGraphFromSpec(
 BuiltPmgArtifact BuildPmgArtifactFromSpec(
     const GraphSpec& spec,
     const ArtifactBuildConfig& config) {
-    if (spec.nodes.empty()) {
-        throw std::runtime_error("BuildPmgArtifactFromSpec: spec contains no nodes");
-    }
-
     BuiltPmgArtifact artifact;
-    std::map<std::string, ParametricMotionSpace> spaces;
-    std::optional<Skeleton> reference_skeleton;
+    MotionSpacePreparationConfig preparation_config;
+    preparation_config.default_cycle_joint = config.default_cycle_joint;
+    preparation_config.default_contact_joints = config.default_contact_joints;
+    preparation_config.default_min_contact_frames =
+        config.default_min_contact_frames;
+    preparation_config.default_dtw_refine = config.default_dtw_refine;
+    preparation_config.calibration_frames_per_second =
+        config.default_edge_config.generated_frames_per_second;
+    preparation_config.skeleton_offset_tolerance =
+        config.skeleton_offset_tolerance;
+    const PreparedMotionSpaces prepared =
+        PrepareMotionSpaces(spec, preparation_config);
 
-    for (const GraphSpecNode& node : spec.nodes) {
-        ParametricMotionSpace space(node.name, node.parameter_dimension);
-        NodeRegistrationMetadata registration;
-        registration.node_name = node.name;
-        registration.cycle_joint =
-            node.has_registration_config ? node.cycle_joint : config.default_cycle_joint;
-        registration.contact_joints =
-            node.has_registration_config ? node.contact_joints : config.default_contact_joints;
-        registration.min_contact_frames =
-            node.has_registration_config ? node.min_contact_frames
-                                         : config.default_min_contact_frames;
-        registration.dtw_refine =
-            node.has_registration_config ? node.dtw_refine : config.default_dtw_refine;
-
-        for (const GraphSpecExample& example : spec.examples) {
-            if (example.node_name != node.name) {
-                continue;
-            }
-            BvhData bvh = BvhLoader::Load(example.bvh_path);
-            if (!reference_skeleton.has_value()) {
-                reference_skeleton = bvh.skeleton;
-            } else {
-                RequireSkeletonCompatible(
-                    *reference_skeleton, bvh.skeleton, "BuildPmgArtifactFromSpec",
-                    config.skeleton_offset_tolerance);
-            }
-
-            MotionClip clip = std::move(bvh.clip);
-            if (!registration.cycle_joint.empty()) {
-                const int cycle_joint = FindJointIndex(
-                    *reference_skeleton, registration.cycle_joint,
-                    "BuildPmgArtifactFromSpec cycle joint");
-                const ContactDetectionSettings cycle_settings =
-                    EstimateContactSettings(*reference_skeleton, clip, {cycle_joint});
-                clip = ExtractFirstCycle(
-                    *reference_skeleton, clip, cycle_joint, cycle_settings);
-            }
-            space.AddExample(example.parameter, std::move(clip));
-            artifact.metadata.source_bvh_paths.push_back(example.bvh_path);
-        }
-        if (space.NumExamples() == 0) {
-            throw std::runtime_error("BuildPmgArtifactFromSpec: node '" + node.name +
-                                     "' has no examples");
-        }
-
-        if (!registration.contact_joints.empty()) {
-            std::vector<int> contact_joint_indices;
-            for (const std::string& joint_name : registration.contact_joints) {
-                contact_joint_indices.push_back(FindJointIndex(
-                    *reference_skeleton, joint_name,
-                    "BuildPmgArtifactFromSpec contact joint"));
-            }
-            ContactDetectionSettings settings = EstimateContactSettings(
-                *reference_skeleton, space.Examples().front().clip,
-                contact_joint_indices);
-            settings.min_contact_frames = registration.min_contact_frames;
-            RegisterSpaceByContacts(
-                space, *reference_skeleton, contact_joint_indices, settings);
-            if (registration.dtw_refine) {
-                RefineRegistrationByDtw(space, *reference_skeleton, {});
-            }
-        } else if (registration.dtw_refine) {
-            throw std::runtime_error(
-                "BuildPmgArtifactFromSpec: node '" + node.name +
-                "' enables DTW refinement without contact joints");
-        }
-
-        // Parameter-accuracy calibration runs after registration so the
-        // measured blends already combine corresponding moments.
-        if (node.parameter_metric != ParameterMetric::kNone) {
-            space.SetParameterCalibration(CalibrateParameterMetric(
-                space, node.parameter_metric,
-                config.default_edge_config.generated_frames_per_second));
-        }
-
-        artifact.metadata.node_registrations.push_back(registration);
-        spaces.emplace(node.name, std::move(space));
-    }
-
-    if (!reference_skeleton.has_value()) {
-        throw std::runtime_error("BuildPmgArtifactFromSpec: spec contains no examples");
-    }
-    artifact.skeleton = *reference_skeleton;
+    artifact.skeleton = prepared.skeleton;
+    artifact.metadata.source_bvh_paths = prepared.source_bvh_paths;
 
     std::map<std::string, int> node_indices;
     for (const GraphSpecNode& node : spec.nodes) {
+        const PreparedMotionSpace& prepared_node = prepared.Node(node.name);
         node_indices.emplace(
-            node.name, artifact.graph.AddNode(node.name, spaces.at(node.name)));
+            node.name,
+            artifact.graph.AddNode(node.name, prepared_node.production));
+        artifact.metadata.node_registrations.push_back(
+            prepared_node.registration);
     }
 
     artifact.metadata.generated_frame_count =

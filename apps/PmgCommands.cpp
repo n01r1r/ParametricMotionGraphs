@@ -27,6 +27,7 @@ void PrintUsage() {
               << "  pmg_cli --validate-graph graph_spec.txt [--cycle-joint name]\n"
               << "      [--tgood X --tbad Y --source-samples N --target-samples N --seed S]\n"
               << "      [--min-edge-samples N] [--min-good-fraction F] [--assert-no-regression]\n"
+              << "      registration options must match explicit GraphSpec settings\n"
               << "  pmg_cli --random-walk graph_spec.txt|graph.pmg [--seconds S] [--walk-seed N]\n"
               << "      [--min-transitions N] [--max-pop-ratio X] [builder/registration opts]\n"
               << "  pmg_cli --goto graph_spec.txt|graph.pmg x z [--seconds S] [--tolerance D]\n"
