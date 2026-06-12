@@ -2,12 +2,35 @@
 
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
 namespace pmg {
 
 namespace {
+
+// One artifact version's on-disk grammar. Versions differ only in which
+// optional records are present and whether names are quoted, so every version
+// rule lives in the single table below (FormatForHeader): adding a version is
+// one row, not a new branch threaded through the reader.
+struct GraphPayloadFormat {
+    bool has_metadata_and_skeleton;  // V4+ precede the graph with metadata + skeleton
+    bool has_warp_records;           // V3+ store per-example time warps
+    bool has_calibration_records;    // V5+ store parameter calibration
+    bool has_target_phase_samples;   // V6+ store per-target transition phases
+    bool quoted_names;               // V4+ quote node/clip/joint names
+};
+
+std::optional<GraphPayloadFormat> FormatForHeader(const std::string& header) {
+    //                                       meta+skel  warp   calib  target quoted
+    if (header == "PMG_GRAPH_V6") return GraphPayloadFormat{true,  true,  true,  true,  true};
+    if (header == "PMG_GRAPH_V5") return GraphPayloadFormat{true,  true,  true,  false, true};
+    if (header == "PMG_GRAPH_V4") return GraphPayloadFormat{true,  true,  false, false, true};
+    if (header == "PMG_GRAPH_V3") return GraphPayloadFormat{false, true,  false, false, false};
+    if (header == "PMG_GRAPH_V2") return GraphPayloadFormat{false, false, false, false, false};
+    return std::nullopt;
+}
 
 void WriteParameter(std::ostream& output, const ParameterVector& parameter) {
     output << parameter.size();
@@ -219,8 +242,7 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
 }
 
 ParametricMotionGraph ReadGraphPayload(
-    std::istream& input, bool has_warp_records, bool has_calibration_records,
-    bool has_target_phase_samples, bool quoted_names) {
+    std::istream& input, const GraphPayloadFormat& format) {
     std::string keyword;
     int node_count = 0;
     input >> keyword >> node_count;
@@ -234,7 +256,7 @@ ParametricMotionGraph ReadGraphPayload(
         int parameter_dimension = 0;
         int example_count = 0;
         input >> keyword;
-        if (quoted_names) {
+        if (format.quoted_names) {
             input >> std::quoted(node_name);
         } else {
             input >> node_name;
@@ -251,9 +273,9 @@ ParametricMotionGraph ReadGraphPayload(
                     "LoadPmgArtifactText: expected example record");
             }
             const ParameterVector parameter = ReadParameter(input);
-            space.AddExample(parameter, ReadClip(input, quoted_names));
+            space.AddExample(parameter, ReadClip(input, format.quoted_names));
         }
-        if (has_warp_records) {
+        if (format.has_warp_records) {
             int warp_count = 0;
             input >> keyword >> warp_count;
             if (keyword != "warps" || warp_count < 0 ||
@@ -278,7 +300,7 @@ ParametricMotionGraph ReadGraphPayload(
                 space.SetExampleTimeWarps(std::move(warps));
             }
         }
-        if (has_calibration_records) {
+        if (format.has_calibration_records) {
             int metric_value = -1;
             input >> keyword >> metric_value;
             if (keyword != "calibration" || metric_value < 0 || metric_value > 1 ||
@@ -355,7 +377,7 @@ ParametricMotionGraph ReadGraphPayload(
             input >> sample.source_transition_phase
                   >> sample.target_transition_phase;
             std::size_t target_phase_sample_count = 0;
-            if (has_target_phase_samples) {
+            if (format.has_target_phase_samples) {
                 input >> target_phase_sample_count;
             }
             if (!input) {
@@ -598,45 +620,19 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     std::string header;
     input >> header;
 
+    const std::optional<GraphPayloadFormat> format = FormatForHeader(header);
+    if (!format) {
+        throw std::runtime_error(
+            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V6");
+    }
+
     BuiltPmgArtifact artifact;
-    if (header == "PMG_GRAPH_V6") {
+    if (format->has_metadata_and_skeleton) {
         artifact.metadata = ReadMetadata(input);
         artifact.skeleton = ReadSkeleton(input);
-        artifact.graph = ReadGraphPayload(
-            input, /*has_warp_records=*/true, /*has_calibration_records=*/true,
-            /*has_target_phase_samples=*/true, /*quoted_names=*/true);
-        return artifact;
     }
-    if (header == "PMG_GRAPH_V5") {
-        artifact.metadata = ReadMetadata(input);
-        artifact.skeleton = ReadSkeleton(input);
-        artifact.graph = ReadGraphPayload(
-            input, /*has_warp_records=*/true, /*has_calibration_records=*/true,
-            /*has_target_phase_samples=*/false, /*quoted_names=*/true);
-        return artifact;
-    }
-    if (header == "PMG_GRAPH_V4") {
-        artifact.metadata = ReadMetadata(input);
-        artifact.skeleton = ReadSkeleton(input);
-        artifact.graph = ReadGraphPayload(
-            input, /*has_warp_records=*/true, /*has_calibration_records=*/false,
-            /*has_target_phase_samples=*/false, /*quoted_names=*/true);
-        return artifact;
-    }
-    if (header == "PMG_GRAPH_V3") {
-        artifact.graph = ReadGraphPayload(
-            input, /*has_warp_records=*/true, /*has_calibration_records=*/false,
-            /*has_target_phase_samples=*/false, /*quoted_names=*/false);
-        return artifact;
-    }
-    if (header == "PMG_GRAPH_V2") {
-        artifact.graph = ReadGraphPayload(
-            input, /*has_warp_records=*/false, /*has_calibration_records=*/false,
-            /*has_target_phase_samples=*/false, /*quoted_names=*/false);
-        return artifact;
-    }
-    throw std::runtime_error(
-        "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V6");
+    artifact.graph = ReadGraphPayload(input, *format);
+    return artifact;
 }
 
 void SaveGraphText(
