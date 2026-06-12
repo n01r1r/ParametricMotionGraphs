@@ -30,6 +30,13 @@
 
 namespace {
 
+// Layers any CLI builder options (--tgood, --source-samples, ...) onto a base
+// config. Forward-declared so DiagnoseGraphEdgeCommand can pass a spec-derived
+// base; definition supplies the default empty base for --build-graph.
+pmg::PmgBuilderConfig ParseBuilderConfigOptions(
+    int argc, char** argv, int first_option_index,
+    pmg::PmgBuilderConfig config = {});
+
 void PrintParameterVector(const pmg::ParameterVector& parameter) {
     std::cout << "[";
     for (std::size_t i = 0; i < parameter.size(); ++i) {
@@ -137,8 +144,23 @@ int DiagnoseGraphEdgeCommand(
     const std::string& spec_path,
     const std::string& source_node,
     const std::string& target_node,
-    const pmg::PmgBuilderConfig& config) {
+    int argc, char** argv, int first_option_index) {
     const pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
+    // Diagnose the edge as authored: start from its per-edge build config when
+    // the spec declares one, then let CLI options override. Without this the
+    // diagnosis used default thresholds (TGOOD=0.5) and reported a reject for
+    // an edge that --build-graph accepts under its edge_config.
+    pmg::PmgBuilderConfig base;
+    for (const pmg::GraphSpecEdge& spec_edge : spec.edges) {
+        if (spec_edge.source_node == source_node &&
+            spec_edge.target_node == target_node &&
+            spec_edge.has_build_config) {
+            base = spec_edge.build_config;
+            break;
+        }
+    }
+    const pmg::PmgBuilderConfig config =
+        ParseBuilderConfigOptions(argc, argv, first_option_index, base);
     pmg::MotionSpacePreparationConfig preparation_config;
     preparation_config.calibration_frames_per_second =
         config.generated_frames_per_second;
@@ -160,8 +182,9 @@ int DiagnoseGraphEdgeCommand(
     return result.edge.samples.empty() ? 1 : 0;
 }
 
-pmg::PmgBuilderConfig ParseBuilderConfigOptions(int argc, char** argv, int first_option_index) {
-    pmg::PmgBuilderConfig config;
+pmg::PmgBuilderConfig ParseBuilderConfigOptions(
+    int argc, char** argv, int first_option_index,
+    pmg::PmgBuilderConfig config) {
     for (int index = first_option_index; index < argc; ++index) {
         const std::string option = argv[index];
         auto require_value = [&](const char* name) -> std::string {
@@ -563,9 +586,7 @@ std::optional<int> TryRunGraphCommand(int argc, char** argv) {
         return ValidateGraphSpecCommand(argv[2]);
     }
     if (command == "--diagnose-graph-edge" && argc >= 5) {
-        const pmg::PmgBuilderConfig config =
-            ParseBuilderConfigOptions(argc, argv, 5);
-        return DiagnoseGraphEdgeCommand(argv[2], argv[3], argv[4], config);
+        return DiagnoseGraphEdgeCommand(argv[2], argv[3], argv[4], argc, argv, 5);
     }
     if (command == "--inspect-graph" && argc == 3) {
         return InspectGraphCommand(argv[2]);
