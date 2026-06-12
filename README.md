@@ -48,6 +48,11 @@ Viewer UI is organized around the runtime model, not the BVH container:
   `ParametricMotionSpace` as a node and each directed transition as an arrow;
   self-transitions remain visible as loops.
 - `Inputs`: BVH selection plus hierarchy/channel diagnostics.
+- `Display`: PMG-native-to-viewer scale controls.
+
+Camera, rendering, and input live in the PMG-free `ViewerHost`. PMG playback
+and diagnostics are supplied through the compile-time `ViewerWorkspace`
+Interface, so another algorithm can provide its own Adapter and `RenderScene`.
 
 ## Offline Artifact
 

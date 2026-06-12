@@ -24,6 +24,20 @@ GraphSpec
 ParametricMotionGraph, runtime frame configuration, registration metadata,
 edge sampling configuration, seeds, and build reports.
 
+## Viewer Modules
+
+```text
+ViewerHost
+  -> ViewerWorkspace Interface
+      -> PmgViewerWorkspace Adapter
+  -> RenderScene
+  -> camera + OpenGL renderer + input
+```
+
+`ViewerHost` has no PMG dependency. The Adapter owns algorithm state and
+diagnostics and produces the neutral scene consumed by the Host. Adapter
+selection is compile-time; runtime library loading is not supported.
+
 ## Contracts
 
 - BVH offsets/root positions and distance thresholds use native BVH units.

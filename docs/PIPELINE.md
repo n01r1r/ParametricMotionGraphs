@@ -202,7 +202,18 @@ search.
 
 ## Viewer
 
-The optional viewer exposes four diagnostic views:
+The optional viewer has one compile-time Seam:
+
+```text
+ViewerHost -> ViewerWorkspace Interface -> PmgViewerWorkspace Adapter
+           -> RenderScene -> OpenGL renderer
+```
+
+`ViewerHost` owns camera, rendering, and window input without linking
+`pmg_core`. The Adapter owns PMG playback and diagnostics and translates them
+into the algorithm-neutral `RenderScene`.
+
+The PMG Adapter exposes these diagnostic views:
 
 - **Inputs**: BVH files, hierarchy, channels, units.
 - **Motion Space**: authored parameters, local weights, canonical phase,
@@ -210,6 +221,7 @@ The optional viewer exposes four diagnostic views:
 - **Transition Grid**: distance grid and transition classification.
 - **PMG Runtime**: topology, requested/reachable parameters, phase pair,
   alignment, blend window, and root-motion diagnostics.
+- **Display**: PMG scene scaling. Camera follow and reset remain Host controls.
 
 The viewer is an inspection surface. Core graph behavior lives in `pmg_core`.
 Artifact startup currently requires the first graph node to use a
