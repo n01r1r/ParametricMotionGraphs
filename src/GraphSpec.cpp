@@ -296,15 +296,19 @@ ParametricMotionGraph BuildGraphFromSpec(
             graph.Node(source_index).motion_space,
             graph.Node(target_index).motion_space,
             builder_config);
-        if (edge_result.edge.samples.empty()) {
-            throw std::runtime_error(
-                "BuildGraphFromSpec: edge '" + edge_spec.source_node + " -> " +
-                edge_spec.target_node + "' produced no valid transition samples: " +
-                edge_result.report.reject_reason);
+        // Paper: a graph is the set of edges that pass. A single
+        // transition-incompatible pair must not abort the whole build (this
+        // matches the viewer's tolerant build); rejected edges are skipped.
+        if (!edge_result.edge.samples.empty()) {
+            graph.AddEdge(std::move(edge_result.edge));
         }
-        graph.AddEdge(std::move(edge_result.edge));
     }
 
+    if (!spec.edges.empty() && graph.NumEdges() == 0) {
+        throw std::runtime_error(
+            "BuildGraphFromSpec: every declared edge was rejected; no "
+            "transitions built");
+    }
     return graph;
 }
 
@@ -368,13 +372,18 @@ BuiltPmgArtifact BuildPmgArtifactFromSpec(
         metadata.report = result.report;
         artifact.metadata.edge_builds.push_back(metadata);
 
-        if (!result.report.edge_created) {
-            throw std::runtime_error(
-                "BuildPmgArtifactFromSpec: edge '" + edge_spec.source_node +
-                " -> " + edge_spec.target_node + "' rejected: " +
-                result.report.reject_reason);
+        // Tolerant build: the reject is recorded in edge_builds above (visible
+        // via the report and the CLI warning), and the edge is skipped instead
+        // of aborting -- consistent with the viewer and with paper semantics.
+        if (result.report.edge_created) {
+            artifact.graph.AddEdge(std::move(result.edge));
         }
-        artifact.graph.AddEdge(std::move(result.edge));
+    }
+
+    if (!spec.edges.empty() && artifact.graph.NumEdges() == 0) {
+        throw std::runtime_error(
+            "BuildPmgArtifactFromSpec: every declared edge was rejected; no "
+            "transitions built");
     }
     return artifact;
 }
