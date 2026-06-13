@@ -16,8 +16,8 @@ Status legend used in the tables below:
 - **○ Out of scope** — belongs to the surrounding Motion Graphs / KG04 systems,
   intentionally excluded (see the Claim Limit).
 
-Deviation ids (`D1`–`D8`) are stable and referenced from `README.md`,
-`docs/IMPLEMENTATION_PLAN.md`, and `docs/adr/0003-parameter-accuracy-calibration.md`.
+Deviation ids (`D1`–`D8`) are stable and referenced from `README.md` and
+`docs/adr/0003-parameter-accuracy-calibration.md`.
 
 ## §3 — Motion spaces
 
@@ -97,7 +97,7 @@ not the PMG layer this project implements.
 | Largest-SCC connectivity pruning | ○ (D8) | Motion Graphs database construction |
 | Branch-and-bound graph-walk search | ○ (D8) | Motion Graphs global search |
 | Constraint-annotation footskate cleanup | ○ (D8) | replaced by independent IK foot-lock (`include/pmg/FootLocking.h`) |
-| Skinned-mesh point clouds, BVH export, learned validity, CUDA, mid-clip transitions | ○ | `docs/STATUS.md` optional future work |
+| Skinned-mesh point clouds, BVH export, learned validity, CUDA, mid-clip transitions | ○ | optional future work |
 
 ## What's left, in priority order
 
