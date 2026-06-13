@@ -187,8 +187,11 @@ const pmg::Skeleton& PmgViewerWorkspace::ActiveSkeleton() const {
 }
 
 float PmgViewerWorkspace::ActiveReferenceDuration() const {
-    if (ParametricBlendActive() && !pmg_examples_.empty()) {
-        return pmg_examples_.front().clip.DurationSeconds();
+    // The blended cycle inherits its timing from the generated preview clip, so
+    // the phase timeline matches what is rendered (BlendedDurationSeconds), not
+    // an arbitrary example's duration.
+    if (ParametricBlendActive() && pmg_preview_clip_.NumFrames() > 0) {
+        return pmg_preview_clip_.DurationSeconds();
     }
     if (clip_.NumFrames() > 0) {
         return clip_.DurationSeconds();
@@ -197,13 +200,28 @@ float PmgViewerWorkspace::ActiveReferenceDuration() const {
 }
 
 pmg::Pose PmgViewerWorkspace::CurrentPose() const {
-    const float phase = NormalizedPhase(current_time_seconds_, ActiveReferenceDuration());
     if (ParametricBlendActive()) {
-        return pmg_space_.EvaluatePose({pmg_parameter_}, phase);
+        // Sample the cached GenerateClip output (kept fresh by Update) by phase,
+        // instead of blending absolute root positions per frame.
+        if (pmg_preview_clip_.NumFrames() == 0) {
+            return pmg::Pose{};
+        }
+        const float phase = NormalizedPhase(
+            current_time_seconds_, pmg_preview_clip_.DurationSeconds());
+        pmg::Pose pose = pmg_preview_clip_.SampleNormalizedPhase(phase);
+        if (pmg_preview_in_place_) {
+            // Lock the horizontal root to the cycle start; keep vertical (y).
+            const pmg::Vec3& anchor =
+                pmg_preview_clip_.frames.front().root_position;
+            pose.root_position.x = anchor.x;
+            pose.root_position.z = anchor.z;
+        }
+        return pose;
     }
     if (clip_.NumFrames() == 0) {
         return pmg::Pose{};
     }
+    const float phase = NormalizedPhase(current_time_seconds_, ActiveReferenceDuration());
     return clip_.SampleNormalizedPhase(phase);
 }
 
@@ -408,6 +426,12 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
     if (playing_) {
         current_time_seconds_ += delta_seconds * playback_speed_;
     }
+    // Keep the cached parametric preview in sync with the blend parameter.
+    if (ParametricBlendActive() &&
+        (pmg_preview_dirty_ ||
+         std::abs(pmg_parameter_ - pmg_preview_parameter_) > kEpsilon)) {
+        RegeneratePreviewClip();
+    }
     const pmg::Pose pose = CurrentPose();
     UpdateRootMotionDiagnostics(
         pose, playing_ ? delta_seconds * playback_speed_ : 0.0f);
@@ -489,8 +513,10 @@ void PmgViewerWorkspace::RefreshExampleContacts(PmgExample& example) {
 }
 
 void PmgViewerWorkspace::RebuildPmgSpace() {
+    pmg_preview_dirty_ = true;
     if (pmg_examples_.empty()) {
         pmg_space_ready_ = false;
+        pmg_preview_clip_ = pmg::MotionClip{};
         mode_ = ViewerPlaybackMode::ClipPlayback;
         return;
     }
@@ -514,6 +540,19 @@ void PmgViewerWorkspace::RebuildPmgSpace() {
     }
     pmg_parameter_ = std::clamp(pmg_parameter_, pmg_parameter_min_, pmg_parameter_max_);
     pmg_space_ready_ = true;
+}
+
+void PmgViewerWorkspace::RegeneratePreviewClip() {
+    pmg_preview_dirty_ = false;
+    pmg_preview_parameter_ = pmg_parameter_;
+    if (!pmg_space_ready_ || pmg_space_.NumExamples() == 0) {
+        pmg_preview_clip_ = pmg::MotionClip{};
+        return;
+    }
+    const float fps = pmg_examples_.empty()
+                          ? 30.0f
+                          : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
+    pmg_preview_clip_ = pmg_space_.GenerateClip({pmg_parameter_}, fps);
 }
 
 // --- ImGui UI ---------------------------------------------------------------
@@ -797,6 +836,10 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
                 pmg_space_ready_ ? pmg_space_.Name().c_str() : "(none)",
                 pmg_space_ready_ ? pmg_space_.ParameterDimension() : 0,
                 pmg_examples_.size());
+    ImGui::TextDisabled(
+        "Graph NODE = this parametric motion space: a blend of its sample clips.");
+    ImGui::TextDisabled(
+        "Graph EDGES = sampled transitions between nodes (see the Graph tab).");
 
     if (pmg_space_ready_) {
         ImGui::Separator();
@@ -804,6 +847,15 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
         ParameterSliderWithTicks("Blend parameter", &pmg_parameter_,
                                  pmg_parameter_min_, pmg_parameter_max_);
         DrawParameterSpace(pmg_parameter_);
+
+        // Preview comes from GenerateClip (root-delta integration). The toggle
+        // chooses whether the character traces that integrated trajectory or
+        // cycles in place for pose inspection.
+        ImGui::Checkbox("In-place preview", &pmg_preview_in_place_);
+        ImGui::SameLine();
+        ImGui::TextDisabled(pmg_preview_in_place_
+                                ? "(root locked: cycle in place)"
+                                : "(trajectory: integrated root path)");
 
         const float canonical_phase =
             GraphRuntimeActive() && graph_controller_.has_value()
