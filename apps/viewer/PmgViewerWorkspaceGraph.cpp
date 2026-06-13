@@ -246,8 +246,8 @@ void PmgViewerWorkspace::BuildGraphRuntime() {
     }
 
     try {
-        graph_ = pmg::ParametricMotionGraph{};
-        const int node = graph_.AddNode("viewer_node", pmg_space_);
+        pmg::ParametricMotionGraph built;
+        const int node = built.AddNode("viewer_node", pmg_space_);
 
         pmg::PmgBuilderConfig config;
         config.source_sample_count = 8;     // small for interactive build
@@ -263,32 +263,144 @@ void PmgViewerWorkspace::BuildGraphRuntime() {
                 "No valid self-edge (empty box). Raise TGOOD or use a looping clip.";
             return;
         }
-        graph_.AddEdge(std::move(edge));
-
-        // Runtime alignment uses the Kovar-derived joint point-cloud adapter.
-        // It holds a reference to pmg_skeleton_, so build it first.
-        graph_runtime_config_.transition_blend_frames =
-            std::max(1, config.distance_grid.window_size);
-        graph_alignment_.emplace(
-            pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
-        graph_controller_.emplace(
-            graph_, *graph_alignment_, graph_runtime_config_);
-        graph_desired_parameter_ =
-            std::clamp(graph_desired_parameter_, pmg_parameter_min_, pmg_parameter_max_);
-        graph_desired_node_ = node;
-        selected_graph_node_ = node;
-        selected_graph_edge_ = 0;
-        // Fresh graph: discard any drag offsets carried over from a prior build.
-        graph_node_offsets_.clear();
-        graph_drag_node_ = -1;
-        graph_controller_->Start(node, {graph_desired_parameter_}, graph_fps_);
-
-        graph_ready_ = true;
-        mode_ = ViewerPlaybackMode::GraphRuntime;
-        graph_status_ = "Graph built: " + std::to_string(edge.samples.size()) +
-                        " transition samples. Switched to Graph Runtime.";
+        const std::size_t sample_count = edge.samples.size();
+        built.AddEdge(std::move(edge));
+        InstallSandboxGraph(
+            std::move(built), std::max(1, config.distance_grid.window_size),
+            "Graph built: " + std::to_string(sample_count) +
+                " transition samples. Switched to Graph Runtime.");
     } catch (const std::exception& error) {
         graph_status_ = std::string("Graph build failed: ") + error.what();
+    }
+}
+
+void PmgViewerWorkspace::InstallSandboxGraph(
+    pmg::ParametricMotionGraph built, int blend_frames,
+    const std::string& status_label) {
+    // Shared install path for the single-node and authored sandbox builds.
+    // Sandbox graphs have no backing artifact, so drop any retained one (no
+    // stale "Save artifact") and clear the runtime overlays (steering/goto).
+    graph_ready_ = false;
+    graph_controller_.reset();
+    source_artifact_.reset();
+    steering_.reset();
+    goto_active_ = false;
+    goto_status_.clear();
+
+    graph_ = std::move(built);
+
+    // The viewer's parameter slider and canvas assume a one-dimensional first
+    // node; derive its range when present.
+    const pmg::ParametricMotionSpace& first_space = graph_.Node(0).motion_space;
+    if (first_space.ParameterDimension() == 1) {
+        pmg_parameter_min_ = first_space.MinParameter().front();
+        pmg_parameter_max_ = first_space.MaxParameter().front();
+        graph_desired_parameter_ = std::clamp(
+            graph_desired_parameter_, pmg_parameter_min_, pmg_parameter_max_);
+    }
+    graph_desired_node_ = 0;
+    selected_graph_node_ = 0;
+    selected_graph_edge_ = graph_.NumEdges() > 0 ? 0 : -1;
+    // Fresh graph: discard drag offsets so an equal node count cannot inherit a
+    // prior graph's positions (size == NumNodes skips the on-demand reset).
+    graph_node_offsets_.clear();
+    graph_drag_node_ = -1;
+
+    // Runtime alignment holds a reference to pmg_skeleton_, so build it first.
+    graph_runtime_config_.transition_blend_frames = std::max(1, blend_frames);
+    graph_alignment_.emplace(
+        pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
+    graph_controller_.emplace(graph_, *graph_alignment_, graph_runtime_config_);
+    graph_controller_->Start(0, {graph_desired_parameter_}, graph_fps_);
+
+    graph_ready_ = true;
+    mode_ = ViewerPlaybackMode::GraphRuntime;
+    graph_status_ = status_label;
+}
+
+void PmgViewerWorkspace::AddAuthoredNode() {
+    if (!pmg_space_ready_ || pmg_examples_.empty()) {
+        graph_status_ =
+            "Author a motion space (add clips in Inputs) before adding a node.";
+        return;
+    }
+    if (pmg_space_.ParameterDimension() != 1) {
+        graph_status_ = "Motion space must be one-dimensional to add as a node.";
+        return;
+    }
+    const std::string name =
+        authored_node_name_[0] != '\0' ? authored_node_name_ : "node";
+    authored_nodes_.push_back(AuthoredNode{name, pmg_skeleton_, pmg_space_});
+    graph_status_ = "Added node '" + name + "' (" +
+                    std::to_string(pmg_space_.NumExamples()) +
+                    " samples). Authored nodes: " +
+                    std::to_string(authored_nodes_.size());
+}
+
+void PmgViewerWorkspace::BuildAuthoredGraph() {
+    if (authored_nodes_.empty()) {
+        graph_status_ = "Add at least one authored node first.";
+        return;
+    }
+    // All nodes share one alignment skeleton; reject a mixed set up front.
+    const pmg::Skeleton& first_skeleton = authored_nodes_.front().skeleton;
+    for (const AuthoredNode& node : authored_nodes_) {
+        if (node.skeleton.NumJoints() != first_skeleton.NumJoints()) {
+            graph_status_ = "Authored nodes use different skeletons; rebuild "
+                            "them from one skeleton.";
+            return;
+        }
+    }
+    if (authored_nodes_.front().space.ParameterDimension() != 1) {
+        graph_status_ = "First authored node must be one-dimensional.";
+        return;
+    }
+
+    try {
+        pmg::ParametricMotionGraph built;
+        for (const AuthoredNode& node : authored_nodes_) {
+            built.AddNode(node.name, node.space);
+        }
+
+        const int node_count = static_cast<int>(authored_nodes_.size());
+        int edges_built = 0;
+        std::string skipped;
+        for (const AuthoredEdge& authored : authored_edges_) {
+            if (authored.source_node < 0 || authored.source_node >= node_count ||
+                authored.target_node < 0 || authored.target_node >= node_count) {
+                continue;
+            }
+            pmg::PmgBuilderConfig config;
+            config.source_sample_count = 8;     // small for interactive build
+            config.target_sample_count = 32;
+            config.generated_frames_per_second = graph_fps_;
+            config.good_transition_threshold = authored.tgood;
+            config.bad_transition_threshold =
+                std::max(authored.tbad, authored.tgood);
+
+            pmg::PmgEdge edge = pmg::PmgBuilder::BuildEdge(
+                first_skeleton, authored.source_node, authored.target_node,
+                authored_nodes_[authored.source_node].space,
+                authored_nodes_[authored.target_node].space, config);
+            if (edge.samples.empty()) {
+                skipped += " " + std::to_string(authored.source_node) + "->" +
+                           std::to_string(authored.target_node);
+                continue;
+            }
+            built.AddEdge(std::move(edge));
+            ++edges_built;
+        }
+
+        // Adopt the authored skeleton as the live alignment skeleton.
+        pmg_skeleton_ = first_skeleton;
+        std::string status = "Authored graph: " + std::to_string(node_count) +
+                             " nodes, " + std::to_string(edges_built) + " edges.";
+        if (!skipped.empty()) {
+            status += " Skipped empty edges:" + skipped + " (raise TGOOD).";
+        }
+        InstallSandboxGraph(std::move(built), 5, status);
+    } catch (const std::exception& error) {
+        graph_status_ = std::string("Authored build failed: ") + error.what();
     }
 }
 
@@ -628,6 +740,132 @@ void PmgViewerWorkspace::BuildGraphSection() {
         BuildGraphRuntime();
     }
     ImGui::TextWrapped("%s", graph_status_.c_str());
+
+    // Author a multi-node graph in-GUI (Path B). Nodes snapshot the current
+    // motion space; edges carry per-edge TGOOD/TBAD; "Build authored graph"
+    // rebuilds the whole sandbox graph. Re-author the motion space (load other
+    // clips in Inputs) between "Add node" presses to get distinct nodes.
+    ImGui::Separator();
+    ImGui::TextDisabled("Author multi-node graph (sandbox, not saveable)");
+    ImGui::SetNextItemWidth(150.0f);
+    ImGui::InputText(
+        "##authored_node_name", authored_node_name_, sizeof(authored_node_name_));
+    ImGui::SameLine();
+    if (ImGui::Button("Add node from motion space")) {
+        AddAuthoredNode();
+    }
+
+    if (!authored_nodes_.empty()) {
+        int remove_node = -1;
+        for (int i = 0; i < static_cast<int>(authored_nodes_.size()); ++i) {
+            ImGui::PushID(i);
+            ImGui::BulletText(
+                "%d: %s (%d samples)", i, authored_nodes_[i].name.c_str(),
+                authored_nodes_[i].space.NumExamples());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("x##node")) {
+                remove_node = i;
+            }
+            ImGui::PopID();
+        }
+        if (remove_node >= 0) {
+            authored_nodes_.erase(authored_nodes_.begin() + remove_node);
+            // Drop edges touching the removed node; renumber survivors so the
+            // stored endpoints stay aligned with the node vector.
+            std::vector<AuthoredEdge> kept;
+            kept.reserve(authored_edges_.size());
+            for (AuthoredEdge edge : authored_edges_) {
+                if (edge.source_node == remove_node ||
+                    edge.target_node == remove_node) {
+                    continue;
+                }
+                if (edge.source_node > remove_node) --edge.source_node;
+                if (edge.target_node > remove_node) --edge.target_node;
+                kept.push_back(edge);
+            }
+            authored_edges_.swap(kept);
+        }
+
+        const int node_count = static_cast<int>(authored_nodes_.size());
+        if (node_count > 0) {
+            authored_edge_source_ =
+                std::clamp(authored_edge_source_, 0, node_count - 1);
+            authored_edge_target_ =
+                std::clamp(authored_edge_target_, 0, node_count - 1);
+
+            ImGui::SetNextItemWidth(120.0f);
+            if (ImGui::BeginCombo(
+                    "##edge_source",
+                    authored_nodes_[authored_edge_source_].name.c_str())) {
+                for (int i = 0; i < node_count; ++i) {
+                    // Suffix the index so identically named nodes get distinct
+                    // ImGui IDs (the text after "##" is not displayed).
+                    const std::string item =
+                        authored_nodes_[i].name + "##src" + std::to_string(i);
+                    if (ImGui::Selectable(
+                            item.c_str(), i == authored_edge_source_)) {
+                        authored_edge_source_ = i;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted("->");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(120.0f);
+            if (ImGui::BeginCombo(
+                    "##edge_target",
+                    authored_nodes_[authored_edge_target_].name.c_str())) {
+                for (int i = 0; i < node_count; ++i) {
+                    const std::string item =
+                        authored_nodes_[i].name + "##tgt" + std::to_string(i);
+                    if (ImGui::Selectable(
+                            item.c_str(), i == authored_edge_target_)) {
+                        authored_edge_target_ = i;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Add edge")) {
+                authored_edges_.push_back(AuthoredEdge{
+                    authored_edge_source_, authored_edge_target_, tgood_, tbad_});
+                graph_status_ = "Added edge (TGOOD/TBAD seeded from sliders).";
+            }
+        }
+
+        if (!authored_edges_.empty()) {
+            ImGui::TextDisabled("edges (fields: TGOOD / TBAD):");
+            int remove_edge = -1;
+            for (int i = 0; i < static_cast<int>(authored_edges_.size()); ++i) {
+                AuthoredEdge& edge = authored_edges_[i];
+                ImGui::PushID(1000 + i);
+                ImGui::Text(
+                    "%s -> %s",
+                    authored_nodes_[edge.source_node].name.c_str(),
+                    authored_nodes_[edge.target_node].name.c_str());
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(70.0f);
+                ImGui::InputFloat("##aetg", &edge.tgood, 0.0f, 0.0f, "%.2f");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(70.0f);
+                ImGui::InputFloat("##aetb", &edge.tbad, 0.0f, 0.0f, "%.2f");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("x##edge")) {
+                    remove_edge = i;
+                }
+                ImGui::PopID();
+            }
+            if (remove_edge >= 0) {
+                authored_edges_.erase(authored_edges_.begin() + remove_edge);
+            }
+        }
+
+        if (ImGui::Button("Build authored graph")) {
+            BuildAuthoredGraph();
+        }
+    }
+
     ImGui::Separator();
 
     if (graph_ready_ && graph_controller_.has_value()) {
