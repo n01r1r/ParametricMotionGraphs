@@ -20,5 +20,21 @@ Before ending a work session or letting context cycle, always:
 
 ## Git
 
-- Branch per change, open a PR, merge, then delete the branch. No direct commits
-  to `main`, no stacked PRs, no long-lived side branches.
+Stable line is `main`; nothing commits to it directly. Day-to-day work lands on
+long-lived, area-scoped integration branches and reaches `main` by PR once
+stable:
+
+- `dev/ui` — viewer / UI / UX (anything under `apps/viewer/`).
+- `dev/core` — the `pmg_core` library, algorithms, and their tests (`src/`,
+  `include/`, `tests/`).
+- `dev/misc` — docs, build, memory, branch policy, and other cross-cutting work.
+
+Rules:
+
+- Commit each change to the matching `dev/*` branch. Do not branch per change and
+  do not commit straight to `main`.
+- A change spanning areas splits along these lines — UI code to `dev/ui`, its
+  core test to `dev/core`, docs to `dev/misc` — so the branches stay file-disjoint
+  and conflict-free and each area's history reads cleanly.
+- Open a PR from a `dev/*` branch to `main` when its work is stable. No stacked
+  PRs. Keep the `dev/*` branches alive across sessions instead of deleting them.
