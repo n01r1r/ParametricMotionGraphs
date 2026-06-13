@@ -93,6 +93,14 @@ private:
     void RecomputeHeatmap();
     void SaveHeatmapCsv();
     void BuildGraphRuntime();
+    // Path B: in-GUI multi-node graph authoring. Snapshot the current motion
+    // space as a node, then (re)build the whole immutable graph from the
+    // viewer-side authoring model. Both build paths funnel through
+    // InstallSandboxGraph, which owns the controller/alignment/flag wiring.
+    void AddAuthoredNode();
+    void BuildAuthoredGraph();
+    void InstallSandboxGraph(pmg::ParametricMotionGraph built, int blend_frames,
+                             const std::string& status_label);
     void DiscoverSpecFiles();
     void BuildArtifactFromSpec(const std::string& spec_path);
     void SaveArtifact(const std::string& name);
@@ -193,6 +201,30 @@ private:
     // need no extra wiring. View-only; does not mutate the graph (Path B).
     std::vector<glm::vec2> graph_node_offsets_;
     int graph_drag_node_ = -1;
+
+    // --- Path B authoring model (sandbox, not saveable) ------------------------
+    // Viewer-side description of a multi-node graph. Nodes snapshot a 1-D motion
+    // space (+ its skeleton, so a build can reject mismatched skeletons); edges
+    // carry per-edge GOOD/BAD thresholds. BuildAuthoredGraph rebuilds the
+    // immutable ParametricMotionGraph from these each time, so no remove/edit
+    // API is needed on the core graph.
+    struct AuthoredNode {
+        std::string name;
+        pmg::Skeleton skeleton;
+        pmg::ParametricMotionSpace space;
+    };
+    struct AuthoredEdge {
+        int source_node = 0;
+        int target_node = 0;
+        float tgood = 0.5f;
+        float tbad = 0.7f;
+    };
+    std::vector<AuthoredNode> authored_nodes_;
+    std::vector<AuthoredEdge> authored_edges_;
+    char authored_node_name_[64] = "node";
+    int authored_edge_source_ = 0;
+    int authored_edge_target_ = 0;
+
     float graph_fps_ = 30.0f;
     std::string graph_status_ = "Define a motion space, then build a PMG.";
     std::vector<std::string> contact_joint_names_;

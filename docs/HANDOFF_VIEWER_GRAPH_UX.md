@@ -66,9 +66,32 @@ A minor, intentional interaction remains: starting a node drag with a
 double-click also sets the runtime target (mouse delta is ~0, so no real
 displacement). Left as-is.
 
+## Path B — in-GUI multi-node authoring (landed)
+
+Implemented as a viewer-side authoring model (no `pmg_core` graph API change;
+`ParametricMotionGraph` stays append-only). `BuildGraphSection` gained an
+"Author multi-node graph (sandbox)" block: **Add node from motion space**
+snapshots the current 1-D motion space (+ its skeleton) as `AuthoredNode`;
+**Add edge** records a source/target pair with per-edge TGOOD/TBAD seeded from
+the sliders; the edge list edits thresholds inline and removes entries. **Build
+authored graph** reconstructs the immutable `ParametricMotionGraph` from scratch
+(`PmgBuilder::BuildEdge` per edge, per-edge thresholds) and installs it.
+
+To get distinct nodes, re-author the motion space (load other clips in Inputs)
+between **Add node** presses. Nodes must share one skeleton (joint-count
+checked at build). Empty-box edges are skipped with a status note.
+
+Both the single-node sandbox and the authored build now funnel through one
+private `InstallSandboxGraph(built, blend_frames, status)` that owns the
+controller/alignment/flag/offset wiring (removed the duplicated tail in
+`BuildGraphRuntime`).
+
+Like the single-node sandbox, an authored graph is **not saveable** (no backing
+artifact). The saveable route for multi-node graphs remains `.pmg_spec` files
+built through the same core path as the CLI `--build-graph`.
+
 ## Deferred / next
 
-In-GUI multi-node authoring (add node, add edge, edit edge thresholds) is
-**Path B**, still deferred. The current canvas is inspection + view manipulation
-+ runtime steering only; multi-node graphs are authored via `.pmg_spec` files
-and built through the same core path as the CLI `--build-graph`.
+Saving authored sandbox graphs (synthesize a `BuiltPmgArtifact` from the
+authoring model so "Save artifact" works) and in-canvas edge creation
+(drag node→node) are the natural follow-ups; neither is implemented.
