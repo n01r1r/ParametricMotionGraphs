@@ -23,6 +23,7 @@ Kovar, Gleicher & Pighin 2002 (*Motion Graphs*).
 | Source playback through cycle-crossing transitions (D3) | `RuntimeController::FoldCompletedCycles` |
 | Metric/blend transition-window unification (D4) | `RuntimeControllerConfigFromArtifact` |
 | Per-target transition phase lookup (D5) | `TargetTransitionPhaseSample` |
+| Repeated unchanged self-edge traversal for continuous streams | viewer `RuntimeControlRequest` policy |
 
 ## Resolved Deviations
 

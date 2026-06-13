@@ -30,6 +30,7 @@ Testing/
 *.sln
 *.suo
 *.user
+.work/
 
 # IDE / editor
 .vscode/

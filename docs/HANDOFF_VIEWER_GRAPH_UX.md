@@ -132,17 +132,17 @@ hides source/target combo controls under Advanced, and keeps only the authored
 canvas visible. Runtime layout reserves label space; self-edge loops bend
 sideways instead of clipping above the canvas.
 
-## Follow-up: idle self-edge playback
+## Follow-up: self-edge streaming correction
 
-The graph viewer previously submitted its selected node and parameter on every
-playback update. When both already matched the active runtime state, that still
-requested the node's self-edge and repeatedly jumped to the edge's target phase.
+Commit `b6b49a7` suppressed unchanged same-node/same-parameter requests. That
+removed the visible phase restart but also bypassed the PMG self-edge blend and
+exposed the extracted cycle's joint-space seam.
 
-`dev/ui` commit `b6b49a7` leaves the request empty while the viewer is idle and
-the selected state already matches. Idle playback now uses
-`RuntimeController`'s continuous cycle folding. Node changes, parameter
-changes, and goal steering still submit explicit graph-transition requests.
-Core same-node/same-parameter transitions remain intentional and unchanged.
+The viewer now continuously submits its selected target. Same-node playback
+therefore repeatedly traverses the self-edge as described by Heck and Gleicher:
+align the next short clip and blend end-to-start over the transition window.
+Measured acceleration spikes dropped substantially relative to raw cycle
+wrapping; see `docs/WALK_JOG_CONTINUITY.md`.
 
 Verification: Debug `pmg_viewer` rebuilt successfully;
 `test_runtime_controller` and `test_goal_directed_locomotion` pass (2/2).
