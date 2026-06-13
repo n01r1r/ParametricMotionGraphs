@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -26,6 +27,7 @@ namespace {
 constexpr float kEpsilon = 1.0e-6f;
 constexpr float kParameterCanvasHeight = 88.0f;
 constexpr float kPhaseRowHeight = 26.0f;
+constexpr int kSteeringCurveSamples = 24;  // turn-rate plot resolution
 
 glm::vec3 ToGlm(const pmg::Vec3& v) { return glm::vec3(v.x, v.y, v.z); }
 
@@ -517,6 +519,7 @@ void PmgViewerWorkspace::RebuildPmgSpace() {
     if (pmg_examples_.empty()) {
         pmg_space_ready_ = false;
         pmg_preview_clip_ = pmg::MotionClip{};
+        steering_turn_rate_curve_.clear();
         mode_ = ViewerPlaybackMode::ClipPlayback;
         return;
     }
@@ -540,6 +543,33 @@ void PmgViewerWorkspace::RebuildPmgSpace() {
     }
     pmg_parameter_ = std::clamp(pmg_parameter_, pmg_parameter_min_, pmg_parameter_max_);
     pmg_space_ready_ = true;
+    RecomputeSteeringCurve();
+}
+
+void PmgViewerWorkspace::RecomputeSteeringCurve() {
+    steering_turn_rate_curve_.clear();
+    if (!pmg_space_ready_ || pmg_space_.NumExamples() == 0) {
+        return;
+    }
+    const float fps = pmg_examples_.empty()
+                          ? 30.0f
+                          : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
+    const float span = std::max(pmg_parameter_max_ - pmg_parameter_min_, kEpsilon);
+    steering_turn_rate_curve_.reserve(kSteeringCurveSamples);
+    for (int i = 0; i < kSteeringCurveSamples; ++i) {
+        const float alpha =
+            static_cast<float>(i) / static_cast<float>(kSteeringCurveSamples - 1);
+        const float parameter = pmg_parameter_min_ + alpha * span;
+        float rate = 0.0f;
+        try {
+            rate = pmg::MeasureParameterMetric(
+                pmg::ParameterMetric::kTurnRate,
+                pmg_space_.GenerateClip({parameter}, fps));
+        } catch (const std::exception&) {
+            rate = 0.0f;
+        }
+        steering_turn_rate_curve_.push_back(rate);
+    }
 }
 
 void PmgViewerWorkspace::RegeneratePreviewClip() {
@@ -856,6 +886,27 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
         ImGui::TextDisabled(pmg_preview_in_place_
                                 ? "(root locked: cycle in place)"
                                 : "(trajectory: integrated root path)");
+
+        // Steering diagnostic: measured turn rate across the parameter axis.
+        // Smooth steering reads as a monotone, spike-free curve.
+        if (steering_turn_rate_curve_.size() >= 2) {
+            ImGui::TextDisabled(
+                "Turn rate vs parameter (rad/s) -- smooth = monotone, no spikes");
+            ImGui::PlotLines("##steering_turn_rate",
+                             steering_turn_rate_curve_.data(),
+                             static_cast<int>(steering_turn_rate_curve_.size()),
+                             0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0.0f, 48.0f));
+            if (pmg_preview_clip_.NumFrames() >= 2) {
+                float current_rate = 0.0f;
+                try {
+                    current_rate = pmg::MeasureParameterMetric(
+                        pmg::ParameterMetric::kTurnRate, pmg_preview_clip_);
+                } catch (const std::exception&) {
+                    current_rate = 0.0f;
+                }
+                ImGui::TextDisabled("current blend: %.3f rad/s", current_rate);
+            }
+        }
 
         const float canonical_phase =
             GraphRuntimeActive() && graph_controller_.has_value()

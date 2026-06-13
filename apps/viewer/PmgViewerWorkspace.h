@@ -85,6 +85,9 @@ private:
     // (Re)generate the cached parametric preview clip for the current blend
     // parameter via ParametricMotionSpace::GenerateClip (paper root-delta path).
     void RegeneratePreviewClip();
+    // Sample measured turn rate across the parameter axis for the steering
+    // diagnostic plot. Cached; recomputed on space rebuild, not per frame.
+    void RecomputeSteeringCurve();
     void RefreshExampleContacts(PmgExample& example);
     std::vector<int> ResolveContactJointIndices() const;
     static float ComputeGroundOffset(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip);
@@ -195,6 +198,11 @@ private:
     // character cycles in place (inspect the pose) instead of tracing its
     // integrated trajectory across the floor.
     bool pmg_preview_in_place_ = false;
+    // Measured turn rate (rad/s) of GenerateClip across the blend-parameter
+    // axis. A smooth steering response is monotone and spike-free; this is the
+    // in-GUI counterpart to the dev/core steering-smoothness diagnostic.
+    // Recomputed when the space changes (RecomputeSteeringCurve), not per frame.
+    std::vector<float> steering_turn_rate_curve_;
 
     // --- Distance Grid heatmap (transition visualization, paper §3.1 Fig 3) ---
     // Source clip = the currently loaded clip_; target chosen below. Grid is
