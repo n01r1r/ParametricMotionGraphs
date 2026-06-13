@@ -82,6 +82,12 @@ private:
 
     void AddCurrentClipToSpace(float parameter);
     void RebuildPmgSpace();
+    // (Re)generate the cached parametric preview clip for the current blend
+    // parameter via ParametricMotionSpace::GenerateClip (paper root-delta path).
+    void RegeneratePreviewClip();
+    // Sample measured turn rate across the parameter axis for the steering
+    // diagnostic plot. Cached; recomputed on space rebuild, not per frame.
+    void RecomputeSteeringCurve();
     void RefreshExampleContacts(PmgExample& example);
     std::vector<int> ResolveContactJointIndices() const;
     static float ComputeGroundOffset(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip);
@@ -180,6 +186,23 @@ private:
     float pmg_parameter_min_ = 0.0f;
     float pmg_parameter_max_ = 1.0f;
     float next_example_parameter_ = 0.0f;
+    // Cached parametric preview. GenerateClip integrates blended per-frame root
+    // deltas in each example's own heading frame (paper path), so a parameter
+    // sweep follows an intermediate arc instead of the exaggerated root that
+    // blending absolute positions (EvaluatePose) produced. Regenerated when the
+    // blend parameter or the space changes; sampled by phase every frame.
+    pmg::MotionClip pmg_preview_clip_;
+    float pmg_preview_parameter_ = 0.0f;
+    bool pmg_preview_dirty_ = true;
+    // Render-only toggle: lock the horizontal root to the cycle start so the
+    // character cycles in place (inspect the pose) instead of tracing its
+    // integrated trajectory across the floor.
+    bool pmg_preview_in_place_ = false;
+    // Measured turn rate (rad/s) of GenerateClip across the blend-parameter
+    // axis. A smooth steering response is monotone and spike-free; this is the
+    // in-GUI counterpart to the dev/core steering-smoothness diagnostic.
+    // Recomputed when the space changes (RecomputeSteeringCurve), not per frame.
+    std::vector<float> steering_turn_rate_curve_;
 
     // --- Distance Grid heatmap (transition visualization, paper §3.1 Fig 3) ---
     // Source clip = the currently loaded clip_; target chosen below. Grid is

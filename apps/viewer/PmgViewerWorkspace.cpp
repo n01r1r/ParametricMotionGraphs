@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -26,6 +27,7 @@ namespace {
 constexpr float kEpsilon = 1.0e-6f;
 constexpr float kParameterCanvasHeight = 88.0f;
 constexpr float kPhaseRowHeight = 26.0f;
+constexpr int kSteeringCurveSamples = 24;  // turn-rate plot resolution
 
 glm::vec3 ToGlm(const pmg::Vec3& v) { return glm::vec3(v.x, v.y, v.z); }
 
@@ -187,8 +189,11 @@ const pmg::Skeleton& PmgViewerWorkspace::ActiveSkeleton() const {
 }
 
 float PmgViewerWorkspace::ActiveReferenceDuration() const {
-    if (ParametricBlendActive() && !pmg_examples_.empty()) {
-        return pmg_examples_.front().clip.DurationSeconds();
+    // The blended cycle inherits its timing from the generated preview clip, so
+    // the phase timeline matches what is rendered (BlendedDurationSeconds), not
+    // an arbitrary example's duration.
+    if (ParametricBlendActive() && pmg_preview_clip_.NumFrames() > 0) {
+        return pmg_preview_clip_.DurationSeconds();
     }
     if (clip_.NumFrames() > 0) {
         return clip_.DurationSeconds();
@@ -197,13 +202,28 @@ float PmgViewerWorkspace::ActiveReferenceDuration() const {
 }
 
 pmg::Pose PmgViewerWorkspace::CurrentPose() const {
-    const float phase = NormalizedPhase(current_time_seconds_, ActiveReferenceDuration());
     if (ParametricBlendActive()) {
-        return pmg_space_.EvaluatePose({pmg_parameter_}, phase);
+        // Sample the cached GenerateClip output (kept fresh by Update) by phase,
+        // instead of blending absolute root positions per frame.
+        if (pmg_preview_clip_.NumFrames() == 0) {
+            return pmg::Pose{};
+        }
+        const float phase = NormalizedPhase(
+            current_time_seconds_, pmg_preview_clip_.DurationSeconds());
+        pmg::Pose pose = pmg_preview_clip_.SampleNormalizedPhase(phase);
+        if (pmg_preview_in_place_) {
+            // Lock the horizontal root to the cycle start; keep vertical (y).
+            const pmg::Vec3& anchor =
+                pmg_preview_clip_.frames.front().root_position;
+            pose.root_position.x = anchor.x;
+            pose.root_position.z = anchor.z;
+        }
+        return pose;
     }
     if (clip_.NumFrames() == 0) {
         return pmg::Pose{};
     }
+    const float phase = NormalizedPhase(current_time_seconds_, ActiveReferenceDuration());
     return clip_.SampleNormalizedPhase(phase);
 }
 
@@ -408,6 +428,12 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
     if (playing_) {
         current_time_seconds_ += delta_seconds * playback_speed_;
     }
+    // Keep the cached parametric preview in sync with the blend parameter.
+    if (ParametricBlendActive() &&
+        (pmg_preview_dirty_ ||
+         std::abs(pmg_parameter_ - pmg_preview_parameter_) > kEpsilon)) {
+        RegeneratePreviewClip();
+    }
     const pmg::Pose pose = CurrentPose();
     UpdateRootMotionDiagnostics(
         pose, playing_ ? delta_seconds * playback_speed_ : 0.0f);
@@ -489,8 +515,11 @@ void PmgViewerWorkspace::RefreshExampleContacts(PmgExample& example) {
 }
 
 void PmgViewerWorkspace::RebuildPmgSpace() {
+    pmg_preview_dirty_ = true;
     if (pmg_examples_.empty()) {
         pmg_space_ready_ = false;
+        pmg_preview_clip_ = pmg::MotionClip{};
+        steering_turn_rate_curve_.clear();
         mode_ = ViewerPlaybackMode::ClipPlayback;
         return;
     }
@@ -514,6 +543,46 @@ void PmgViewerWorkspace::RebuildPmgSpace() {
     }
     pmg_parameter_ = std::clamp(pmg_parameter_, pmg_parameter_min_, pmg_parameter_max_);
     pmg_space_ready_ = true;
+    RecomputeSteeringCurve();
+}
+
+void PmgViewerWorkspace::RecomputeSteeringCurve() {
+    steering_turn_rate_curve_.clear();
+    if (!pmg_space_ready_ || pmg_space_.NumExamples() == 0) {
+        return;
+    }
+    const float fps = pmg_examples_.empty()
+                          ? 30.0f
+                          : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
+    const float span = std::max(pmg_parameter_max_ - pmg_parameter_min_, kEpsilon);
+    steering_turn_rate_curve_.reserve(kSteeringCurveSamples);
+    for (int i = 0; i < kSteeringCurveSamples; ++i) {
+        const float alpha =
+            static_cast<float>(i) / static_cast<float>(kSteeringCurveSamples - 1);
+        const float parameter = pmg_parameter_min_ + alpha * span;
+        float rate = 0.0f;
+        try {
+            rate = pmg::MeasureParameterMetric(
+                pmg::ParameterMetric::kTurnRate,
+                pmg_space_.GenerateClip({parameter}, fps));
+        } catch (const std::exception&) {
+            rate = 0.0f;
+        }
+        steering_turn_rate_curve_.push_back(rate);
+    }
+}
+
+void PmgViewerWorkspace::RegeneratePreviewClip() {
+    pmg_preview_dirty_ = false;
+    pmg_preview_parameter_ = pmg_parameter_;
+    if (!pmg_space_ready_ || pmg_space_.NumExamples() == 0) {
+        pmg_preview_clip_ = pmg::MotionClip{};
+        return;
+    }
+    const float fps = pmg_examples_.empty()
+                          ? 30.0f
+                          : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
+    pmg_preview_clip_ = pmg_space_.GenerateClip({pmg_parameter_}, fps);
 }
 
 // --- ImGui UI ---------------------------------------------------------------
@@ -797,6 +866,10 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
                 pmg_space_ready_ ? pmg_space_.Name().c_str() : "(none)",
                 pmg_space_ready_ ? pmg_space_.ParameterDimension() : 0,
                 pmg_examples_.size());
+    ImGui::TextDisabled(
+        "Graph NODE = this parametric motion space: a blend of its sample clips.");
+    ImGui::TextDisabled(
+        "Graph EDGES = sampled transitions between nodes (see the Graph tab).");
 
     if (pmg_space_ready_) {
         ImGui::Separator();
@@ -804,6 +877,36 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
         ParameterSliderWithTicks("Blend parameter", &pmg_parameter_,
                                  pmg_parameter_min_, pmg_parameter_max_);
         DrawParameterSpace(pmg_parameter_);
+
+        // Preview comes from GenerateClip (root-delta integration). The toggle
+        // chooses whether the character traces that integrated trajectory or
+        // cycles in place for pose inspection.
+        ImGui::Checkbox("In-place preview", &pmg_preview_in_place_);
+        ImGui::SameLine();
+        ImGui::TextDisabled(pmg_preview_in_place_
+                                ? "(root locked: cycle in place)"
+                                : "(trajectory: integrated root path)");
+
+        // Steering diagnostic: measured turn rate across the parameter axis.
+        // Smooth steering reads as a monotone, spike-free curve.
+        if (steering_turn_rate_curve_.size() >= 2) {
+            ImGui::TextDisabled(
+                "Turn rate vs parameter (rad/s) -- smooth = monotone, no spikes");
+            ImGui::PlotLines("##steering_turn_rate",
+                             steering_turn_rate_curve_.data(),
+                             static_cast<int>(steering_turn_rate_curve_.size()),
+                             0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0.0f, 48.0f));
+            if (pmg_preview_clip_.NumFrames() >= 2) {
+                float current_rate = 0.0f;
+                try {
+                    current_rate = pmg::MeasureParameterMetric(
+                        pmg::ParameterMetric::kTurnRate, pmg_preview_clip_);
+                } catch (const std::exception&) {
+                    current_rate = 0.0f;
+                }
+                ImGui::TextDisabled("current blend: %.3f rad/s", current_rate);
+            }
+        }
 
         const float canonical_phase =
             GraphRuntimeActive() && graph_controller_.has_value()
