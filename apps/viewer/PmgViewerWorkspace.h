@@ -69,7 +69,7 @@ private:
 
     struct PmgExample {
         std::string label;
-        float parameter = 0.0f;
+        pmg::ParameterVector parameter;  // one value per parameter axis
         pmg::MotionClip clip;
         std::vector<pmg::ContactInterval> contact_intervals;
     };
@@ -80,8 +80,11 @@ private:
     const pmg::Skeleton& ActiveSkeleton() const;
     void RebuildScene(const pmg::Pose& pose);
 
-    void AddCurrentClipToSpace(float parameter);
+    void AddCurrentClipToSpace(const pmg::ParameterVector& parameter);
     void RebuildPmgSpace();
+    // Resize the live parameter vectors (current/next) to pmg_dimension_ and
+    // clamp the view axis. Call after the dimension changes.
+    void ResizeParameterVectors();
     // (Re)generate the cached parametric preview clip for the current blend
     // parameter via ParametricMotionSpace::GenerateClip (paper root-delta path).
     void RegeneratePreviewClip();
@@ -104,7 +107,7 @@ private:
     void BuildGraphSpecTab();
     void BuildGraphQuickTab();
     void BuildGraphRuntimeTab();
-    void DrawParameterSpace(float query_parameter);
+    void DrawParameterSpace(int axis);
     void DrawPhaseTimeline(float canonical_phase);
     void DrawGraphCanvas();
     void DrawTransitionPipeline();
@@ -135,6 +138,12 @@ private:
                        const std::string& status_label,
                        GraphOrigin origin);
 
+    // Build a runtime desired-parameter vector matching a node's dimension:
+    // the 1-D control (graph_desired_parameter_) drives axis 0, remaining axes
+    // hold the node's per-axis midpoint. Keeps multidimensional nodes from
+    // crashing the controller while the runtime steering UI stays 1-D.
+    pmg::ParameterVector DesiredParameterForNode(int node) const;
+
     // Goto steering delegates to the same core module as the CLI.
     void CalibrateSteering();
     void UpdateGotoSteering(const pmg::Pose& pose);
@@ -143,7 +152,7 @@ private:
     // SliderFloat plus tick marks at the example parameters, so the user can
     // see where the real clips sit on the blend axis.
     bool ParameterSliderWithTicks(const char* label, float* value,
-                                  float min_value, float max_value);
+                                  float min_value, float max_value, int axis);
 
     void HandleShortcuts();
     void StepFrame(int direction);  // +1 / -1 frame; clip & blend modes only
@@ -182,17 +191,23 @@ private:
     pmg::ParametricMotionSpace pmg_space_;
     bool pmg_space_ready_ = false;
     float pmg_ground_offset_ = 0.0f;
-    float pmg_parameter_ = 0.0f;
-    float pmg_parameter_min_ = 0.0f;
-    float pmg_parameter_max_ = 1.0f;
-    float next_example_parameter_ = 0.0f;
+    // Multidimensional parameter authoring. The space has pmg_dimension_ axes;
+    // every parameter vector below carries one value per axis. The 1-D
+    // visualizations (slider ticks, parameter-space canvas, steering sweep)
+    // operate on pmg_view_axis_, holding the other axes at the current value.
+    int pmg_dimension_ = 1;
+    int pmg_view_axis_ = 0;
+    pmg::ParameterVector pmg_parameter_{0.0f};
+    pmg::ParameterVector pmg_parameter_min_{0.0f};
+    pmg::ParameterVector pmg_parameter_max_{1.0f};
+    pmg::ParameterVector next_example_parameter_{0.0f};
     // Cached parametric preview. GenerateClip integrates blended per-frame root
     // deltas in each example's own heading frame (paper path), so a parameter
     // sweep follows an intermediate arc instead of the exaggerated root that
     // blending absolute positions (EvaluatePose) produced. Regenerated when the
     // blend parameter or the space changes; sampled by phase every frame.
     pmg::MotionClip pmg_preview_clip_;
-    float pmg_preview_parameter_ = 0.0f;
+    pmg::ParameterVector pmg_preview_parameter_;
     bool pmg_preview_dirty_ = true;
     // Render-only toggle: lock the horizontal root to the cycle start so the
     // character cycles in place (inspect the pose) instead of tracing its
