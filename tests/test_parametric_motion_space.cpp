@@ -202,5 +202,46 @@ int main() {
         assert(std::abs(achieved_travel_speed - target_measured[1]) < 0.2f);
     }
 
+    // Steering smoothness diagnostic: sweeping the blend parameter across a
+    // symmetric left/right turning space must yield a monotone, continuous
+    // turn-rate response. This is the core-level evidence for "smooth steering."
+    // GenerateClip integrates blended per-frame root deltas in each example's
+    // own heading frame, so the measured turn rate moves monotonically with the
+    // parameter and never reverses sign mid-sweep -- unlike a preview that
+    // blends absolute root positions, which can swing (e.g. 0.725 -> -0.498
+    // rad/s) as averaged arcs of opposite curvature distort each other.
+    {
+        pmg::ParametricMotionSpace turning("turning_sweep", 1);
+        turning.AddExample({0.0f}, MakeTurningClip(-40.0f, 41));
+        turning.AddExample({1.0f}, MakeTurningClip(40.0f, 41));
+
+        const float left_rate = pmg::MeasureParameterMetric(
+            pmg::ParameterMetric::kTurnRate, turning.GenerateClip({0.0f}, 30.0f));
+        const float right_rate = pmg::MeasureParameterMetric(
+            pmg::ParameterMetric::kTurnRate, turning.GenerateClip({1.0f}, 30.0f));
+        assert(left_rate < 0.0f && right_rate > 0.0f);  // brackets straight ahead
+        const float span = right_rate - left_rate;
+
+        constexpr int kSamples = 21;
+        float previous_rate = left_rate;
+        for (int i = 1; i < kSamples; ++i) {
+            const float parameter =
+                static_cast<float>(i) / static_cast<float>(kSamples - 1);
+            const float rate = pmg::MeasureParameterMetric(
+                pmg::ParameterMetric::kTurnRate,
+                turning.GenerateClip({parameter}, 30.0f));
+            const float step = rate - previous_rate;
+            assert(step > -1.0e-3f);  // monotone: response never reverses
+            assert(step < span);      // continuous: no single step blows up
+            previous_rate = rate;
+        }
+
+        // The straight-ahead midpoint blend sits between the two extremes.
+        const float mid_rate = pmg::MeasureParameterMetric(
+            pmg::ParameterMetric::kTurnRate, turning.GenerateClip({0.5f}, 30.0f));
+        assert(std::abs(mid_rate) < std::abs(left_rate));
+        assert(std::abs(mid_rate) < std::abs(right_rate));
+    }
+
     return 0;
 }
