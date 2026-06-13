@@ -1362,11 +1362,18 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
     if (target_space.ParameterDimension() == 1) {
         const float target_min = target_space.MinParameter().front();
         const float target_max = target_space.MaxParameter().front();
-        ImGui::BeginDisabled(goto_active_);
-        ImGui::SliderFloat(
-            "Desired parameter", &graph_desired_parameter_,
-            target_min, target_max, "%.3f");
-        ImGui::EndDisabled();
+        if (std::abs(target_max - target_min) <= pmg::kSmallEpsilon) {
+            graph_desired_parameter_ = target_min;
+            ImGui::TextDisabled(
+                "Desired parameter fixed at %.3f (one authored example).",
+                target_min);
+        } else {
+            ImGui::BeginDisabled(goto_active_);
+            ImGui::SliderFloat(
+                "Desired parameter", &graph_desired_parameter_,
+                target_min, target_max, "%.3f");
+            ImGui::EndDisabled();
+        }
     } else {
         ImGui::TextDisabled(
             "Viewer controls currently expose one-dimensional target spaces.");
