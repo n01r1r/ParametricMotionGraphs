@@ -548,6 +548,7 @@ void PmgViewerWorkspace::RebuildPmgSpace() {
 
 void PmgViewerWorkspace::RecomputeSteeringCurve() {
     steering_turn_rate_curve_.clear();
+    steering_travel_speed_curve_.clear();
     if (!pmg_space_ready_ || pmg_space_.NumExamples() == 0) {
         return;
     }
@@ -556,19 +557,25 @@ void PmgViewerWorkspace::RecomputeSteeringCurve() {
                           : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
     const float span = std::max(pmg_parameter_max_ - pmg_parameter_min_, kEpsilon);
     steering_turn_rate_curve_.reserve(kSteeringCurveSamples);
+    steering_travel_speed_curve_.reserve(kSteeringCurveSamples);
     for (int i = 0; i < kSteeringCurveSamples; ++i) {
         const float alpha =
             static_cast<float>(i) / static_cast<float>(kSteeringCurveSamples - 1);
         const float parameter = pmg_parameter_min_ + alpha * span;
-        float rate = 0.0f;
+        float turn_rate = 0.0f;
+        float travel_speed = 0.0f;
         try {
-            rate = pmg::MeasureParameterMetric(
-                pmg::ParameterMetric::kTurnRate,
-                pmg_space_.GenerateClip({parameter}, fps));
+            const pmg::MotionClip sample = pmg_space_.GenerateClip({parameter}, fps);
+            turn_rate = pmg::MeasureParameterMetric(
+                pmg::ParameterMetric::kTurnRate, sample);
+            travel_speed = pmg::MeasureParameterMetric(
+                pmg::ParameterMetric::kTravelSpeed, sample);
         } catch (const std::exception&) {
-            rate = 0.0f;
+            turn_rate = 0.0f;
+            travel_speed = 0.0f;
         }
-        steering_turn_rate_curve_.push_back(rate);
+        steering_turn_rate_curve_.push_back(turn_rate);
+        steering_travel_speed_curve_.push_back(travel_speed);
     }
 }
 
@@ -887,24 +894,52 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
                                 ? "(root locked: cycle in place)"
                                 : "(trajectory: integrated root path)");
 
-        // Steering diagnostic: measured turn rate across the parameter axis.
-        // Smooth steering reads as a monotone, spike-free curve.
+        // Steering diagnostic: measured locomotion metrics across the parameter
+        // axis. Smooth steering reads as monotone, spike-free curves; the marker
+        // shows where the current blend parameter sits on that response.
         if (steering_turn_rate_curve_.size() >= 2) {
-            ImGui::TextDisabled(
-                "Turn rate vs parameter (rad/s) -- smooth = monotone, no spikes");
-            ImGui::PlotLines("##steering_turn_rate",
-                             steering_turn_rate_curve_.data(),
-                             static_cast<int>(steering_turn_rate_curve_.size()),
-                             0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0.0f, 48.0f));
+            const float span =
+                std::max(pmg_parameter_max_ - pmg_parameter_min_, kEpsilon);
+            const float marker_alpha = std::clamp(
+                (pmg_parameter_ - pmg_parameter_min_) / span, 0.0f, 1.0f);
+
+            const auto plot_with_marker =
+                [marker_alpha](const char* id, const char* caption,
+                               const std::vector<float>& curve) {
+                    ImGui::TextDisabled("%s", caption);
+                    ImGui::PlotLines(id, curve.data(),
+                                     static_cast<int>(curve.size()), 0, nullptr,
+                                     FLT_MAX, FLT_MAX, ImVec2(0.0f, 48.0f));
+                    const ImVec2 plot_min = ImGui::GetItemRectMin();
+                    const ImVec2 plot_max = ImGui::GetItemRectMax();
+                    const float marker_x =
+                        plot_min.x + marker_alpha * (plot_max.x - plot_min.x);
+                    ImGui::GetWindowDrawList()->AddLine(
+                        ImVec2(marker_x, plot_min.y), ImVec2(marker_x, plot_max.y),
+                        IM_COL32(245, 180, 65, 255), 1.5f);
+                };
+
+            plot_with_marker("##steering_turn_rate",
+                             "Turn rate vs parameter (rad/s) -- smooth = monotone",
+                             steering_turn_rate_curve_);
+            plot_with_marker("##steering_travel_speed",
+                             "Travel speed vs parameter (units/s)",
+                             steering_travel_speed_curve_);
+
             if (pmg_preview_clip_.NumFrames() >= 2) {
-                float current_rate = 0.0f;
+                float turn_rate = 0.0f;
+                float travel_speed = 0.0f;
                 try {
-                    current_rate = pmg::MeasureParameterMetric(
+                    turn_rate = pmg::MeasureParameterMetric(
                         pmg::ParameterMetric::kTurnRate, pmg_preview_clip_);
+                    travel_speed = pmg::MeasureParameterMetric(
+                        pmg::ParameterMetric::kTravelSpeed, pmg_preview_clip_);
                 } catch (const std::exception&) {
-                    current_rate = 0.0f;
+                    turn_rate = 0.0f;
+                    travel_speed = 0.0f;
                 }
-                ImGui::TextDisabled("current blend: %.3f rad/s", current_rate);
+                ImGui::TextDisabled("current blend: %.3f rad/s, %.3f units/s",
+                                    turn_rate, travel_speed);
             }
         }
 

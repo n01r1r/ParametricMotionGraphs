@@ -202,7 +202,8 @@ private:
     // axis. A smooth steering response is monotone and spike-free; this is the
     // in-GUI counterpart to the dev/core steering-smoothness diagnostic.
     // Recomputed when the space changes (RecomputeSteeringCurve), not per frame.
-    std::vector<float> steering_turn_rate_curve_;
+    std::vector<float> steering_turn_rate_curve_;     // rad/s per axis sample
+    std::vector<float> steering_travel_speed_curve_;  // native units/s per sample
 
     // --- Distance Grid heatmap (transition visualization, paper §3.1 Fig 3) ---
     // Source clip = the currently loaded clip_; target chosen below. Grid is
