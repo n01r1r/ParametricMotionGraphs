@@ -39,6 +39,8 @@ The PDFs are source material, not build inputs.
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - completed paper-core and
   remaining work.
 - [`adr/`](adr/) - accepted implementation decisions.
+- [`MOTION_CORPUS.md`](MOTION_CORPUS.md) - BVH skeleton-compatibility groups,
+  which clips can blend together, and the canonical 2-D steering demo spec.
 - [`../CONTEXT.md`](../CONTEXT.md) - canonical project vocabulary.
 
 ## Evidence Hierarchy

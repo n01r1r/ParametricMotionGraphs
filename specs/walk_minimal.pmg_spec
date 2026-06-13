@@ -1,4 +1,14 @@
+# Minimal 1-D real-BVH motion space: a single walk node over one curvature axis
+# (0 = wide curve, 1 = tight). Example paths resolve relative to THIS spec file
+# (specs/), hence ../BVH. Both clips share one skeleton group (see
+# docs/MOTION_CORPUS.md); cross-group clips are rejected as a skeleton mismatch.
+# The registration line cycle-normalizes the multi-cycle clips on LeftAnkle so
+# their contact structures match (without it the anchor counts disagree).
 node walk 1
-example walk 0.0 BVH/WalkLoopA.bvh
-example walk 1.0 BVH/walkCurve.bvh
+registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
+example walk 0.0 ../BVH/walkCurve.bvh
+example walk 1.0 ../BVH/walkTightCurve.bvh
 edge walk walk
+# Self-edge thresholds tuned for duration-true generated clips (see
+# walk_curvature.pmg_spec); the default thresholds reject every sample.
+edge_config walk walk 1.5 2.0 12 60 7
