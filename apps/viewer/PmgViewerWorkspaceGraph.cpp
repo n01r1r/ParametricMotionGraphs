@@ -14,6 +14,7 @@
 
 #include "pmg/GraphSpec.h"
 #include "pmg/MathTypes.h"
+#include "pmg/SkeletonCompatibility.h"
 
 namespace pmgviewer {
 
@@ -344,10 +345,16 @@ void PmgViewerWorkspace::BuildAuthoredGraph() {
     }
     // All nodes share one alignment skeleton; reject a mixed set up front.
     const pmg::Skeleton& first_skeleton = authored_nodes_.front().skeleton;
-    for (const AuthoredNode& node : authored_nodes_) {
-        if (node.skeleton.NumJoints() != first_skeleton.NumJoints()) {
-            graph_status_ = "Authored nodes use different skeletons; rebuild "
-                            "them from one skeleton.";
+    for (int node_index = 0;
+         node_index < static_cast<int>(authored_nodes_.size());
+         ++node_index) {
+        const pmg::SkeletonCompatibilityResult compatibility =
+            pmg::CheckSkeletonCompatibility(
+                first_skeleton, authored_nodes_[node_index].skeleton);
+        if (!compatibility.compatible) {
+            graph_status_ =
+                "Authored node " + std::to_string(node_index) +
+                " has an incompatible skeleton: " + compatibility.reason;
             return;
         }
     }
