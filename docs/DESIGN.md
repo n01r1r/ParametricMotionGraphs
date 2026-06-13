@@ -179,12 +179,17 @@ debug/test adapter, not the paper path.
 
 - **Random walk.** `ChooseRandomOutgoingTransition` selects only actual outgoing
   edges and samples the target node's parameter domain with the supplied RNG.
-- **Goal-directed locomotion.** `GoalDirectedLocomotion` supports one-dimensional
-  steerable nodes: simulate several fixed parameter values through the real
-  runtime, measure achieved world-space turn rates, convert heading error to a
-  desired turn rate, invert the runtime calibration to a parameter, and let
-  `RuntimeController` clamp it to the reachable box. This is a local greedy
-  controller, not the 2002 paper's generic branch-and-bound search.
+- **Goal-directed locomotion.** `GoalDirectedLocomotion` steers every axis of a
+  registered node. Per axis it simulates fixed parameter values through the real
+  runtime and measures the achieved metric (turn rate or travel speed), building
+  one inverse map per axis. At runtime the `turn_rate` axis converts heading
+  error to a desired rate (with a swing-through branch for targets behind), the
+  `travel_speed` axes cruise at their fastest achievable pace and ease toward
+  their slowest within `arrival_speed_distance` of the goal, and
+  `RuntimeController` clamps the assembled vector to the reachable box. A
+  one-dimensional `turn_rate` node reduces to the prior single-axis behavior.
+  This is a local greedy controller, not the 2002 paper's generic
+  branch-and-bound search.
 
 ## Viewer
 
@@ -200,9 +205,10 @@ ViewerHost -> ViewerWorkspace Interface -> PmgViewerWorkspace Adapter
 into the algorithm-neutral `RenderScene`; Adapter selection is compile-time
 (runtime library loading is not supported). The Adapter exposes Inputs, Motion
 Space, Transition Grid, PMG Runtime, and Display diagnostic views. The viewer is
-an inspection surface; core graph behavior lives in `pmg_core`. Artifact startup
-currently requires the first graph node to use a one-dimensional parameter space;
-incompatible artifacts fail explicitly.
+an inspection surface; core graph behavior lives in `pmg_core`. Goal-directed
+goto steers multidimensional first nodes through the full per-axis steering
+vector; manual slider streaming drives axis 0 and holds the remaining axes at
+their midpoint. Incompatible artifacts fail explicitly.
 
 ## Failure boundaries
 

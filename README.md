@@ -28,7 +28,7 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-All 38 tests pass on MSVC 2022 Debug. See
+All 37 tests pass on MSVC 2022 Debug (39 with the viewer enabled). See
 [docs/REPRODUCTION.md](docs/REPRODUCTION.md) for the full build, validation, and
 runtime command set.
 

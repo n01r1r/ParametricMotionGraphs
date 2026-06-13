@@ -73,17 +73,22 @@ spec-controllable is small, bounded plumbing.
 | Source plays through cycle-crossing blends | ✓ (D3) | `FoldCompletedCycles` | `include/pmg/RuntimeController.h:91` |
 | Repeated unchanged self-edge streaming (align next clip, blend end→start) | ✓ | viewer request policy | `apps/viewer/PmgViewerWorkspace.cpp:417`; `docs/WALK_JOG_CONTINUITY.md` |
 | Random graph walk | ✓ | `ChooseRandomOutgoingTransition` | `include/pmg/GoalDirectedLocomotion.h:87` |
-| Goal-directed locomotion (thesis Ch. 6) | ◐ | `GoalDirectedLocomotion` (single steering axis) | `include/pmg/GoalDirectedLocomotion.h:48` |
-| Multidimensional runtime control | ✗ | steers axis 0; remaining axes held at their midpoint | `src/GoalDirectedLocomotion.cpp:143` |
+| Goal-directed locomotion (thesis Ch. 6) | ◐ | `GoalDirectedLocomotion` (per-axis greedy steering; not branch-and-bound) | `include/pmg/GoalDirectedLocomotion.h:48` |
+| Multidimensional runtime control | ✓ | per-axis calibration + inversion drives all axes (turn_rate heading, travel_speed pace) | `src/GoalDirectedLocomotion.cpp` |
 
-**Multidimensional control (✗).** This is the only genuine missing *feature*.
-The motion-space and blend layers are N-dimensional (D1 vector calibration,
-viewer N-D authoring, and a 2-D `walk_curvature_speed` artifact load and
-stream). The control layer is scalar: `ParameterForRate(float)`,
-`MinParameter().front()`, and a single-component request
-(`src/GoalDirectedLocomotion.cpp:79,220`). A 2-D node therefore loads but only
-its first axis is driven. Closing this means searching the N-D reachable box
-against the vector calibration instead of inverting one scalar rate.
+**Multidimensional control (✓).** `GoalDirectedLocomotion` steers every node
+axis. It calibrates one inverse map per axis by streaming the real runtime at
+swept parameter values and measuring the achieved metric (turn rate or travel
+speed); `RequestForPose` then drives the `turn_rate` axis from heading error and
+each `travel_speed` axis from a cruise/arrival pace policy, assembles the full
+vector, and clamps it to the reachable box (`src/GoalDirectedLocomotion.cpp`).
+Axis metrics resolve from the node's parameter calibration (or an explicit
+config override); a one-dimensional `turn_rate` node reduces to the prior
+single-axis behavior exactly. The CLI `--goto` and the viewer goto both drive
+the full vector. Verified by `test_goal_directed_locomotion` (a 2-D node with
+both axes driven) and the `cli_goto_walk_2d` end-to-end smoke test on the real
+`walk_curvature_speed` artifact. The remaining `◐` on goal-directed control is
+the local-greedy vs. branch-and-bound search adaptation, not dimensionality.
 
 ## Out-of-scope boundaries (○)
 
@@ -101,21 +106,21 @@ not the PMG layer this project implements.
 
 ## What's left, in priority order
 
-1. **✗ Multidimensional runtime / goal-directed control** — the one missing
-   feature that extends paper coverage. Highest value.
-2. **◐ Registration fidelity** — KG04 registration curves vs. the
+1. **◐ Registration fidelity** — KG04 registration curves vs. the
    contact-anchor + DTW approximation. Largest faithfulness gap; large effort,
    low marginal payoff on this corpus.
-3. **◐ Spec-expose the distance-grid phase ranges and window size** — small
+2. **◐ Spec-expose the distance-grid phase ranges and window size** — small
    plumbing that makes the §6.3 source-range restriction tunable per edge.
-4. **◐ D6 metric exactness** — match Kovar's asymmetric window placement and
+3. **◐ D6 metric exactness** — match Kovar's asymmetric window placement and
    unnormalized weighted sum if paper-comparable absolute distances are wanted.
    Low: does not change which transitions classify GOOD on this corpus.
-5. **○ Everything else** — out-of-scope boundaries, correctly excluded per the
+4. **○ Everything else** — out-of-scope boundaries, correctly excluded per the
    Claim Limit.
 
-The core algorithm is faithful and verified (38/38 tests). What remains is
-breadth (multidimensional control) and registration depth, not correctness.
+Multidimensional runtime control (formerly item 1) landed: the control layer
+now drives every node axis. The core algorithm is faithful and verified (37/37
+core tests, 39/39 with the viewer). What remains is registration depth and small
+per-edge plumbing, not correctness or feature breadth.
 
 ## Deviation register
 
