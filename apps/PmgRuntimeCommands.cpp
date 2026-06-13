@@ -273,8 +273,13 @@ int GotoCommand(const GotoOptions& options) {
 
     const pmg::ParametricMotionSpace& walk_space =
         artifact.graph.Node(0).motion_space;
-    const float parameter_min = walk_space.MinParameter()[0];
-    const float parameter_max = walk_space.MaxParameter()[0];
+    const std::vector<float> parameter_min = walk_space.MinParameter();
+    const std::vector<float> parameter_max = walk_space.MaxParameter();
+    pmg::ParameterVector start_parameter(parameter_min.size(), 0.0f);
+    for (std::size_t axis = 0; axis < start_parameter.size(); ++axis) {
+        start_parameter[axis] =
+            0.5f * (parameter_min[axis] + parameter_max[axis]);
+    }
     const pmg::RuntimeControllerConfig runtime_config =
         pmg::RuntimeControllerConfigFromArtifact(artifact);
     pmg::GoalDirectedLocomotionConfig steering_config;
@@ -283,10 +288,21 @@ int GotoCommand(const GotoOptions& options) {
         artifact.graph, artifact.skeleton, 0,
         artifact.metadata.frames_per_second, steering_config);
     const pmg::SteeringCalibration& calibration = steering.Calibration();
-    for (std::size_t sample = 0; sample < calibration.parameters.size(); ++sample) {
-        std::cout << "achieved_turn_rate[param="
-                  << calibration.parameters[sample] << "]="
-                  << calibration.achieved_turn_rates[sample] << " rad/s\n";
+    for (std::size_t axis = 0; axis < calibration.axes.size(); ++axis) {
+        const pmg::SteeringAxis& axis_calibration = calibration.axes[axis];
+        const char* metric_name =
+            axis_calibration.metric == pmg::ParameterMetric::kTurnRate
+                ? "turn_rate"
+                : axis_calibration.metric == pmg::ParameterMetric::kTravelSpeed
+                      ? "travel_speed"
+                      : "none";
+        for (std::size_t sample = 0;
+             sample < axis_calibration.parameters.size(); ++sample) {
+            std::cout << "achieved[axis=" << axis << " " << metric_name
+                      << " param=" << axis_calibration.parameters[sample]
+                      << "]=" << axis_calibration.achieved_metric[sample]
+                      << "\n";
+        }
     }
     std::cout << "travel_heading_offset_deg="
               << calibration.travel_heading_offset * 180.0f / pmg::kPi
@@ -296,7 +312,7 @@ int GotoCommand(const GotoOptions& options) {
         artifact.skeleton, runtime_config.transition_blend_frames);
     pmg::RuntimeController controller(
         artifact.graph, alignment, runtime_config);
-    controller.Start(0, {0.5f * (parameter_min + parameter_max)},
+    controller.Start(0, start_parameter,
                      artifact.metadata.frames_per_second);
 
     const float dt = 1.0f / artifact.metadata.frames_per_second;
@@ -336,8 +352,13 @@ int GotoCommand(const GotoOptions& options) {
         if (options.trace && frame % 30 == 0) {
             std::cout << "t=" << static_cast<float>(frame) * dt
                       << " pos=(" << pose.root_position.x << ", " << pose.root_position.z
-                      << ") dist=" << distance
-                      << " param=" << request.desired_parameter[0] << "\n";
+                      << ") dist=" << distance << " param=(";
+            for (std::size_t axis = 0;
+                 axis < request.desired_parameter.size(); ++axis) {
+                std::cout << (axis == 0 ? "" : ", ")
+                          << request.desired_parameter[axis];
+            }
+            std::cout << ")\n";
         }
 
         controller.Update(dt, request);
