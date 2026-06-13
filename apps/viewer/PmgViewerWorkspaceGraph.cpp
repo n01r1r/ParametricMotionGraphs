@@ -133,6 +133,25 @@ void DrawArrowHead(
 
 // --- Graph runtime (PMG streaming) -----------------------------------------
 
+pmg::ParameterVector PmgViewerWorkspace::DesiredParameterForNode(int node) const {
+    if (node < 0 || node >= graph_.NumNodes()) {
+        return {graph_desired_parameter_};
+    }
+    const pmg::ParametricMotionSpace& space = graph_.Node(node).motion_space;
+    const int dim = std::max(1, space.ParameterDimension());
+    const std::vector<float> lo = space.MinParameter();
+    const std::vector<float> hi = space.MaxParameter();
+    pmg::ParameterVector desired(static_cast<std::size_t>(dim), 0.0f);
+    for (int axis = 0; axis < dim; ++axis) {
+        const float axis_lo = axis < static_cast<int>(lo.size()) ? lo[axis] : 0.0f;
+        const float axis_hi = axis < static_cast<int>(hi.size()) ? hi[axis] : 1.0f;
+        desired[static_cast<std::size_t>(axis)] = 0.5f * (axis_lo + axis_hi);
+    }
+    // The 1-D runtime control steers axis 0.
+    desired[0] = graph_desired_parameter_;
+    return desired;
+}
+
 void PmgViewerWorkspace::AdoptArtifact(
     pmg::BuiltPmgArtifact artifact, const std::string& status_label,
     GraphOrigin origin) {
@@ -147,10 +166,9 @@ void PmgViewerWorkspace::AdoptArtifact(
         throw std::runtime_error(
             "viewer runtime artifact has incomplete graph/frame metadata");
     }
-    if (artifact.graph.Node(0).motion_space.ParameterDimension() != 1) {
-        throw std::runtime_error(
-            "viewer runtime currently requires a one-dimensional first node");
-    }
+    // Multidimensional first nodes are allowed: the runtime steers axis 0 and
+    // holds the other axes at their midpoint (see DesiredParameterForNode). The
+    // 1-D steering UI degrades gracefully for dim > 1.
 
     steering_.reset();
     graph_controller_.reset();
@@ -207,7 +225,7 @@ void PmgViewerWorkspace::AdoptArtifact(
         pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
     graph_controller_.emplace(
         graph_, *graph_alignment_, graph_runtime_config_);
-    graph_controller_->Start(0, {graph_desired_parameter_}, graph_fps_);
+    graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
     graph_ready_ = true;
     graph_origin_ = origin;
     graph_open_runtime_tab_ = true;
@@ -379,7 +397,7 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     graph_alignment_.emplace(
         pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
     graph_controller_.emplace(graph_, *graph_alignment_, graph_runtime_config_);
-    graph_controller_->Start(0, {graph_desired_parameter_}, graph_fps_);
+    graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
 
     graph_ready_ = true;
     graph_origin_ = origin;

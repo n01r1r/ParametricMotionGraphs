@@ -415,7 +415,7 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
             }
             pmg::RuntimeControlRequest request;
             request.desired_node = graph_desired_node_;
-            request.desired_parameter = {graph_desired_parameter_};
+            request.desired_parameter = DesiredParameterForNode(graph_desired_node_);
             graph_controller_->Update(delta_seconds * playback_speed_, request);
         }
         const pmg::Pose pose = graph_controller_->CurrentPose();

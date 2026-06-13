@@ -138,6 +138,12 @@ private:
                        const std::string& status_label,
                        GraphOrigin origin);
 
+    // Build a runtime desired-parameter vector matching a node's dimension:
+    // the 1-D control (graph_desired_parameter_) drives axis 0, remaining axes
+    // hold the node's per-axis midpoint. Keeps multidimensional nodes from
+    // crashing the controller while the runtime steering UI stays 1-D.
+    pmg::ParameterVector DesiredParameterForNode(int node) const;
+
     // Goto steering delegates to the same core module as the CLI.
     void CalibrateSteering();
     void UpdateGotoSteering(const pmg::Pose& pose);
