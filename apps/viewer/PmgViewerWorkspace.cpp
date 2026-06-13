@@ -414,15 +414,14 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
                 UpdateGotoSteering(graph_controller_->CurrentPose());
             }
             pmg::RuntimeControlRequest request;
-            const pmg::ParameterVector desired_parameter =
+            // A PMG stream repeatedly traverses edges, including a node's
+            // self-edge when the requested node and parameter stay unchanged.
+            // That transition blends the end of one generated clip into the
+            // start of the next; leaving the request empty would raw-wrap the
+            // extracted cycle and expose its joint-space seam.
+            request.desired_node = graph_desired_node_;
+            request.desired_parameter =
                 DesiredParameterForNode(graph_desired_node_);
-            const bool target_changed =
-                graph_desired_node_ != graph_controller_->CurrentNode() ||
-                desired_parameter != graph_controller_->CurrentParameter();
-            if (goto_active_ || target_changed) {
-                request.desired_node = graph_desired_node_;
-                request.desired_parameter = desired_parameter;
-            }
             graph_controller_->Update(delta_seconds * playback_speed_, request);
         }
         const pmg::Pose pose = graph_controller_->CurrentPose();
