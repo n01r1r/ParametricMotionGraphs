@@ -166,6 +166,11 @@ void PmgViewerWorkspace::AdoptArtifact(
     graph_desired_node_ = 0;
     selected_graph_node_ = 0;
     selected_graph_edge_ = graph_.NumEdges() > 0 ? 0 : -1;
+    // Drop drag offsets from any previous graph; a new graph with the same node
+    // count would otherwise inherit stale positions (size == NumNodes skips the
+    // on-demand reset in DrawGraphCanvas).
+    graph_node_offsets_.clear();
+    graph_drag_node_ = -1;
 
     graph_runtime_config_ =
         pmg::RuntimeControllerConfigFromArtifact(adopted);
@@ -273,6 +278,9 @@ void PmgViewerWorkspace::BuildGraphRuntime() {
         graph_desired_node_ = node;
         selected_graph_node_ = node;
         selected_graph_edge_ = 0;
+        // Fresh graph: discard any drag offsets carried over from a prior build.
+        graph_node_offsets_.clear();
+        graph_drag_node_ = -1;
         graph_controller_->Start(node, {graph_desired_parameter_}, graph_fps_);
 
         graph_ready_ = true;
@@ -321,6 +329,33 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
             node_positions[node_index] = ImVec2(
                 canvas_center.x + radius * std::cos(angle),
                 canvas_center.y + radius * std::sin(angle));
+        }
+    }
+
+    // Drag offsets ride on top of the auto-layout. Resize on demand so build and
+    // load paths need no extra wiring; a node-count change resets the layout.
+    if (static_cast<int>(graph_node_offsets_.size()) != graph_.NumNodes()) {
+        graph_node_offsets_.assign(
+            static_cast<std::size_t>(graph_.NumNodes()), glm::vec2(0.0f));
+        graph_drag_node_ = -1;
+    }
+    for (int node_index = 0; node_index < graph_.NumNodes(); ++node_index) {
+        node_positions[node_index].x += graph_node_offsets_[node_index].x;
+        node_positions[node_index].y += graph_node_offsets_[node_index].y;
+    }
+
+    // Hover detection (before drawing, so the hovered node can be highlighted).
+    const bool canvas_hovered =
+        ImGui::IsMouseHoveringRect(origin, Add(origin, canvas_size));
+    const ImVec2 mouse_position = ImGui::GetIO().MousePos;
+    int hovered_node = -1;
+    if (canvas_hovered) {
+        for (int node_index = 0; node_index < graph_.NumNodes(); ++node_index) {
+            if (Length(Subtract(mouse_position, node_positions[node_index])) <=
+                kGraphNodeRadius + 8.0f) {
+                hovered_node = node_index;
+                break;
+            }
         }
     }
 
@@ -401,9 +436,14 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
         const bool is_target = node_index == graph_desired_node_;
         const bool is_selected = node_index == selected_graph_node_;
         const ImVec2 center = node_positions[node_index];
-        const ImU32 fill =
+        const bool is_hovered = node_index == hovered_node;
+        ImU32 fill =
             is_active ? IM_COL32(30, 130, 165, 255)
                       : IM_COL32(55, 61, 73, 255);
+        if (is_hovered) {
+            fill = is_active ? IM_COL32(40, 160, 200, 255)
+                             : IM_COL32(80, 88, 104, 255);
+        }
 
         if (is_target) {
             draw_list->AddCircle(
@@ -440,6 +480,21 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
     }
 
     ImGui::InvisibleButton("##pmg_graph_canvas", canvas_size);
+    // Drag a node to reposition it (view declutter only; the graph is untouched).
+    if (ImGui::IsItemActivated() && hovered_node >= 0) {
+        graph_drag_node_ = hovered_node;
+    }
+    if (ImGui::IsItemActive() && graph_drag_node_ >= 0 &&
+        graph_drag_node_ < static_cast<int>(graph_node_offsets_.size())) {
+        const ImVec2 drag_delta = ImGui::GetIO().MouseDelta;
+        graph_node_offsets_[graph_drag_node_].x += drag_delta.x;
+        graph_node_offsets_[graph_drag_node_].y += drag_delta.y;
+        selected_graph_node_ = graph_drag_node_;
+        selected_graph_edge_ = -1;
+    }
+    if (!ImGui::IsItemActive()) {
+        graph_drag_node_ = -1;
+    }
     if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         const ImVec2 mouse = ImGui::GetIO().MousePos;
         int clicked_node = -1;
@@ -501,23 +556,16 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
     }
 
     ImGui::TextDisabled(
-        "cyan active   gold runtime target   orange active transition   "
-        "white selection");
-    ImGui::TextDisabled(
-        "click = inspect   double-click node = set runtime target");
+        "cyan active | gold target | orange transition | white selected | drag node");
 }
 
 void PmgViewerWorkspace::BuildGraphSection() {
-    ImGui::TextWrapped(
-        "ParametricMotionGraph selects an edge from the active motion space, "
-        "interpolates its reachable target region and transition phases, aligns "
-        "the target motion, then blends through the metric window.");
     ImGui::Text("Nodes: %d   edges: %d", graph_.NumNodes(), graph_.NumEdges());
 
     // Build a full multi-node graph from a spec file (same core path as the CLI
     // --build-graph), then optionally save the artifact for later launch/load.
     ImGui::Separator();
-    ImGui::TextDisabled("Build multi-node graph from a .pmg_spec");
+    ImGui::TextDisabled("Build from .pmg_spec (per-edge config, saveable)");
     if (spec_files_.empty()) {
         ImGui::TextDisabled("No .pmg_spec files found in the spec directory.");
     } else {
@@ -556,10 +604,27 @@ void PmgViewerWorkspace::BuildGraphSection() {
     }
 
     ImGui::Separator();
-    ImGui::TextDisabled(
-        "Self-edge sandbox: builds one node + self-transition from the live "
-        "Motion Space, using TGOOD/TBAD from Transition Grid.");
-    if (ImGui::Button("Build single-node graph from Motion Space")) {
+    ImGui::TextDisabled("Single-node sandbox (scratch, not saveable)");
+    // TGOOD/TBAD shown here too -- the single-node build reads them, so the
+    // thresholds live next to the button that consumes them (shared with the
+    // Transition Grid tab; same members).
+    ImGui::SetNextItemWidth(150.0f);
+    ImGui::SliderFloat("TGOOD##build", &tgood_, 0.0f, 2.0f, "%.3f");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(150.0f);
+    ImGui::SliderFloat("TBAD##build", &tbad_, 0.0f, 2.0f, "%.3f");
+    if (heatmap_ready_) {
+        // Rough pre-build check: the heatmap's minimum cell vs TGOOD predicts
+        // whether the self-edge transition box will be empty (heatmap source is
+        // the loaded clip, so this is a hint, not a guarantee).
+        const bool likely_ok = heatmap_min_distance_ <= tgood_;
+        ImGui::TextColored(
+            likely_ok ? ImVec4(0.40f, 0.80f, 0.45f, 1.0f)
+                      : ImVec4(0.90f, 0.55f, 0.30f, 1.0f),
+            "heatmap min %.3f vs TGOOD %.3f -> %s", heatmap_min_distance_, tgood_,
+            likely_ok ? "transitions likely" : "likely empty; raise TGOOD");
+    }
+    if (ImGui::Button("Build single-node graph")) {
         BuildGraphRuntime();
     }
     ImGui::TextWrapped("%s", graph_status_.c_str());
@@ -579,7 +644,7 @@ void PmgViewerWorkspace::BuildGraphSection() {
             const pmg::PmgNode& selected_node =
                 graph_.Node(selected_graph_node_);
             ImGui::Text(
-                "Selected node: %s   %dD   %d samples",
+                "Node: %s   %dD   %d samples",
                 selected_node.name.c_str(),
                 selected_node.motion_space.ParameterDimension(),
                 selected_node.motion_space.NumExamples());
@@ -603,7 +668,7 @@ void PmgViewerWorkspace::BuildGraphSection() {
             const pmg::PmgEdge& selected_edge =
                 graph_.Edge(selected_graph_edge_);
             ImGui::Text(
-                "Selected edge: %s -> %s   %zu source samples",
+                "Edge: %s -> %s   %zu samples",
                 graph_.Node(selected_edge.source_node).name.c_str(),
                 graph_.Node(selected_edge.target_node).name.c_str(),
                 selected_edge.samples.size());
@@ -612,7 +677,7 @@ void PmgViewerWorkspace::BuildGraphSection() {
         const pmg::ParametricMotionSpace& target_space =
             graph_.Node(graph_desired_node_).motion_space;
         ImGui::Text(
-            "Runtime request: %s -> %s",
+            "Request: %s -> %s",
             graph_.Node(current_node).name.c_str(),
             graph_.Node(graph_desired_node_).name.c_str());
         if (target_space.ParameterDimension() == 1) {
@@ -644,10 +709,7 @@ void PmgViewerWorkspace::BuildGraphSection() {
         DrawTransitionPipeline();
 
         ImGui::Separator();
-        ImGui::TextDisabled("Goto steering");
-        ImGui::TextWrapped("Right-click the floor (in Graph runtime mode) to set a "
-                           "walk target. First click calibrates achieved turn rates "
-                           "(a few seconds).");
+        ImGui::TextDisabled("Steering: right-click floor to set target");
         if (ImGui::Button(steering_.has_value() ? "Recalibrate" : "Calibrate steering")) {
             CalibrateSteering();
         }
@@ -710,14 +772,13 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
         graph_controller_->ActiveTransitionDiagnostics();
 
     ImGui::Separator();
-    ImGui::TextDisabled("PMG transition chain");
+    ImGui::TextDisabled("Transition");
 
-    constexpr const char* kSourceParameterLabel = "1  SOURCE PARAMETER";
-    constexpr const char* kReachableTargetLabel = "2  REACHABLE TARGET AABB";
-    constexpr const char* kTransitionPhasesLabel = "3  TRANSITION PHASES";
-    constexpr const char* kAlignmentTransformLabel = "4  ALIGNMENT TRANSFORM";
-    constexpr const char* kRuntimeBlendWindowLabel =
-        "5  RUNTIME BLEND WINDOW";
+    constexpr const char* kSourceParameterLabel = "SOURCE";
+    constexpr const char* kReachableTargetLabel = "TARGET RANGE";
+    constexpr const char* kTransitionPhasesLabel = "PHASES";
+    constexpr const char* kAlignmentTransformLabel = "ALIGNMENT";
+    constexpr const char* kRuntimeBlendWindowLabel = "BLEND";
     const float widest_label_width = std::max({
         ImGui::CalcTextSize(kSourceParameterLabel).x,
         ImGui::CalcTextSize(kReachableTargetLabel).x,
@@ -757,7 +818,7 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
                 ? active->actual_target_parameter.front()
                 : reachable_box->Clamp(requested_target).front();
         ImGui::Text(
-            "[%.3f, %.3f]  desired %.3f -> actual %.3f",
+            "[%.3f, %.3f]  %.3f -> %.3f",
             reachable_box->min_corner.front(),
             reachable_box->max_corner.front(),
             graph_desired_parameter_, actual_parameter);
@@ -819,7 +880,7 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
             active->alignment.dx,
             active->alignment.dz);
     } else {
-        ImGui::TextDisabled("resolved when source enters phase gate");
+        ImGui::TextDisabled("waiting for phase gate");
     }
 
     ImGui::TextColored(
@@ -836,7 +897,7 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
             active->blend_progress, ImVec2(-1.0f, 0.0f), "transitioning");
     } else {
         ImGui::Text(
-            "%d frames @ %.1f fps   waiting for phase gate",
+            "%d frames @ %.1f fps",
             graph_runtime_config_.transition_blend_frames, graph_fps_);
     }
 }

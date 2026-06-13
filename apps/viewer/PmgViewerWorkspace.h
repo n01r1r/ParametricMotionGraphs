@@ -117,7 +117,6 @@ private:
     void ResetPlayback();
     bool ParametricBlendActive() const;
     bool GraphRuntimeActive() const;
-    static const char* ModeName(ViewerPlaybackMode mode);
 
     std::vector<std::filesystem::path> bvh_files_;
     int selected_file_index_ = -1;
@@ -188,6 +187,12 @@ private:
     int graph_desired_node_ = 0;
     int selected_graph_node_ = 0;
     int selected_graph_edge_ = -1;
+    // Canvas view-manipulation: per-node drag offsets (display space, added on
+    // top of the auto-layout) and the node currently being dragged. Offsets are
+    // (re)sized to the node count inside DrawGraphCanvas, so build/load paths
+    // need no extra wiring. View-only; does not mutate the graph (Path B).
+    std::vector<glm::vec2> graph_node_offsets_;
+    int graph_drag_node_ = -1;
     float graph_fps_ = 30.0f;
     std::string graph_status_ = "Define a motion space, then build a PMG.";
     std::vector<std::string> contact_joint_names_;

@@ -49,9 +49,6 @@ void ViewerHost::BuildViewUi() {
     ImGui::SetNextWindowSize(ImVec2(280.0f, 150.0f), ImGuiCond_FirstUseEver);
     ImGui::Begin("Viewer");
     ImGui::Checkbox("Follow scene focus", &follow_scene_focus_);
-    const glm::vec3 target = camera_.Target();
-    ImGui::Text("Target: %.1f, %.1f, %.1f", target.x, target.y, target.z);
-    ImGui::TextDisabled("Drag left mouse to orbit, scroll to zoom.");
     if (ImGui::Button("Reset camera")) {
         camera_.Reset();
         follow_scene_focus_ = true;

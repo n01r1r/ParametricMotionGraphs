@@ -173,18 +173,6 @@ bool PmgViewerWorkspace::GraphRuntimeActive() const {
            graph_controller_.has_value();
 }
 
-const char* PmgViewerWorkspace::ModeName(ViewerPlaybackMode mode) {
-    switch (mode) {
-        case ViewerPlaybackMode::ClipPlayback:
-            return "Clip playback";
-        case ViewerPlaybackMode::ParametricBlend:
-            return "Parametric blend";
-        case ViewerPlaybackMode::GraphRuntime:
-            return "Graph runtime";
-    }
-    return "Unknown";
-}
-
 void PmgViewerWorkspace::ResetPlayback() {
     current_time_seconds_ = 0.0f;
     playback_speed_ = 1.0f;
@@ -658,28 +646,21 @@ void PmgViewerWorkspace::BuildWorkflowSection() {
     ImGui::TextWrapped("%s", status_message_.c_str());
     ImGui::Separator();
 
-    // Numbered workflow so the order (motion samples -> transitions -> graph) is
-    // discoverable. Each step reports done / locked / available.
-    const bool clip_loaded = clip_.NumFrames() > 0;
-    const bool has_examples = !pmg_examples_.empty();
+    // One-line next-step hint: keeps the build order (clip -> samples -> graph)
+    // discoverable without the multi-line step strip.
+    const char* next_hint = nullptr;
+    if (clip_.NumFrames() == 0) {
+        next_hint = "Next: load a clip in Inputs";
+    } else if (pmg_examples_.empty()) {
+        next_hint = "Next: add motion samples in Inputs";
+    } else if (!graph_ready_) {
+        next_hint = "Next: build a graph in PMG Runtime";
+    }
+    if (next_hint != nullptr) {
+        ImGui::TextColored(ImVec4(0.55f, 0.70f, 0.95f, 1.0f), "%s", next_hint);
+        ImGui::Separator();
+    }
 
-    auto step = [](int number, const char* title, bool done, bool locked, const char* hint) {
-        if (locked) {
-            ImGui::TextDisabled("%d. %s  (%s)", number, title, hint);
-        } else if (done) {
-            ImGui::TextColored(ImVec4(0.40f, 0.80f, 0.45f, 1.0f), "%d. %s  [done]", number, title);
-        } else {
-            ImGui::Text("%d. %s  (%s)", number, title, hint);
-        }
-    };
-    step(1, "Define motion-space samples", has_examples, !clip_loaded,
-         "add an input clip");
-    step(2, "Inspect transition regions", heatmap_ready_, !clip_loaded,
-         "use Transition Grid");
-    step(3, "Run parametric motion graph", graph_ready_, !pmg_space_ready_,
-         "needs motion space");
-
-    ImGui::Separator();
     ImGui::TextDisabled("Mode");
 
     // Mode lives only here. Clip playback is always available; parametric blend
@@ -709,13 +690,6 @@ void PmgViewerWorkspace::BuildWorkflowSection() {
 }
 
 void PmgViewerWorkspace::BuildTransportSection() {
-    ImGui::Text("Mode: %s", ModeName(mode_));
-    if (clip_.NumFrames() > 0) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("| %d frames @ %.0f fps", clip_.NumFrames(), clip_.frames_per_second);
-    }
-    ImGui::Separator();
-
     if (ImGui::Button(playing_ ? "Pause" : "Play ")) {
         playing_ = !playing_;
     }
@@ -756,17 +730,11 @@ void PmgViewerWorkspace::BuildTransportSection() {
             playing_ = false;
         }
     } else if (graph_controller_.has_value()) {
-        ImGui::Text("Phase %.3f  (graph-driven)", graph_controller_->CurrentPhase());
+        ImGui::Text("Phase %.3f", graph_controller_->CurrentPhase());
     }
-
-    ImGui::TextDisabled("space play/pause   .   arrows step   .   R reset");
 }
 
 void PmgViewerWorkspace::BuildInputsSection() {
-    ImGui::TextWrapped(
-        "Input and BVH diagnostics. BVH is the current asset format; playback, "
-        "blending, and transitions operate on motion clips and motion spaces.");
-    ImGui::Separator();
     ImGui::Text("%zu BVH files", bvh_files_.size());
 
     ImGui::SetNextItemWidth(-1.0f);
@@ -811,8 +779,6 @@ void PmgViewerWorkspace::BuildInputsSection() {
     }
 
     ImGui::Separator();
-    ImGui::TextWrapped("Author one sample in ParametricMotionSpace. Parameter is a semantic "
-                       "coordinate such as turn rate or speed, not a BVH property.");
     ImGui::SetNextItemWidth(120.0f);
     ImGui::InputFloat("Blend parameter", &next_example_parameter_);
     ImGui::SameLine();
@@ -822,17 +788,11 @@ void PmgViewerWorkspace::BuildInputsSection() {
 }
 
 void PmgViewerWorkspace::BuildDisplaySection() {
-    ImGui::TextWrapped(
-        "PMG motion is converted from native units into the neutral viewer scene.");
     ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
     ImGui::SliderFloat("Display scale", &display_scale_, 1.0f, 40.0f, "%.1fx");
-    ImGui::TextDisabled("Display scale magnifies the whole world, travel included.");
 }
 
 void PmgViewerWorkspace::BuildMotionSpaceSection() {
-    ImGui::TextWrapped(
-        "ParametricMotionSpace = authored motion samples + semantic parameters + "
-        "local blend weights + canonical phase registration.");
     ImGui::Text("Space: %s   dimension: %d   samples: %zu",
                 pmg_space_ready_ ? pmg_space_.Name().c_str() : "(none)",
                 pmg_space_ready_ ? pmg_space_.ParameterDimension() : 0,
@@ -857,6 +817,36 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
         }
     } else {
         ImGui::TextDisabled("Add motion samples from Inputs.");
+    }
+
+    if (!pmg_examples_.empty()) {
+        ImGui::Separator();
+        ImGui::TextDisabled("Samples (edit parameter / remove)");
+        int remove_index = -1;
+        bool params_changed = false;
+        for (int i = 0; i < static_cast<int>(pmg_examples_.size()); ++i) {
+            ImGui::PushID(i);
+            ImGui::SetNextItemWidth(90.0f);
+            // EnterReturnsTrue: rebuild on commit, not on every per-frame edit.
+            if (ImGui::InputFloat("##param", &pmg_examples_[i].parameter, 0.0f, 0.0f,
+                                  "%.3f", ImGuiInputTextFlags_EnterReturnsTrue)) {
+                params_changed = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("x")) {
+                remove_index = i;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(pmg_examples_[i].label.c_str());
+            ImGui::PopID();
+        }
+        if (remove_index >= 0) {
+            pmg_examples_.erase(pmg_examples_.begin() + remove_index);
+            RebuildPmgSpace();
+            status_message_ = "Removed motion sample.";
+        } else if (params_changed) {
+            RebuildPmgSpace();
+        }
     }
 
     ImGui::Separator();
@@ -1241,8 +1231,8 @@ void PmgViewerWorkspace::BuildDistanceGridSection() {
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("y = source phase, x = target phase");
-    ImGui::TextDisabled("blue = low (good)  red = high (bad)  white = min cell");
+    ImGui::TextDisabled(
+        "x target | y source | blue low | red high | white min");
     ImGui::Text("distance range  min %.4f   max %.4f",
                 heatmap_min_distance_, heatmap_max_distance_);
     ImGui::Separator();
