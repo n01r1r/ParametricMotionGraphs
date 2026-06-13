@@ -179,16 +179,19 @@ void PmgViewerWorkspace::AdoptArtifact(
     pmg_examples_.clear();
     for (const pmg::ExampleMotion& example : pmg_space_.Examples()) {
         PmgExample viewer_example{
-            ShortClipLabel(example.clip.name), example.parameter.front(),
+            ShortClipLabel(example.clip.name), example.parameter,
             example.clip, {}};
         RefreshExampleContacts(viewer_example);
         pmg_examples_.push_back(std::move(viewer_example));
     }
     pmg_space_ready_ = true;
-    pmg_parameter_min_ = pmg_space_.MinParameter().front();
-    pmg_parameter_max_ = pmg_space_.MaxParameter().front();
-    graph_desired_parameter_ =
-        0.5f * (pmg_parameter_min_ + pmg_parameter_max_);
+    pmg_dimension_ = std::max(1, pmg_space_.ParameterDimension());
+    ResizeParameterVectors();
+    pmg_parameter_min_ = pmg_space_.MinParameter();
+    pmg_parameter_max_ = pmg_space_.MaxParameter();
+    const float gmin = pmg_parameter_min_.empty() ? 0.0f : pmg_parameter_min_.front();
+    const float gmax = pmg_parameter_max_.empty() ? 1.0f : pmg_parameter_max_.front();
+    graph_desired_parameter_ = 0.5f * (gmin + gmax);
     graph_desired_node_ = 0;
     selected_graph_node_ = 0;
     selected_graph_edge_ = graph_.NumEdges() > 0 ? 0 : -1;
@@ -355,10 +358,13 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     // node; derive its range when present.
     const pmg::ParametricMotionSpace& first_space = graph_.Node(0).motion_space;
     if (first_space.ParameterDimension() == 1) {
-        pmg_parameter_min_ = first_space.MinParameter().front();
-        pmg_parameter_max_ = first_space.MaxParameter().front();
-        graph_desired_parameter_ = std::clamp(
-            graph_desired_parameter_, pmg_parameter_min_, pmg_parameter_max_);
+        pmg_parameter_min_ = first_space.MinParameter();
+        pmg_parameter_max_ = first_space.MaxParameter();
+        const float gmin =
+            pmg_parameter_min_.empty() ? 0.0f : pmg_parameter_min_.front();
+        const float gmax =
+            pmg_parameter_max_.empty() ? 1.0f : pmg_parameter_max_.front();
+        graph_desired_parameter_ = std::clamp(graph_desired_parameter_, gmin, gmax);
     }
     graph_desired_node_ = 0;
     selected_graph_node_ = 0;
