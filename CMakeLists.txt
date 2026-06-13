@@ -376,5 +376,12 @@ if(PMG_BUILD_VIEWER)
         add_executable(test_viewer_host tests/test_viewer_host.cpp)
         target_link_libraries(test_viewer_host PRIVATE viewer_host)
         add_test(NAME test_viewer_host COMMAND test_viewer_host)
+
+        add_executable(test_viewer_graph_authoring
+            tests/test_viewer_graph_authoring.cpp)
+        target_include_directories(test_viewer_graph_authoring
+            PRIVATE apps/viewer)
+        add_test(NAME test_viewer_graph_authoring
+            COMMAND test_viewer_graph_authoring)
     endif()
 endif()

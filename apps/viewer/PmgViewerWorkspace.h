@@ -19,6 +19,7 @@
 #include "pmg/RuntimeController.h"
 #include "pmg/Skeleton.h"
 
+#include "GraphAuthoringModel.h"
 #include "ViewerWorkspace.h"
 
 namespace pmgviewer {
@@ -58,6 +59,14 @@ public:
     const RenderScene& Scene() const override { return scene_; }
 
 private:
+    enum class GraphOrigin {
+        None,
+        LoadedArtifact,
+        SpecBuild,
+        QuickSandbox,
+        AuthoredSandbox,
+    };
+
     struct PmgExample {
         std::string label;
         float parameter = 0.0f;
@@ -85,6 +94,10 @@ private:
     void BuildMotionSpaceSection();
     void BuildDistanceGridSection();
     void BuildGraphSection();
+    void BuildGraphAuthorTab();
+    void BuildGraphSpecTab();
+    void BuildGraphQuickTab();
+    void BuildGraphRuntimeTab();
     void DrawParameterSpace(float query_parameter);
     void DrawPhaseTimeline(float canonical_phase);
     void DrawGraphCanvas();
@@ -98,9 +111,14 @@ private:
     // viewer-side authoring model. Both build paths funnel through
     // InstallSandboxGraph, which owns the controller/alignment/flag wiring.
     void AddAuthoredNode();
+    void AddAuthoredEdge(int source_node, int target_node);
     void BuildAuthoredGraph();
+    void DrawAuthoredGraphCanvas();
     void InstallSandboxGraph(pmg::ParametricMotionGraph built, int blend_frames,
-                             const std::string& status_label);
+                             const std::string& status_label,
+                             GraphOrigin origin);
+    const char* GraphOriginLabel() const;
+    const char* GraphPersistenceLabel() const;
     void DiscoverSpecFiles();
     void BuildArtifactFromSpec(const std::string& spec_path);
     void SaveArtifact(const std::string& name);
@@ -108,7 +126,8 @@ private:
     // Shared post-build/-load wiring: installs an artifact as the live runtime
     // (skeleton, graph, controller) and retains it for lossless re-save.
     void AdoptArtifact(pmg::BuiltPmgArtifact artifact,
-                       const std::string& status_label);
+                       const std::string& status_label,
+                       GraphOrigin origin);
 
     // Goto steering delegates to the same core module as the CLI.
     void CalibrateSteering();
@@ -191,6 +210,8 @@ private:
     std::optional<pmg::PointCloudAlignment> graph_alignment_;
     std::optional<pmg::RuntimeController> graph_controller_;
     bool graph_ready_ = false;
+    GraphOrigin graph_origin_ = GraphOrigin::None;
+    bool graph_open_runtime_tab_ = false;
     float graph_desired_parameter_ = 0.0f;
     int graph_desired_node_ = 0;
     int selected_graph_node_ = 0;
@@ -213,17 +234,14 @@ private:
         pmg::Skeleton skeleton;
         pmg::ParametricMotionSpace space;
     };
-    struct AuthoredEdge {
-        int source_node = 0;
-        int target_node = 0;
-        float tgood = 0.5f;
-        float tbad = 0.7f;
-    };
     std::vector<AuthoredNode> authored_nodes_;
     std::vector<AuthoredEdge> authored_edges_;
     char authored_node_name_[64] = "node";
     int authored_edge_source_ = 0;
     int authored_edge_target_ = 0;
+    std::vector<glm::vec2> authored_node_offsets_;
+    int authored_drag_node_ = -1;
+    int authored_edge_drag_source_ = -1;
 
     float graph_fps_ = 30.0f;
     std::string graph_status_ = "Define a motion space, then build a PMG.";

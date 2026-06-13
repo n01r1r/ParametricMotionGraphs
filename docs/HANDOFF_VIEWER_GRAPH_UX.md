@@ -3,8 +3,7 @@
 Last updated: 2026-06-13. Status: merged into `main` via PR #17 (`c32414f`);
 source branch deleted. This file is now a landed-work record, not a live handoff.
 
-Scope: `apps/viewer/` only. No `pmg_core` behavior changes; the configured
-37/37 test result in [`STATUS.md`](STATUS.md) remains green.
+Scope: viewer UI and viewer-specific tests. No `pmg_core` behavior changes.
 
 ## What changed
 
@@ -94,5 +93,41 @@ built through the same core path as the CLI `--build-graph`.
 ## Deferred / next
 
 Saving authored sandbox graphs (synthesize a `BuiltPmgArtifact` from the
-authoring model so "Save artifact" works) and in-canvas edge creation
-(drag node→node) are the natural follow-ups; neither is implemented.
+authoring model so "Save artifact" works) remains the next flow-level item.
+
+## Follow-up: in-canvas edge authoring
+
+Implemented on branch `codex/viewer-canvas-edge-authoring`:
+
+- authored nodes render on a dedicated canvas before graph build;
+- drag a node's gold connector onto a target node to add a directed edge;
+- drag a node body to arrange the authoring canvas;
+- combo-based edge creation remains as a fallback;
+- both paths share `GraphAuthoringModel.h`, which rejects invalid endpoints,
+  non-finite/negative thresholds, `TBAD < TGOOD`, and duplicate directed pairs;
+- edited invalid thresholds fail explicitly before builder work instead of
+  being silently clamped.
+
+`test_viewer_graph_authoring` covers valid, reverse, self, duplicate, invalid
+endpoint, and invalid-threshold insertion. Native UI automation was unavailable
+in the implementation environment; viewer compilation is the interaction-code
+gate.
+
+### UX correction after visual review
+
+The first canvas-authoring pass exposed every build path and both canvases in
+one vertical stack. It was functionally complete but visually ambiguous.
+
+The Graph panel now uses four task tabs:
+
+- **Author**: numbered node snapshot -> edge connection -> build flow;
+- **From spec**: saveable `.pmg_spec` build only;
+- **Quick self-edge**: one-node diagnostic only;
+- **Runtime**: live graph canvas and playback controls only.
+
+The header always reports current graph provenance, node/edge count, and
+saveability. Successful builds open Runtime automatically. Authoring shows
+current clip names and parameter range, auto-suffixes duplicate node names,
+hides source/target combo controls under Advanced, and keeps only the authored
+canvas visible. Runtime layout reserves label space; self-edge loops bend
+sideways instead of clipping above the canvas.
