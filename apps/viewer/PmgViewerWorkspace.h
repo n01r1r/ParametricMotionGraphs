@@ -252,6 +252,9 @@ private:
     GraphOrigin graph_origin_ = GraphOrigin::None;
     bool graph_open_runtime_tab_ = false;
     float graph_desired_parameter_ = 0.0f;
+    // Full per-axis steering vector while a goto is active (empty otherwise);
+    // lets multidimensional goal-directed control drive every axis, not just 0.
+    pmg::ParameterVector goto_desired_parameter_;
     int graph_desired_node_ = 0;
     int selected_graph_node_ = 0;
     int selected_graph_edge_ = -1;
