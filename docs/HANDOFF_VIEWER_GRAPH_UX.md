@@ -1,6 +1,7 @@
 # Handoff: Viewer Graph Build/Manipulation UX
 
-Last updated: 2026-06-13. Branch: `codex/reduce-viewer-text`.
+Last updated: 2026-06-13. Status: merged into `main` via PR #17 (`c32414f`);
+source branch deleted. This file is now a landed-work record, not a live handoff.
 
 Scope: `apps/viewer/` only. No `pmg_core` changes, so the 36/36 core test
 result in [`STATUS.md`](STATUS.md) is unaffected.
