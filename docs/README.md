@@ -41,6 +41,9 @@ The PDFs are source material, not build inputs.
 - [`adr/`](adr/) - accepted implementation decisions.
 - [`MOTION_CORPUS.md`](MOTION_CORPUS.md) - BVH skeleton-compatibility groups,
   which clips can blend together, and the canonical 2-D steering demo spec.
+- [`WALK_JOG_CONTINUITY.md`](WALK_JOG_CONTINUITY.md) - measured loop-seam
+  analysis, paper comparison, jog-domain limits, and desired-parameter
+  semantics.
 - [`../CONTEXT.md`](../CONTEXT.md) - canonical project vocabulary.
 
 ## Evidence Hierarchy
