@@ -3,8 +3,8 @@
 Last updated: 2026-06-13. Status: merged into `main` via PR #17 (`c32414f`);
 source branch deleted. This file is now a landed-work record, not a live handoff.
 
-Scope: `apps/viewer/` only. No `pmg_core` changes, so the 36/36 core test
-result in [`STATUS.md`](STATUS.md) is unaffected.
+Scope: `apps/viewer/` only. No `pmg_core` behavior changes; the configured
+37/37 test result in [`STATUS.md`](STATUS.md) remains green.
 
 ## What changed
 
@@ -78,8 +78,9 @@ authored graph** reconstructs the immutable `ParametricMotionGraph` from scratch
 (`PmgBuilder::BuildEdge` per edge, per-edge thresholds) and installs it.
 
 To get distinct nodes, re-author the motion space (load other clips in Inputs)
-between **Add node** presses. Nodes must share one skeleton (joint-count
-checked at build). Empty-box edges are skipped with a status note.
+between **Add node** presses. Nodes must share one strictly compatible skeleton
+(joint names, hierarchy, offsets, and channel conventions are checked at
+build). Empty-box edges are skipped with a status note.
 
 Both the single-node sandbox and the authored build now funnel through one
 private `InstallSandboxGraph(built, blend_frames, status)` that owns the

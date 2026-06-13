@@ -38,8 +38,9 @@ Deviation ids reference [PAPER_CONFORMANCE.md](PAPER_CONFORMANCE.md). Motion
 spaces come first: the graph layer is near-conformant, while motion-space
 fidelity gates the paper's parameter-accuracy claim.
 
-1. Mid-clip transitions, partial source-domain edges, and continuously
-   changing parameters.
+1. Mid-clip transitions, partial-source compatibility through restricted
+   source-domain nodes (paper Section 6.3), and continuously changing
+   parameters.
 2. Revisit whether goal-directed streaming calibration can be retired once
    self-transition slicing is addressed.
 3. Better global target search and explicit reachability maps.

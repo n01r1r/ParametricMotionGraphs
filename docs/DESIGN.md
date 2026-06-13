@@ -75,5 +75,6 @@ The full prioritized deviation list lives in
 - The included corpus validates walking/jogging behavior, not the original
   boxing/platform experiments.
 - Transition regions are axis-aligned boxes and clips transition near their
-  end; mid-clip transitions and partial source domains remain future work.
+  end; mid-clip transitions and paper Section 6.3 restricted source-domain
+  nodes remain future work.
 - Foot locking is optional and not serialized as runtime behavior.

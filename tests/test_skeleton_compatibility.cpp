@@ -37,6 +37,7 @@ int main() {
 
     pmg::Skeleton reparented = reference;
     reparented.joints[1].parent_index = -1;
+    assert(reparented.NumJoints() == reference.NumJoints());
     assert(!pmg::CheckSkeletonCompatibility(reference, reparented).compatible);
 
     pmg::Skeleton offset_changed = reference;
