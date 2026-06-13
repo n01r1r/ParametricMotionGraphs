@@ -90,7 +90,8 @@ weight_i = raw_weight_i / sum_j raw_weight_j
 Implementation:
 
 - exact matches are handled before reciprocal-distance evaluation;
-- the cutoff is the selected `k`th neighbor, matching printed Equation 2;
+- the cutoff is the selected `k`th neighbor, matching Equation 2 (verified
+  against Heck PhD thesis Ch. 6 Eqs. 6.1-6.2 and Allen et al. [ACP02]);
 - the farthest selected neighbor receives zero raw weight;
 - zero/invalid weight sums fall back to the nearest sample;
 - min and max target-box corners are weighted independently;
