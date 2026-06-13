@@ -133,6 +133,25 @@ void DrawArrowHead(
 
 // --- Graph runtime (PMG streaming) -----------------------------------------
 
+pmg::ParameterVector PmgViewerWorkspace::DesiredParameterForNode(int node) const {
+    if (node < 0 || node >= graph_.NumNodes()) {
+        return {graph_desired_parameter_};
+    }
+    const pmg::ParametricMotionSpace& space = graph_.Node(node).motion_space;
+    const int dim = std::max(1, space.ParameterDimension());
+    const std::vector<float> lo = space.MinParameter();
+    const std::vector<float> hi = space.MaxParameter();
+    pmg::ParameterVector desired(static_cast<std::size_t>(dim), 0.0f);
+    for (int axis = 0; axis < dim; ++axis) {
+        const float axis_lo = axis < static_cast<int>(lo.size()) ? lo[axis] : 0.0f;
+        const float axis_hi = axis < static_cast<int>(hi.size()) ? hi[axis] : 1.0f;
+        desired[static_cast<std::size_t>(axis)] = 0.5f * (axis_lo + axis_hi);
+    }
+    // The 1-D runtime control steers axis 0.
+    desired[0] = graph_desired_parameter_;
+    return desired;
+}
+
 void PmgViewerWorkspace::AdoptArtifact(
     pmg::BuiltPmgArtifact artifact, const std::string& status_label,
     GraphOrigin origin) {
@@ -147,10 +166,9 @@ void PmgViewerWorkspace::AdoptArtifact(
         throw std::runtime_error(
             "viewer runtime artifact has incomplete graph/frame metadata");
     }
-    if (artifact.graph.Node(0).motion_space.ParameterDimension() != 1) {
-        throw std::runtime_error(
-            "viewer runtime currently requires a one-dimensional first node");
-    }
+    // Multidimensional first nodes are allowed: the runtime steers axis 0 and
+    // holds the other axes at their midpoint (see DesiredParameterForNode). The
+    // 1-D steering UI degrades gracefully for dim > 1.
 
     steering_.reset();
     graph_controller_.reset();
@@ -179,16 +197,19 @@ void PmgViewerWorkspace::AdoptArtifact(
     pmg_examples_.clear();
     for (const pmg::ExampleMotion& example : pmg_space_.Examples()) {
         PmgExample viewer_example{
-            ShortClipLabel(example.clip.name), example.parameter.front(),
+            ShortClipLabel(example.clip.name), example.parameter,
             example.clip, {}};
         RefreshExampleContacts(viewer_example);
         pmg_examples_.push_back(std::move(viewer_example));
     }
     pmg_space_ready_ = true;
-    pmg_parameter_min_ = pmg_space_.MinParameter().front();
-    pmg_parameter_max_ = pmg_space_.MaxParameter().front();
-    graph_desired_parameter_ =
-        0.5f * (pmg_parameter_min_ + pmg_parameter_max_);
+    pmg_dimension_ = std::max(1, pmg_space_.ParameterDimension());
+    ResizeParameterVectors();
+    pmg_parameter_min_ = pmg_space_.MinParameter();
+    pmg_parameter_max_ = pmg_space_.MaxParameter();
+    const float gmin = pmg_parameter_min_.empty() ? 0.0f : pmg_parameter_min_.front();
+    const float gmax = pmg_parameter_max_.empty() ? 1.0f : pmg_parameter_max_.front();
+    graph_desired_parameter_ = 0.5f * (gmin + gmax);
     graph_desired_node_ = 0;
     selected_graph_node_ = 0;
     selected_graph_edge_ = graph_.NumEdges() > 0 ? 0 : -1;
@@ -204,7 +225,7 @@ void PmgViewerWorkspace::AdoptArtifact(
         pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
     graph_controller_.emplace(
         graph_, *graph_alignment_, graph_runtime_config_);
-    graph_controller_->Start(0, {graph_desired_parameter_}, graph_fps_);
+    graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
     graph_ready_ = true;
     graph_origin_ = origin;
     graph_open_runtime_tab_ = true;
@@ -355,10 +376,13 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     // node; derive its range when present.
     const pmg::ParametricMotionSpace& first_space = graph_.Node(0).motion_space;
     if (first_space.ParameterDimension() == 1) {
-        pmg_parameter_min_ = first_space.MinParameter().front();
-        pmg_parameter_max_ = first_space.MaxParameter().front();
-        graph_desired_parameter_ = std::clamp(
-            graph_desired_parameter_, pmg_parameter_min_, pmg_parameter_max_);
+        pmg_parameter_min_ = first_space.MinParameter();
+        pmg_parameter_max_ = first_space.MaxParameter();
+        const float gmin =
+            pmg_parameter_min_.empty() ? 0.0f : pmg_parameter_min_.front();
+        const float gmax =
+            pmg_parameter_max_.empty() ? 1.0f : pmg_parameter_max_.front();
+        graph_desired_parameter_ = std::clamp(graph_desired_parameter_, gmin, gmax);
     }
     graph_desired_node_ = 0;
     selected_graph_node_ = 0;
@@ -373,7 +397,7 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     graph_alignment_.emplace(
         pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
     graph_controller_.emplace(graph_, *graph_alignment_, graph_runtime_config_);
-    graph_controller_->Start(0, {graph_desired_parameter_}, graph_fps_);
+    graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
 
     graph_ready_ = true;
     graph_origin_ = origin;
@@ -1338,11 +1362,18 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
     if (target_space.ParameterDimension() == 1) {
         const float target_min = target_space.MinParameter().front();
         const float target_max = target_space.MaxParameter().front();
-        ImGui::BeginDisabled(goto_active_);
-        ImGui::SliderFloat(
-            "Desired parameter", &graph_desired_parameter_,
-            target_min, target_max, "%.3f");
-        ImGui::EndDisabled();
+        if (std::abs(target_max - target_min) <= pmg::kSmallEpsilon) {
+            graph_desired_parameter_ = target_min;
+            ImGui::TextDisabled(
+                "Desired parameter fixed at %.3f (one authored example).",
+                target_min);
+        } else {
+            ImGui::BeginDisabled(goto_active_);
+            ImGui::SliderFloat(
+                "Desired parameter", &graph_desired_parameter_,
+                target_min, target_max, "%.3f");
+            ImGui::EndDisabled();
+        }
     } else {
         ImGui::TextDisabled(
             "Viewer controls currently expose one-dimensional target spaces.");

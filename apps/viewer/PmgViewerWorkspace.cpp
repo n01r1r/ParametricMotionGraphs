@@ -414,8 +414,14 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
                 UpdateGotoSteering(graph_controller_->CurrentPose());
             }
             pmg::RuntimeControlRequest request;
+            // A PMG stream repeatedly traverses edges, including a node's
+            // self-edge when the requested node and parameter stay unchanged.
+            // That transition blends the end of one generated clip into the
+            // start of the next; leaving the request empty would raw-wrap the
+            // extracted cycle and expose its joint-space seam.
             request.desired_node = graph_desired_node_;
-            request.desired_parameter = {graph_desired_parameter_};
+            request.desired_parameter =
+                DesiredParameterForNode(graph_desired_node_);
             graph_controller_->Update(delta_seconds * playback_speed_, request);
         }
         const pmg::Pose pose = graph_controller_->CurrentPose();
@@ -430,8 +436,7 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
     }
     // Keep the cached parametric preview in sync with the blend parameter.
     if (ParametricBlendActive() &&
-        (pmg_preview_dirty_ ||
-         std::abs(pmg_parameter_ - pmg_preview_parameter_) > kEpsilon)) {
+        (pmg_preview_dirty_ || pmg_parameter_ != pmg_preview_parameter_)) {
         RegeneratePreviewClip();
     }
     const pmg::Pose pose = CurrentPose();
@@ -440,9 +445,13 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
     RebuildScene(pose);
 }
 
-void PmgViewerWorkspace::AddCurrentClipToSpace(float parameter) {
+void PmgViewerWorkspace::AddCurrentClipToSpace(const pmg::ParameterVector& parameter) {
     if (clip_.NumFrames() == 0) {
         status_message_ = "Load a clip before adding it to the PMG space.";
+        return;
+    }
+    if (static_cast<int>(parameter.size()) != pmg_dimension_) {
+        status_message_ = "Parameter dimension mismatch.";
         return;
     }
     if (!pmg_examples_.empty()) {
@@ -464,9 +473,14 @@ void PmgViewerWorkspace::AddCurrentClipToSpace(float parameter) {
     PmgExample example{label, parameter, clip_, {}};
     RefreshExampleContacts(example);
     pmg_examples_.push_back(std::move(example));
-    next_example_parameter_ = parameter + 1.0f;
+    // Suggest the next sample one unit further along the primary axis.
+    next_example_parameter_ = parameter;
+    if (!next_example_parameter_.empty()) {
+        next_example_parameter_[0] += 1.0f;
+    }
     RebuildPmgSpace();
-    status_message_ = "Added '" + label + "' at parameter " + std::to_string(parameter);
+    status_message_ = "Added '" + label + "' (" +
+                      std::to_string(pmg_dimension_) + "-D parameter).";
 }
 
 std::vector<int> PmgViewerWorkspace::ResolveContactJointIndices() const {
@@ -514,61 +528,102 @@ void PmgViewerWorkspace::RefreshExampleContacts(PmgExample& example) {
     }
 }
 
+void PmgViewerWorkspace::ResizeParameterVectors() {
+    const std::size_t dim = static_cast<std::size_t>(std::max(1, pmg_dimension_));
+    pmg_parameter_.resize(dim, 0.0f);
+    next_example_parameter_.resize(dim, 0.0f);
+    pmg_view_axis_ = std::clamp(pmg_view_axis_, 0, std::max(0, pmg_dimension_ - 1));
+}
+
 void PmgViewerWorkspace::RebuildPmgSpace() {
     pmg_preview_dirty_ = true;
+    ResizeParameterVectors();
     if (pmg_examples_.empty()) {
         pmg_space_ready_ = false;
         pmg_preview_clip_ = pmg::MotionClip{};
         steering_turn_rate_curve_.clear();
+        steering_travel_speed_curve_.clear();
         mode_ = ViewerPlaybackMode::ClipPlayback;
         return;
     }
 
-    pmg_space_ = pmg::ParametricMotionSpace("viewer_space", 1);
-    pmg_parameter_min_ = std::numeric_limits<float>::infinity();
-    pmg_parameter_max_ = -std::numeric_limits<float>::infinity();
+    const std::size_t dim = static_cast<std::size_t>(std::max(1, pmg_dimension_));
+    pmg_space_ = pmg::ParametricMotionSpace("viewer_space", pmg_dimension_);
+    pmg_parameter_min_.assign(dim, std::numeric_limits<float>::infinity());
+    pmg_parameter_max_.assign(dim, -std::numeric_limits<float>::infinity());
     float min_y = std::numeric_limits<float>::infinity();
     for (const PmgExample& example : pmg_examples_) {
-        pmg_space_.AddExample({example.parameter}, example.clip);
-        pmg_parameter_min_ = std::min(pmg_parameter_min_, example.parameter);
-        pmg_parameter_max_ = std::max(pmg_parameter_max_, example.parameter);
+        if (example.parameter.size() != dim) {
+            continue;  // skip samples authored at a different dimension
+        }
+        pmg_space_.AddExample(example.parameter, example.clip);
+        for (std::size_t axis = 0; axis < dim; ++axis) {
+            pmg_parameter_min_[axis] =
+                std::min(pmg_parameter_min_[axis], example.parameter[axis]);
+            pmg_parameter_max_[axis] =
+                std::max(pmg_parameter_max_[axis], example.parameter[axis]);
+        }
         // Ground offset uses the global lowest point across all examples.
         const float offset = ComputeGroundOffset(pmg_skeleton_, example.clip);
         min_y = std::min(min_y, -offset);
     }
     pmg_ground_offset_ = std::isfinite(min_y) ? -min_y : 0.0f;
 
-    if (pmg_parameter_max_ <= pmg_parameter_min_) {
-        pmg_parameter_max_ = pmg_parameter_min_ + 1.0f;
+    for (std::size_t axis = 0; axis < dim; ++axis) {
+        if (!std::isfinite(pmg_parameter_min_[axis]) ||
+            !std::isfinite(pmg_parameter_max_[axis])) {
+            pmg_parameter_min_[axis] = 0.0f;
+            pmg_parameter_max_[axis] = 1.0f;
+        }
+        if (pmg_parameter_max_[axis] <= pmg_parameter_min_[axis]) {
+            pmg_parameter_max_[axis] = pmg_parameter_min_[axis] + 1.0f;
+        }
+        pmg_parameter_[axis] = std::clamp(
+            pmg_parameter_[axis], pmg_parameter_min_[axis], pmg_parameter_max_[axis]);
     }
-    pmg_parameter_ = std::clamp(pmg_parameter_, pmg_parameter_min_, pmg_parameter_max_);
     pmg_space_ready_ = true;
     RecomputeSteeringCurve();
 }
 
 void PmgViewerWorkspace::RecomputeSteeringCurve() {
     steering_turn_rate_curve_.clear();
+    steering_travel_speed_curve_.clear();
     if (!pmg_space_ready_ || pmg_space_.NumExamples() == 0) {
+        return;
+    }
+    const int axis = std::clamp(pmg_view_axis_, 0, pmg_dimension_ - 1);
+    if (axis >= static_cast<int>(pmg_parameter_min_.size()) ||
+        pmg_parameter_.size() != pmg_parameter_min_.size()) {
         return;
     }
     const float fps = pmg_examples_.empty()
                           ? 30.0f
                           : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
-    const float span = std::max(pmg_parameter_max_ - pmg_parameter_min_, kEpsilon);
+    // Sweep the view axis across its range, holding the other axes at the
+    // current blend; this generalizes the 1-D curve to one axis of an N-D space.
+    const float span =
+        std::max(pmg_parameter_max_[axis] - pmg_parameter_min_[axis], kEpsilon);
+    pmg::ParameterVector query = pmg_parameter_;
     steering_turn_rate_curve_.reserve(kSteeringCurveSamples);
+    steering_travel_speed_curve_.reserve(kSteeringCurveSamples);
     for (int i = 0; i < kSteeringCurveSamples; ++i) {
         const float alpha =
             static_cast<float>(i) / static_cast<float>(kSteeringCurveSamples - 1);
-        const float parameter = pmg_parameter_min_ + alpha * span;
-        float rate = 0.0f;
+        query[axis] = pmg_parameter_min_[axis] + alpha * span;
+        float turn_rate = 0.0f;
+        float travel_speed = 0.0f;
         try {
-            rate = pmg::MeasureParameterMetric(
-                pmg::ParameterMetric::kTurnRate,
-                pmg_space_.GenerateClip({parameter}, fps));
+            const pmg::MotionClip sample = pmg_space_.GenerateClip(query, fps);
+            turn_rate = pmg::MeasureParameterMetric(
+                pmg::ParameterMetric::kTurnRate, sample);
+            travel_speed = pmg::MeasureParameterMetric(
+                pmg::ParameterMetric::kTravelSpeed, sample);
         } catch (const std::exception&) {
-            rate = 0.0f;
+            turn_rate = 0.0f;
+            travel_speed = 0.0f;
         }
-        steering_turn_rate_curve_.push_back(rate);
+        steering_turn_rate_curve_.push_back(turn_rate);
+        steering_travel_speed_curve_.push_back(travel_speed);
     }
 }
 
@@ -582,7 +637,7 @@ void PmgViewerWorkspace::RegeneratePreviewClip() {
     const float fps = pmg_examples_.empty()
                           ? 30.0f
                           : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
-    pmg_preview_clip_ = pmg_space_.GenerateClip({pmg_parameter_}, fps);
+    pmg_preview_clip_ = pmg_space_.GenerateClip(pmg_parameter_, fps);
 }
 
 // --- ImGui UI ---------------------------------------------------------------
@@ -682,19 +737,23 @@ void PmgViewerWorkspace::StepFrame(int direction) {
 }
 
 bool PmgViewerWorkspace::ParameterSliderWithTicks(const char* label, float* value,
-                                         float min_value, float max_value) {
+                                         float min_value, float max_value, int axis) {
     const float frame_width = ImGui::CalcItemWidth();
     const bool changed = ImGui::SliderFloat(label, value, min_value, max_value, "%.3f");
 
     // Tick marks at the example parameters along the slider frame's bottom
-    // edge, so the user sees where real clips sit on the blend axis.
+    // edge, so the user sees where real clips sit on this blend axis.
     const float span = max_value - min_value;
     if (span > kEpsilon && !pmg_examples_.empty()) {
         const ImVec2 rect_min = ImGui::GetItemRectMin();
         const float bottom = ImGui::GetItemRectMax().y;
         ImDrawList* draw_list = ImGui::GetWindowDrawList();
         for (const PmgExample& example : pmg_examples_) {
-            const float alpha = std::clamp((example.parameter - min_value) / span, 0.0f, 1.0f);
+            if (axis >= static_cast<int>(example.parameter.size())) {
+                continue;
+            }
+            const float alpha =
+                std::clamp((example.parameter[axis] - min_value) / span, 0.0f, 1.0f);
             const float x = rect_min.x + alpha * frame_width;
             draw_list->AddLine(ImVec2(x, bottom - 4.0f), ImVec2(x, bottom + 2.0f),
                                IM_COL32(255, 255, 255, 170), 1.0f);
@@ -703,7 +762,10 @@ bool PmgViewerWorkspace::ParameterSliderWithTicks(const char* label, float* valu
             ImGui::BeginTooltip();
             ImGui::TextDisabled("ticks = example clips (ctrl+click to type)");
             for (const PmgExample& example : pmg_examples_) {
-                ImGui::Text("%.3f  %s", example.parameter, example.label.c_str());
+                const float tick = axis < static_cast<int>(example.parameter.size())
+                                       ? example.parameter[axis]
+                                       : 0.0f;
+                ImGui::Text("%.3f  %s", tick, example.label.c_str());
             }
             ImGui::EndTooltip();
         }
@@ -848,8 +910,20 @@ void PmgViewerWorkspace::BuildInputsSection() {
     }
 
     ImGui::Separator();
+    // Parameter dimension is locked once the space has samples (every sample
+    // must share one dimension); edit it only on an empty space.
+    ImGui::BeginDisabled(!pmg_examples_.empty());
     ImGui::SetNextItemWidth(120.0f);
-    ImGui::InputFloat("Blend parameter", &next_example_parameter_);
+    if (ImGui::InputInt("Parameter dimension", &pmg_dimension_)) {
+        pmg_dimension_ = std::clamp(pmg_dimension_, 1, 4);
+        ResizeParameterVectors();
+    }
+    ImGui::EndDisabled();
+
+    ResizeParameterVectors();  // keep next_example_parameter_ sized to dimension
+    ImGui::SetNextItemWidth(220.0f);
+    ImGui::InputScalarN("Blend parameter", ImGuiDataType_Float,
+                        next_example_parameter_.data(), pmg_dimension_);
     ImGui::SameLine();
     if (ImGui::Button("Add motion sample")) {
         AddCurrentClipToSpace(next_example_parameter_);
@@ -874,9 +948,28 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
     if (pmg_space_ready_) {
         ImGui::Separator();
         ImGui::TextDisabled("Evaluation parameter");
-        ParameterSliderWithTicks("Blend parameter", &pmg_parameter_,
-                                 pmg_parameter_min_, pmg_parameter_max_);
-        DrawParameterSpace(pmg_parameter_);
+        const int dim = std::max(1, pmg_dimension_);
+        for (int axis = 0; axis < dim; ++axis) {
+            if (axis >= static_cast<int>(pmg_parameter_.size()) ||
+                axis >= static_cast<int>(pmg_parameter_min_.size())) {
+                break;
+            }
+            ImGui::PushID(axis);
+            const std::string label =
+                "Blend parameter [" + std::to_string(axis) + "]";
+            ParameterSliderWithTicks(label.c_str(), &pmg_parameter_[axis],
+                                     pmg_parameter_min_[axis],
+                                     pmg_parameter_max_[axis], axis);
+            ImGui::PopID();
+        }
+        if (dim > 1) {
+            ImGui::SetNextItemWidth(120.0f);
+            if (ImGui::InputInt("View axis (1-D plots)", &pmg_view_axis_)) {
+                pmg_view_axis_ = std::clamp(pmg_view_axis_, 0, dim - 1);
+                RecomputeSteeringCurve();
+            }
+        }
+        DrawParameterSpace(std::clamp(pmg_view_axis_, 0, dim - 1));
 
         // Preview comes from GenerateClip (root-delta integration). The toggle
         // chooses whether the character traces that integrated trajectory or
@@ -887,24 +980,59 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
                                 ? "(root locked: cycle in place)"
                                 : "(trajectory: integrated root path)");
 
-        // Steering diagnostic: measured turn rate across the parameter axis.
-        // Smooth steering reads as a monotone, spike-free curve.
+        // Steering diagnostic: measured locomotion metrics across the parameter
+        // axis. Smooth steering reads as monotone, spike-free curves; the marker
+        // shows where the current blend parameter sits on that response.
         if (steering_turn_rate_curve_.size() >= 2) {
-            ImGui::TextDisabled(
-                "Turn rate vs parameter (rad/s) -- smooth = monotone, no spikes");
-            ImGui::PlotLines("##steering_turn_rate",
-                             steering_turn_rate_curve_.data(),
-                             static_cast<int>(steering_turn_rate_curve_.size()),
-                             0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0.0f, 48.0f));
+            const int axis =
+                std::clamp(pmg_view_axis_, 0, std::max(0, pmg_dimension_ - 1));
+            const float axis_min = axis < static_cast<int>(pmg_parameter_min_.size())
+                                       ? pmg_parameter_min_[axis] : 0.0f;
+            const float axis_max = axis < static_cast<int>(pmg_parameter_max_.size())
+                                       ? pmg_parameter_max_[axis] : 1.0f;
+            const float axis_val = axis < static_cast<int>(pmg_parameter_.size())
+                                       ? pmg_parameter_[axis] : 0.0f;
+            const float span = std::max(axis_max - axis_min, kEpsilon);
+            const float marker_alpha =
+                std::clamp((axis_val - axis_min) / span, 0.0f, 1.0f);
+
+            const auto plot_with_marker =
+                [marker_alpha](const char* id, const char* caption,
+                               const std::vector<float>& curve) {
+                    ImGui::TextDisabled("%s", caption);
+                    ImGui::PlotLines(id, curve.data(),
+                                     static_cast<int>(curve.size()), 0, nullptr,
+                                     FLT_MAX, FLT_MAX, ImVec2(0.0f, 48.0f));
+                    const ImVec2 plot_min = ImGui::GetItemRectMin();
+                    const ImVec2 plot_max = ImGui::GetItemRectMax();
+                    const float marker_x =
+                        plot_min.x + marker_alpha * (plot_max.x - plot_min.x);
+                    ImGui::GetWindowDrawList()->AddLine(
+                        ImVec2(marker_x, plot_min.y), ImVec2(marker_x, plot_max.y),
+                        IM_COL32(245, 180, 65, 255), 1.5f);
+                };
+
+            plot_with_marker("##steering_turn_rate",
+                             "Turn rate vs parameter (rad/s) -- smooth = monotone",
+                             steering_turn_rate_curve_);
+            plot_with_marker("##steering_travel_speed",
+                             "Travel speed vs parameter (units/s)",
+                             steering_travel_speed_curve_);
+
             if (pmg_preview_clip_.NumFrames() >= 2) {
-                float current_rate = 0.0f;
+                float turn_rate = 0.0f;
+                float travel_speed = 0.0f;
                 try {
-                    current_rate = pmg::MeasureParameterMetric(
+                    turn_rate = pmg::MeasureParameterMetric(
                         pmg::ParameterMetric::kTurnRate, pmg_preview_clip_);
+                    travel_speed = pmg::MeasureParameterMetric(
+                        pmg::ParameterMetric::kTravelSpeed, pmg_preview_clip_);
                 } catch (const std::exception&) {
-                    current_rate = 0.0f;
+                    turn_rate = 0.0f;
+                    travel_speed = 0.0f;
                 }
-                ImGui::TextDisabled("current blend: %.3f rad/s", current_rate);
+                ImGui::TextDisabled("current blend: %.3f rad/s, %.3f units/s",
+                                    turn_rate, travel_speed);
             }
         }
 
@@ -929,10 +1057,13 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
         bool params_changed = false;
         for (int i = 0; i < static_cast<int>(pmg_examples_.size()); ++i) {
             ImGui::PushID(i);
-            ImGui::SetNextItemWidth(90.0f);
+            pmg::ParameterVector& sample = pmg_examples_[i].parameter;
+            sample.resize(static_cast<std::size_t>(std::max(1, pmg_dimension_)), 0.0f);
+            ImGui::SetNextItemWidth(60.0f * pmg_dimension_);
             // EnterReturnsTrue: rebuild on commit, not on every per-frame edit.
-            if (ImGui::InputFloat("##param", &pmg_examples_[i].parameter, 0.0f, 0.0f,
-                                  "%.3f", ImGuiInputTextFlags_EnterReturnsTrue)) {
+            if (ImGui::InputScalarN("##param", ImGuiDataType_Float, sample.data(),
+                                    pmg_dimension_, nullptr, nullptr, "%.3f",
+                                    ImGuiInputTextFlags_EnterReturnsTrue)) {
                 params_changed = true;
             }
             ImGui::SameLine();
@@ -960,21 +1091,30 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
     }
 }
 
-void PmgViewerWorkspace::DrawParameterSpace(float query_parameter) {
+void PmgViewerWorkspace::DrawParameterSpace(int axis) {
     if (!pmg_space_ready_ || pmg_examples_.empty()) {
         return;
     }
+    axis = std::clamp(axis, 0, std::max(0, pmg_dimension_ - 1));
+    if (axis >= static_cast<int>(pmg_parameter_min_.size()) ||
+        axis >= static_cast<int>(pmg_parameter_.size())) {
+        return;
+    }
+    const float axis_min = pmg_parameter_min_[axis];
+    const float axis_max = pmg_parameter_max_[axis];
+    const float query_value = pmg_parameter_[axis];
 
     std::vector<float> weights;
     try {
-        weights = pmg_space_.ComputeLocalBlendWeights({query_parameter});
+        // Stencil weights use the full N-D blend; the canvas projects onto axis.
+        weights = pmg_space_.ComputeLocalBlendWeights(pmg_parameter_);
     } catch (const std::exception& error) {
         ImGui::TextWrapped("Weight evaluation failed: %s", error.what());
         return;
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("Parameter-space samples and local stencil");
+    ImGui::TextDisabled("Parameter-space samples and local stencil (axis %d)", axis);
     const ImVec2 canvas_origin = ImGui::GetCursorScreenPos();
     const float canvas_width = std::max(120.0f, ImGui::GetContentRegionAvail().x);
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -994,9 +1134,10 @@ void PmgViewerWorkspace::DrawParameterSpace(float query_parameter) {
 
     for (std::size_t index = 0; index < pmg_examples_.size(); ++index) {
         const PmgExample& example = pmg_examples_[index];
+        const float coord = axis < static_cast<int>(example.parameter.size())
+                                ? example.parameter[axis] : 0.0f;
         const float x = ParameterToCanvasX(
-            example.parameter, pmg_parameter_min_, pmg_parameter_max_,
-            axis_left, axis_width);
+            coord, axis_min, axis_max, axis_left, axis_width);
         const float weight = index < weights.size() ? weights[index] : 0.0f;
         const float radius = 5.0f + 7.0f * std::sqrt(std::max(0.0f, weight));
         const ImU32 color =
@@ -1006,12 +1147,11 @@ void PmgViewerWorkspace::DrawParameterSpace(float query_parameter) {
         draw_list->AddText(
             ImVec2(x - 18.0f, axis_y + 16.0f),
             IM_COL32(205, 208, 215, 255),
-            std::to_string(example.parameter).substr(0, 4).c_str());
+            std::to_string(coord).substr(0, 4).c_str());
     }
 
     const float query_x = ParameterToCanvasX(
-        query_parameter, pmg_parameter_min_, pmg_parameter_max_,
-        axis_left, axis_width);
+        query_value, axis_min, axis_max, axis_left, axis_width);
     draw_list->AddLine(
         ImVec2(query_x, canvas_origin.y + 8.0f),
         ImVec2(query_x, axis_y - 7.0f),
