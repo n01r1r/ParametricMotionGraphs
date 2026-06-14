@@ -228,6 +228,15 @@ goto steers multidimensional first nodes through the full per-axis steering
 vector; manual slider streaming drives axis 0 and holds the remaining axes at
 their midpoint. Incompatible artifacts fail explicitly.
 
+The PMG Runtime view retains a bounded world-root trail and transition-event
+markers keyed by source/target edge. These are viewer-owned diagnostic history;
+they do not alter controller state or artifact semantics. During an active
+transition, the pipeline view reconstructs the exact metric support from the
+artifact's per-edge build convention and displays it beside the exact runtime
+blend support already reported by `RuntimeController`. This makes the
+directional-metric/centered-blend policy explicit without duplicating transition
+selection or alignment logic.
+
 ## Failure boundaries
 
 The implementation throws close to the invalid input for: missing or malformed

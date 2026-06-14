@@ -53,9 +53,9 @@ Main conclusions:
    machinery and control. It does not establish a robust rectangular
    turn-speed family: three samples define a minimal triangle, the tight-jog
    corner is missing, and the jog anchor changes both turn rate and speed.
-7. Current diagnostics show build classes and live transition state, but cannot
-   visually establish advancing, non-stuttering graph behavior. Persistent path
-   and transition-event evidence is the highest-value gap.
+7. The viewer now exposes persistent root travel, edge-colored transition
+   events, and exact metric/runtime frame supports. This makes advancing versus
+   stuttering behavior inspectable, but does not prove perceptual smoothness.
 
 ## Audit Evidence
 
@@ -561,12 +561,12 @@ conventions on raw clip pairs and override blend placement.
 
 Remaining ambiguity:
 
-- viewer shows references and duration, not exact metric support frames;
-- viewer does not show exact centered runtime support frames;
 - raw-vs-centered comparison is not available in one visual view;
 - some human-readable artifact metadata still says V7 despite V8 semantics.
 
-Policy is implemented, but difficult to inspect at spec level.
+The viewer now displays the exact directional metric and centered runtime
+supports during an active transition. Policy is inspectable, but no integrated
+raw-vs-centered visual comparison exists.
 
 ### Raw distance scale dependence
 
@@ -581,11 +581,11 @@ weighting, BVH scale, registration, generated timing, and phase range.
 | GOOD/NEUTRAL/BAD counts | Edge CLI and build CSV/report | Sufficient numerically |
 | Reachable target boxes | CLI; viewer for 1-D runtime | Partial for N-D |
 | Phase references | Artifact, CLI, viewer | Partial |
-| Exact metric support frames | Convention CLI for clip pairs | Missing for built edge in viewer |
-| Exact runtime support frames | Stored in runtime diagnostics | Not displayed |
+| Exact metric support frames | CLI and active-transition viewer row | Available |
+| Exact runtime support frames | Active-transition viewer row | Available |
 | Directional vs centered comparison | CLI clip-pair command | No integrated overlay |
-| Path trail | None | Missing, P1 |
-| World transition markers | None | Missing, P1 |
+| Path trail | Viewer PMG Runtime, bounded persistent trail | Available |
+| World transition markers | Viewer PMG Runtime, colored by source/target edge | Available |
 | Raw wrap vs blended overlay | Numerical experiments only | Missing, P1 |
 | Before/after aligned overlay | Synthetic CLI metrics only | Missing |
 | Foot contact timeline | Viewer motion-space panel | Available |
@@ -614,17 +614,22 @@ weighting, BVH scale, registration, generated timing, and phase range.
 
 ### P1 - Small diagnostics
 
-1. Add persistent root path trail.
-2. Add world transition markers, colored by edge.
-3. Display exact metric and runtime frame supports from existing
+Implemented on `dev/ui` in `ed8a488`:
+
+1. Persistent root path trail.
+2. World transition markers, colored by edge.
+3. Exact metric and runtime frame supports from existing
    `TransitionFrameWindows`.
-4. Add CLI edge summary:
+
+Remaining:
+
+1. Add CLI edge summary:
    - class fractions;
    - full/restricted/shrunken box counts;
    - phase min/max and variance;
    - BAD exclusion count;
    - zero-volume target-domain warning.
-5. Add raw-wrap vs PMG-blended toggle/overlay for active self-edge.
+2. Add raw-wrap vs PMG-blended toggle/overlay for active self-edge.
 
 ### P2 - Optional spec redesign
 
