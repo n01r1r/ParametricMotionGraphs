@@ -143,6 +143,65 @@ int main() {
     }
     assert(bad_range_threw);
 
+    // expect clauses are validated against the parsed examples at load time.
+    // A 2-D node sampling all four corners satisfies corner_coverage full.
+    const std::filesystem::path full_corner_spec_path =
+        directory / "full_corner.txt";
+    {
+        std::ofstream full_corner_spec(full_corner_spec_path);
+        full_corner_spec << "node g 2\n"
+                         << "example g 0 0 walk_a.bvh\n"
+                         << "example g 1 0 walk_a.bvh\n"
+                         << "example g 0 1 walk_a.bvh\n"
+                         << "example g 1 1 walk_a.bvh\n"
+                         << "expect g spanned_axes 2\n"
+                         << "expect g corner_coverage full\n";
+    }
+    const pmg::GraphSpec full_corner =
+        pmg::LoadGraphSpec(full_corner_spec_path.string());
+    assert(full_corner.nodes[0].expect_corner_coverage_full);
+    assert(full_corner.nodes[0].has_expect_spanned_axes);
+    assert(full_corner.nodes[0].expect_spanned_axes == 2);
+
+    // The same node missing the (1,1) corner is a degenerate simplex and fails
+    // the corner_coverage full claim.
+    const std::filesystem::path missing_corner_spec_path =
+        directory / "missing_corner.txt";
+    {
+        std::ofstream missing_corner_spec(missing_corner_spec_path);
+        missing_corner_spec << "node g 2\n"
+                            << "example g 0 0 walk_a.bvh\n"
+                            << "example g 1 0 walk_a.bvh\n"
+                            << "example g 0 1 walk_a.bvh\n"
+                            << "expect g corner_coverage full\n";
+    }
+    bool missing_corner_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(missing_corner_spec_path.string());
+    } catch (const std::runtime_error&) {
+        missing_corner_threw = true;
+    }
+    assert(missing_corner_threw);
+
+    // A node whose examples vary along only one axis cannot satisfy
+    // spanned_axes 2.
+    const std::filesystem::path collinear_spec_path =
+        directory / "collinear.txt";
+    {
+        std::ofstream collinear_spec(collinear_spec_path);
+        collinear_spec << "node g 2\n"
+                       << "example g 0 0 walk_a.bvh\n"
+                       << "example g 1 0 walk_a.bvh\n"
+                       << "expect g spanned_axes 2\n";
+    }
+    bool collinear_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(collinear_spec_path.string());
+    } catch (const std::runtime_error&) {
+        collinear_threw = true;
+    }
+    assert(collinear_threw);
+
     pmg::PmgBuilderConfig config;
     config.source_sample_count = 1;
     config.target_sample_count = 1;

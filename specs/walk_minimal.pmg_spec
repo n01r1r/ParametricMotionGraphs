@@ -8,6 +8,10 @@ node walk 1
 registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
 example walk 0.0 ../BVH/walkCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
+# Both extremes of the single curvature axis are authored, so the space is
+# fully covered. Held to that claim at load.
+expect walk spanned_axes 1
+expect walk corner_coverage full
 edge walk walk
 # Raw-sum thresholds calibrated for the D6 metric (see walk_curvature.pmg_spec).
 edge_config walk walk 225 250 12 60 7
