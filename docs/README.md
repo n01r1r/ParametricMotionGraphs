@@ -25,26 +25,23 @@ The PDFs are source material, not build inputs.
    they fit together.
 2. [`PAPER_CODE_MAP.md`](PAPER_CODE_MAP.md) - paper sections and equations
    mapped to code and tests.
-3. [`PIPELINE.md`](PIPELINE.md) - offline construction, artifact boundary, and
-   online runtime flow.
-4. [`REPRODUCTION.md`](REPRODUCTION.md) - build, validation, artifact, and
+3. [`PAPER_CONFORMANCE.md`](PAPER_CONFORMANCE.md) - line-by-line conformance
+   audit, the deviation list (D1-D8), what's left, and the claim limit.
+4. [`DESIGN.md`](DESIGN.md) - module structure, offline/online pipeline,
+   contracts, and failure boundaries.
+5. [`REPRODUCTION.md`](REPRODUCTION.md) - build, validation, artifact, and
    runtime commands.
-5. [`GLOSSARY.md`](GLOSSARY.md) - paper terms, code symbols, units, and naming.
 
-## Existing Design Records
+## Supporting References
 
-- [`DESIGN.md`](DESIGN.md) - module responsibilities and contracts.
-- [`PAPER_CONFORMANCE.md`](PAPER_CONFORMANCE.md) - conformance audit and claim
-  limits.
-- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - completed paper-core and
-  remaining work.
-- [`adr/`](adr/) - accepted implementation decisions.
+- [`../CONTEXT.md`](../CONTEXT.md) - canonical project vocabulary and the
+  paper-symbol map; code and conversation use these terms exactly.
 - [`MOTION_CORPUS.md`](MOTION_CORPUS.md) - BVH skeleton-compatibility groups,
   which clips can blend together, and the canonical 2-D steering demo spec.
 - [`WALK_JOG_CONTINUITY.md`](WALK_JOG_CONTINUITY.md) - measured loop-seam
   analysis, paper comparison, jog-domain limits, and desired-parameter
   semantics.
-- [`../CONTEXT.md`](../CONTEXT.md) - canonical project vocabulary.
+- [`adr/`](adr/) - accepted implementation decisions.
 
 ## Evidence Hierarchy
 

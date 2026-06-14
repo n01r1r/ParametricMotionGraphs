@@ -11,8 +11,8 @@ imports this file, so every agent reads the same notes. See
 Before ending a work session or letting context cycle, always:
 
 1. **Update docs to current state.** Reflect what changed this session in the
-   relevant doc — `docs/STATUS.md` for core-scope/test claims, the matching
-   `docs/HANDOFF_*.md` or design doc for feature work.
+   relevant doc — `docs/PAPER_CONFORMANCE.md` for conformance/scope/test claims,
+   `docs/DESIGN.md` for architecture, the matching design doc for feature work.
 2. **Clean up stale references.** Fix merged/deleted branch names, bump
    `Last updated:` dates, retire handoff notes whose work has landed.
 3. **Commit for a clean handoff.** Leave `git status` clean so the next session

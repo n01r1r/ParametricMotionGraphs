@@ -188,3 +188,22 @@ _Avoid_: pose distance (the older single-frame metric, removed).
 Aligned point-cloud distance for every sampled (source frame, target frame) pair
 over the transition region; its minimum cell is the optimal transition.
 _Avoid_: cost matrix, heatmap (the heatmap is the viewer's rendering of it).
+
+## Paper symbols
+
+Mapping from the source papers' notation to the repository equivalents.
+
+| Paper symbol | Meaning | Repository equivalent |
+|---|---|---|
+| `M(t)` | motion evaluated at time | `MotionClip::SampleNormalizedPhase` |
+| `P(lambda)` | parameterized motion generator | `ParametricMotionSpace::GenerateClip` |
+| `D(M1(t1), M2(t2))` | aligned window distance | `AlignedPointCloudDistance` |
+| `Ls`, `Lt` | sampled source/target parameters | builder sample vectors |
+| `Lt_GOOD`, `Lt_BAD` | classified target samples | `good_hits`, `bad_target_parameters` |
+| `B(Ns, Nt)` | interpolated target transition region | `target_parameter_box` |
+| `w_i` | PMG source-neighbor weight | `weights[n]` in edge lookup |
+| `TGOOD`, `TBAD` | transition thresholds | `good_transition_threshold`, `bad_transition_threshold` |
+
+`turn_rate` measures rad/s; `travel_speed` measures root floor-path speed in
+native BVH units/s. `TGOOD`/`TBAD` are corpus- and metric-specific
+squared-distance thresholds with no universal physical interpretation.

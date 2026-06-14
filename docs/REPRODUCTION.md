@@ -258,7 +258,8 @@ cmake --build build --config Debug --target pmg_viewer
 
 Manual checks:
 
-1. The artifact's first graph node has a one-dimensional parameter space.
+1. The artifact's first graph node loads (one- or multi-dimensional); goto
+   steering drives every axis, the manual blend slider drives axis 0.
 2. Motion Space shows authored samples and parameter weights.
 3. Canonical phase and contact markers advance consistently.
 4. Transition Grid shows a finite minimum and selected alignment.
