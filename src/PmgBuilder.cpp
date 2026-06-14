@@ -149,8 +149,10 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
         distances.reserve(target_samples.size());
 
         for (std::size_t target_index = 0; target_index < target_samples.size(); ++target_index) {
-            const OptimalTransition transition = MotionDistance::FindOptimalTransition(
-                skeleton, source_clip, target_clips[target_index], config.distance_grid);
+            const OptimalTransition transition =
+                MotionDistance::FindOptimalTransitionForConvention(
+                    skeleton, source_clip, target_clips[target_index],
+                    config.distance_grid, config.transition_convention);
             const float distance = transition.distance;
             distances.push_back(distance);
 

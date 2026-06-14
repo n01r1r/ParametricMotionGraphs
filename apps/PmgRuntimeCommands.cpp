@@ -148,6 +148,8 @@ struct RandomWalkOptions {
     // Assert thresholds; negative = report only.
     int min_transitions = -1;
     float max_pop_ratio = -1.0f;
+    // Override runtime blend placement (default: artifact-derived / centered).
+    std::optional<pmg::TransitionWindowConvention> blend_placement;
 };
 
 // Paper application A: stream random transitions through the graph and verify
@@ -157,8 +159,22 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
         options.spec_path, options.cycle_joint, options.contact_joints_csv,
         options.min_contact_frames, options.builder);
 
-    const pmg::RuntimeControllerConfig runtime_config =
+    // The metric convention lives in the artifact; the runtime blend placement
+    // defaults to PMG centered (§5.2.1) and can be overridden for the A/B.
+    pmg::RuntimeControllerConfig runtime_config =
         pmg::RuntimeControllerConfigFromArtifact(artifact);
+    if (options.blend_placement.has_value()) {
+        runtime_config.convention = *options.blend_placement;
+    }
+    std::cout << "metric_convention="
+              << pmg::TransitionWindowConventionName(
+                     artifact.metadata.edge_builds.empty()
+                         ? pmg::TransitionWindowConvention::kKovarDirectional
+                         : artifact.metadata.edge_builds.front()
+                               .config.transition_convention)
+              << " blend_placement="
+              << pmg::TransitionWindowConventionName(runtime_config.convention)
+              << "\n";
     pmg::PointCloudAlignment alignment(
         artifact.skeleton, runtime_config.transition_blend_frames);
     pmg::RuntimeController controller(
@@ -453,6 +469,34 @@ RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
             options.min_transitions = std::stoi(require_value("--min-transitions"));
         } else if (option == "--max-pop-ratio") {
             options.max_pop_ratio = std::stof(require_value("--max-pop-ratio"));
+        } else if (option == "--transition-convention") {
+            const std::string value =
+                require_value("--transition-convention");
+            if (value == "centered" || value == "pmg_centered") {
+                options.builder.transition_convention =
+                    pmg::TransitionWindowConvention::kPmgCentered;
+            } else if (value == "directional" ||
+                       value == "kovar_directional") {
+                options.builder.transition_convention =
+                    pmg::TransitionWindowConvention::kKovarDirectional;
+            } else {
+                throw std::runtime_error(
+                    "--transition-convention expects 'directional' or "
+                    "'centered'");
+            }
+        } else if (option == "--blend-placement") {
+            const std::string value = require_value("--blend-placement");
+            if (value == "centered" || value == "pmg_centered") {
+                options.blend_placement =
+                    pmg::TransitionWindowConvention::kPmgCentered;
+            } else if (value == "directional" ||
+                       value == "kovar_directional") {
+                options.blend_placement =
+                    pmg::TransitionWindowConvention::kKovarDirectional;
+            } else {
+                throw std::runtime_error(
+                    "--blend-placement expects 'directional' or 'centered'");
+            }
         } else {
             throw std::runtime_error("unknown random-walk option '" + option + "'");
         }

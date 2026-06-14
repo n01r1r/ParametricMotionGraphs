@@ -4,6 +4,7 @@
 #include "pmg/ParametricMotionGraph.h"  // InterpolatedTransition
 #include "pmg/RigidTransform2D.h"
 #include "pmg/Skeleton.h"
+#include "pmg/TransitionWindow.h"
 
 namespace pmg {
 
@@ -17,6 +18,9 @@ struct AlignmentContext {
     const MotionClip& target_clip;
     float live_source_phase;
     const InterpolatedTransition& transition;
+    int window_size = 5;
+    TransitionWindowConvention convention =
+        TransitionWindowConvention::kKovarDirectional;
 };
 
 // Seam: how a RuntimeController aligns the chosen target clip onto the current

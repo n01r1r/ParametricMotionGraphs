@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <stdexcept>
 
 namespace {
 
@@ -82,6 +83,31 @@ int main() {
         assert(Near(out.yaw, 0.0f));
         assert(Near(out.dx, 3.0f));   // 2 - (-1)
         assert(Near(out.dz, -1.0f));  // 3 - 4
+    }
+
+    // Point-cloud alignment rejects a metric/runtime window mismatch instead
+    // of silently aligning different frame support.
+    {
+        const pmg::Skeleton skeleton = MakeSkeleton();
+        const pmg::MotionClip source = MakeWalkClip(0.0f);
+        const pmg::MotionClip target = MakeWalkClip(1.0f);
+        pmg::InterpolatedTransition transition;
+        transition.source_transition_phase = 0.5f;
+        transition.target_transition_phase = 0.5f;
+        const pmg::AlignmentContext context{
+            source, target, 0.5f, transition,
+            /*window_size=*/3,
+            pmg::TransitionWindowConvention::kKovarDirectional};
+        const pmg::PointCloudAlignment strategy(
+            skeleton, /*window=*/5);
+
+        bool rejected_mismatch = false;
+        try {
+            (void)strategy.Resolve(context);
+        } catch (const std::runtime_error&) {
+            rejected_mismatch = true;
+        }
+        assert(rejected_mismatch);
     }
 
     // The seam decouples timing from alignment: an arbitrary adapter plugs into

@@ -9,7 +9,7 @@ namespace pmg {
 
 namespace {
 
-PointCloud BuildPointCloudFromFirstFrame(
+PointCloud BuildPointCloudFromFirstFrameImpl(
     const Skeleton& skeleton,
     const MotionClip& clip,
     int first_frame,
@@ -75,8 +75,18 @@ PointCloud MotionDistance::BuildPointCloud(
     int window_size,
     const PointCloudWeighting& weighting) {
     const int half_window = window_size / 2;
-    return BuildPointCloudFromFirstFrame(
+    return BuildPointCloudFromFirstFrameImpl(
         skeleton, clip, center_frame - half_window, window_size, weighting);
+}
+
+PointCloud MotionDistance::BuildPointCloudFromFirstFrame(
+    const Skeleton& skeleton,
+    const MotionClip& clip,
+    int first_frame,
+    int window_size,
+    const PointCloudWeighting& weighting) {
+    return BuildPointCloudFromFirstFrameImpl(
+        skeleton, clip, first_frame, window_size, weighting);
 }
 
 AlignedDistanceResult MotionDistance::AlignedPointCloudDistance(
@@ -216,6 +226,17 @@ DistanceGrid MotionDistance::BuildDistanceGrid(
     const MotionClip& source_clip,
     const MotionClip& target_clip,
     const DistanceGridConfig& config) {
+    return BuildDistanceGridForConvention(
+        skeleton, source_clip, target_clip, config,
+        TransitionWindowConvention::kKovarDirectional);
+}
+
+DistanceGrid MotionDistance::BuildDistanceGridForConvention(
+    const Skeleton& skeleton,
+    const MotionClip& source_clip,
+    const MotionClip& target_clip,
+    const DistanceGridConfig& config,
+    TransitionWindowConvention convention) {
     source_clip.RequireNotEmpty("MotionDistance::BuildDistanceGrid source");
     target_clip.RequireNotEmpty("MotionDistance::BuildDistanceGrid target");
 
@@ -229,22 +250,31 @@ DistanceGrid MotionDistance::BuildDistanceGrid(
                                        config.target_phase_end,
                                        config.target_frame_stride);
 
-    // Kovar et al. 2002 Sec. 3.1: source window begins at candidate i;
-    // target window ends at candidate j.
     std::vector<PointCloud> source_clouds;
     source_clouds.reserve(grid.source_frames.size());
     for (const int frame : grid.source_frames) {
+        const TransitionFrameWindows windows =
+            ResolveTransitionFrameWindows(
+                source_clip.NumFrames(), target_clip.NumFrames(),
+                frame, 0, config.window_size, convention);
         source_clouds.push_back(
-            BuildPointCloudFromFirstFrame(
-                skeleton, source_clip, frame, config.window_size,
+            BuildPointCloudFromFirstFrameImpl(
+                skeleton, source_clip,
+                windows.source.first_unclamped_frame,
+                config.window_size,
                 config.weighting));
     }
     std::vector<PointCloud> target_clouds;
     target_clouds.reserve(grid.target_frames.size());
     for (const int frame : grid.target_frames) {
+        const TransitionFrameWindows windows =
+            ResolveTransitionFrameWindows(
+                source_clip.NumFrames(), target_clip.NumFrames(),
+                0, frame, config.window_size, convention);
         target_clouds.push_back(
-            BuildPointCloudFromFirstFrame(
-                skeleton, target_clip, frame - config.window_size + 1,
+            BuildPointCloudFromFirstFrameImpl(
+                skeleton, target_clip,
+                windows.target.first_unclamped_frame,
                 config.window_size, config.weighting));
     }
 
@@ -269,7 +299,20 @@ OptimalTransition MotionDistance::FindOptimalTransition(
     const MotionClip& target_clip,
     const DistanceGridConfig& config,
     float max_distance) {
-    const DistanceGrid grid = BuildDistanceGrid(skeleton, source_clip, target_clip, config);
+    return FindOptimalTransitionForConvention(
+        skeleton, source_clip, target_clip, config,
+        TransitionWindowConvention::kKovarDirectional, max_distance);
+}
+
+OptimalTransition MotionDistance::FindOptimalTransitionForConvention(
+    const Skeleton& skeleton,
+    const MotionClip& source_clip,
+    const MotionClip& target_clip,
+    const DistanceGridConfig& config,
+    TransitionWindowConvention convention,
+    float max_distance) {
+    const DistanceGrid grid = BuildDistanceGridForConvention(
+        skeleton, source_clip, target_clip, config, convention);
 
     OptimalTransition best;
     for (int source_index = 0; source_index < grid.SourceCount(); ++source_index) {

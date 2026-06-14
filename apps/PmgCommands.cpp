@@ -13,6 +13,7 @@ void PrintUsage() {
               << "  pmg_cli --bvh path/to/file.bvh\n"
               << "  pmg_cli --list-bvh-joints path/to/file.bvh\n"
               << "  pmg_cli --inspect-transition source.bvh target.bvh\n"
+              << "  pmg_cli --compare-transition-conventions source.bvh target.bvh\n"
               << "  pmg_cli --dump-distance-grid source.bvh target.bvh out.csv\n"
               << "  pmg_cli --calibrate-thresholds bvh_directory [manifest.txt]\n"
               << "  pmg_cli --validate-graph-spec graph_spec.txt\n"

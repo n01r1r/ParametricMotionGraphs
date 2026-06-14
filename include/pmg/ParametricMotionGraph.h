@@ -15,8 +15,10 @@ struct PmgNode {
 };
 
 // Result of interpolating an edge's stored samples at a query source parameter.
-// Contains no alignment transform: runtime alignment is recomputed from the
-// selected source/target phases and generated clips.
+// Source phase identifies the first source support frame; target phase
+// identifies the last target support frame. Contains no alignment transform:
+// runtime alignment is recomputed from those directional references and the
+// generated clips.
 struct InterpolatedTransition {
     ParameterAabb target_parameter_box;
     float source_transition_phase = 0.0f;

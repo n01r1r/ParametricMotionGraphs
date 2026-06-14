@@ -30,6 +30,7 @@ add_library(pmg_core
     src/RuntimeController.cpp
     src/SkeletonCompatibility.cpp
     src/TimeWarp.cpp
+    src/TransitionWindow.cpp
 )
 
 target_include_directories(pmg_core PUBLIC include)
@@ -80,6 +81,12 @@ if(PMG_BUILD_TESTS)
     add_executable(test_distance_grid tests/test_distance_grid.cpp)
     target_link_libraries(test_distance_grid PRIVATE pmg_core)
     add_test(NAME test_distance_grid COMMAND test_distance_grid)
+
+    add_executable(test_transition_window_contract
+        tests/test_transition_window_contract.cpp)
+    target_link_libraries(test_transition_window_contract PRIVATE pmg_core)
+    add_test(NAME test_transition_window_contract
+        COMMAND test_transition_window_contract)
 
     add_executable(test_pmg_builder tests/test_pmg_builder.cpp)
     target_link_libraries(test_pmg_builder PRIVATE pmg_core)

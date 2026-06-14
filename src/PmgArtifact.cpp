@@ -28,6 +28,10 @@ RuntimeControllerConfig RuntimeControllerConfigFromArtifact(
     }
 
     runtime_config.transition_blend_frames = transition_window_frames;
+    // Blend placement (RuntimeControllerConfig::convention) is intentionally
+    // NOT taken from the artifact's metric convention: PMG locates transitions
+    // with Kovar's directional metric but centers the runtime blend (§5.2.1).
+    // It keeps the struct default (kPmgCentered).
     return runtime_config;
 }
 
