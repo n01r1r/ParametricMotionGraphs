@@ -227,12 +227,17 @@ preparation assumptions.
   --source-samples 12 `
   --target-samples 60 `
   --seed 7 `
-  --tgood 1.5 `
-  --tbad 2.0 `
+  --tgood 225 `
+  --tbad 250 `
   --min-edge-samples 10 `
   --min-good-fraction 0.9 `
-  --assert-no-regression
+  --max-preparation-distance-ratio 1.10
 ```
+
+Distances use the raw weighted squared-sum scale from Kovar Equation 1.
+Thresholds depend on point count, window length, configured weights, and native
+BVH units. The `1.10` preparation ratio is a corpus-specific regression cap;
+the measured value for this command is `1.0775`.
 
 ## Validation Specs
 

@@ -36,14 +36,17 @@ B-spline, plus per-frame rigid frame alignment and constraint matching. The
 timewarp `s(u)` now matches that: the dense slope-constrained DTW correspondence
 is denoised by a cubic smoothing spline (penalized second-difference form, the
 natural-cubic-smoothing-spline equivalent of KG04's B-spline) before it is
-sampled into warp knots — see `RefineRegistrationByDtw`. Measured on
-`specs/walk_curvature` (`--validate-graph`, seed 7), this lowers the production
-best self-transition distance from `0.8878` (prior piecewise-linear refine) to
-`0.8816` against a `0.8604` no-registration baseline — about 23% less
-registration penalty — with runtime pop ratio flat and all tests green. The
-payoff is corpus-density-coupled: with only three clean walk clips the
-within-segment correspondence is already near-linear, so the headroom is small;
-a denser/noisier corpus is where the spline earns more.
+sampled into warp knots — see `RefineRegistrationByDtw`. Under the superseded
+centered mean-distance diagnostic, this lowered production best self-transition
+distance from `0.8878` (prior piecewise-linear refine) to `0.8816` against a
+`0.8604` no-registration baseline, with runtime pop ratio flat. D6 replaced
+that diagnostic scale and window placement. Under the exact asymmetric raw-sum
+metric (`specs/walk_curvature`, `--validate-graph`, seed 7), current
+production/authored mean-min distances are `156.654 / 145.385 = 1.0775`; the
+regression gate records that corpus-specific penalty explicitly and caps it at
+`1.10`. All 37 core tests pass. The payoff is corpus-density-coupled: with only
+three clean walk clips the within-segment correspondence is already near-linear,
+so headroom is small.
 
 What remains ◐ is the rest of the KG04 registration *curve*: per-frame rigid
 pose alignment and constraint matching, here approximated by root-delta
@@ -56,7 +59,7 @@ extension that holds on the included clips.
 |---|---|---|---|
 | Node = motion space, edge = sampled transition set | ✓ | `PmgNode` / `PmgEdge` | `include/pmg/ParametricMotionGraph.h:12` |
 | Sample source × target parameter spaces | ✓ | `PmgBuilder` (50 source / 1000 target default) | `include/pmg/PmgBuilder.h:13` |
-| Transition distance = windowed point cloud (Kovar 2002) | ◐ (D6) | `MotionDistance::BuildDistanceGrid` | `include/pmg/MotionDistance.h:99` |
+| Transition distance = windowed point cloud (Kovar 2002) | ◐ (D6) | `MotionDistance::BuildDistanceGrid` | `include/pmg/MotionDistance.h:101` |
 | Closed-form 2-D floor-plane alignment | ✓ | `AlignedPointCloudDistance` | `include/pmg/MotionDistance.h:94` |
 | Optimal transition cell of the grid | ✓ | `FindOptimalTransition` | `include/pmg/MotionDistance.h:107` |
 | GOOD / NEUTRAL / BAD double threshold | ✓ | `PmgBuilderConfig` | `include/pmg/PmgBuilder.h:20` |
@@ -130,14 +133,14 @@ not the PMG layer this project implements.
    was a measured regression (it injects unsupported curvature); the spline
    belongs in the *fit* over the dense correspondence, not in the interpolation
    primitive.
-2. **◐ D6 metric exactness** — match Kovar's asymmetric window placement and
-   unnormalized weighted sum if paper-comparable absolute distances are wanted.
-   Low: does not change which transitions classify GOOD on this corpus.
-3. **○ Everything else** — out-of-scope boundaries, correctly excluded per the
+2. **○ Everything else** — out-of-scope boundaries, correctly excluded per the
    Claim Limit.
 
 Spec-exposing the distance-grid phase ranges (formerly item 2) landed via the
 `edge_phase_range` line; the metric window size stays one global value by D4.
+The D6 equation/window gap also landed: transition grids use source-start and
+target-end windows plus Kovar's unnormalized weighted squared sum. Thresholds
+were recalibrated because raw sums scale with point count and weights.
 The wide-turn walk-loop jolt was diagnosed as a corpus periodicity limit
 (data-bound), not a code/registration/config gap — see
 `docs/WALK_JOG_CONTINUITY.md`.
@@ -188,14 +191,13 @@ Stable ids for the adaptations and gaps above.
 
 ### Known adaptations and gaps
 
-- **D6 — Point-cloud sampling and scale differ from Kovar 2002 (low).**
-  Kovar builds point clouds from downsampled skin-mesh vertices, uses a source
-  window beginning at the candidate frame and a target window ending at the
-  candidate frame, and defines an unnormalized weighted squared sum. This
-  implementation uses joint world positions, centered endpoint-clamped windows
-  for both clips, and a weighted mean squared distance. The closed-form floor
-  alignment is the same optimization, but thresholds and distance values are
-  specific to this implementation and corpus.
+- **D6 — Point representation differs from Kovar 2002 (low).**
+  Source windows now begin at candidate `i`, target windows end at candidate
+  `j`, and distance is Kovar Equation 1's unnormalized weighted squared sum.
+  The remaining adaptation is representation: joint world positions replace
+  downsampled skin-mesh vertices, and directional windows clamp at clip
+  boundaries. Thresholds remain specific to skeleton point count, window,
+  weights, native units, and corpus.
 - **D7 — Optional velocity weighting is in neither paper (low).**
   `PointCloudWeighting::add_velocity_weight` multiplies point weights by
   `1 + speed`. Off by default; enabling it departs from the printed metric.
