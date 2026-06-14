@@ -103,11 +103,11 @@ the chosen optimal cell, measured with `--diagnose-graph-edge` over every
 
 The jolt magnitude tracks `D`, and `D` tracks which BVH anchor is active: under
 one identical pipeline (same runtime, registration, range, blend) only the
-anchor clip changes, yet wide-turn `D` is 1.23 while tight-turn `D` is 0.46. The
-runtime is paper-faithful (`RuntimeController::TryScheduleTransition` centers the
-blend window on the optimal cell per PMG §5.2.1); the limiter is clip
-self-similarity, not code or registration smoothness. **All four edges are
-data-bound:** the wide-turn anchor's periodicity floor and the single-example
+anchor clip changes, yet wide-turn `D` is 1.23 while tight-turn `D` is 0.46. `D`
+is the Kovar directional metric (§3.1) the edge was scored with; the runtime then
+centers its blend on that optimal point (PMG §5.2.1, `kPmgCentered`). The limiter
+is clip self-similarity, not code or registration smoothness. **All four edges
+are data-bound:** the wide-turn anchor's periodicity floor and the single-example
 `jog` node (which also forces T_GOOD up to 3.5 / 2.0 to admit its transitions).
 
 ### Phase-range widening is a degenerate trap

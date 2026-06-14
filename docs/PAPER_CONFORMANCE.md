@@ -44,7 +44,7 @@ that diagnostic scale and window placement. Under the exact asymmetric raw-sum
 metric (`specs/walk_curvature`, `--validate-graph`, seed 7), current
 production/authored mean-min distances are `156.654 / 145.385 = 1.0775`; the
 regression gate records that corpus-specific penalty explicitly and caps it at
-`1.10`. All 37 core tests pass. The payoff is corpus-density-coupled: with only
+`1.10`. All 38 core tests pass. The payoff is corpus-density-coupled: with only
 three clean walk clips the within-segment correspondence is already near-linear,
 so headroom is small.
 
@@ -146,8 +146,8 @@ The wide-turn walk-loop jolt was diagnosed as a corpus periodicity limit
 `docs/WALK_JOG_CONTINUITY.md`.
 
 Multidimensional runtime control (formerly item 1) landed: the control layer
-now drives every node axis. The core algorithm is faithful and verified (37/37
-core tests, 39/39 with the viewer). What remains is registration depth and small
+now drives every node axis. The core algorithm is faithful and verified (38/38
+core tests, 40/40 with the viewer). What remains is registration depth and small
 per-edge plumbing, not correctness or feature breadth.
 
 ## Deviation register
@@ -177,16 +177,35 @@ Stable ids for the adaptations and gaps above.
   placement and resumes at the wrapped clip-local phase, so transitions play
   real source frames through the whole blend. A regression test forces a
   transition window across phase 1 and checks continuous root motion.
-- **D4 — Blend length equals the metric window.**
+- **D4 — Metric window vs blend placement are two concerns.**
   `transition_blend_frames` derives from the edge builds'
-  `DistanceGridConfig::window_size` and drives runtime blending, point-cloud
-  alignment, and goal-directed calibration. Artifacts whose edge builds record
-  different window sizes are rejected explicitly (one global runtime window).
+  `DistanceGridConfig::window_size`; `k` sampled frames span `k-1` intervals so
+  the blend lasts `(k-1)/fps`. Artifacts with mixed window sizes are rejected
+  (one global runtime window). The transition window splits into two source-paper
+  concerns resolved through the shared `ResolveTransitionFrameWindows`:
+  - **Metric (Kovar §3.1):** directional windows, source `[i, i+k-1]` / target
+    `[j-k+1, j]`. PMG reuses Kovar's metric; the asymmetry aligns the end→start
+    seam and the calibrated sub-ranges/thresholds depend on it. A *centered*
+    metric rejects 3/4 walk_jog edges at their thresholds (up to 3.4× distance
+    inflation over the directional-tuned sub-range), so the metric stays
+    `kKovarDirectional`.
+  - **Blend (PMG §5.2.1):** the runtime centers the blend window on the optimal
+    transition point (`kPmgCentered` default). The centered blend window
+    `[ref-h, ref+h]` differs from the metric window by half a window, so the
+    blended frames are not exactly the metric-scored frames — an inherent
+    consequence of pairing Kovar's metric with PMG's centered blend (in pure PMG
+    they coincide). Measured smoother on wide/mid self + cross-node, slightly
+    worse on tight self.
+
+  Serialized as `PMG_GRAPH_V8` (stores the metric convention); legacy V2–V7 pin
+  `kKovarDirectional`. A/B via `pmg_cli --random-walk --transition-convention
+  <metric> --blend-placement <runtime>`; `test_transition_window_contract`
+  regresses the resolver.
 - **D5 — Transition phases remain target-dependent.**
   Each source sample stores the phase pair measured at every retained GOOD
   target sample inside its shrunk box. Runtime clamps the requested target,
   interpolates phases in target-parameter space, then across source samples.
-  Introduced in `PMG_GRAPH_V6`, retained in V7; V2–V5 scalar phases remain
+  Introduced in `PMG_GRAPH_V6`, retained in V7–V8; V2–V5 scalar phases remain
   readable as fallback.
 
 ### Known adaptations and gaps
