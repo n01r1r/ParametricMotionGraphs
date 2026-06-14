@@ -31,14 +31,13 @@
 representation differences:
 
 - points are joint world positions, not downsampled mesh vertices;
-- both clouds use centered, endpoint-clamped windows;
-- the 2002 paper defines one window starting at the source candidate and one
-  ending at the target candidate;
-- output is weighted mean squared distance, not raw weighted sum;
+- directional windows are endpoint-clamped when a configured phase range
+  reaches a clip boundary;
 - optional velocity weighting is a repository extension and defaults off.
 
-These differences preserve the optimization form but change distance values and
-threshold calibration.
+The source-start/target-end placement and raw weighted squared sum now match
+Kovar Section 3.1 exactly. Joint sampling and endpoint handling still make
+thresholds corpus/configuration specific.
 
 ### Alignment formula map
 
@@ -51,7 +50,7 @@ threshold calibration.
 | floor-plane cross term | `cross_term` |
 | optimal yaw | `atan2(numerator, denominator)` |
 | optimal translation | `alignment.dx`, `alignment.dz` |
-| aligned weighted error | `weighted_squared * inv_weight` |
+| aligned weighted error | `weighted_squared` |
 
 ## Parametric Motion Graphs (2007)
 
@@ -151,7 +150,7 @@ Key files:
 | Claim | Test evidence |
 |---|---|
 | Alignment removes floor yaw/translation | `test_motion_distance` |
-| Distance grid returns its true minimum | `test_distance_grid` |
+| Distance grid uses source-start/target-end windows and returns its true minimum | `test_distance_grid` |
 | Edge build is deterministic for a fixed seed | `test_pmg_builder` |
 | BAD points are excluded from retained boxes | `test_pmg_builder` |
 | PMG lookup handles exact and interpolated queries | `test_edge_lookup` |

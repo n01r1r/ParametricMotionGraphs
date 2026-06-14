@@ -70,7 +70,7 @@ example walk 0.0 ../BVH/walkCurve.bvh
 example walk 0.5 ../BVH/walkMoreCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
 edge walk walk
-edge_config walk walk 1.5 2.0 12 60 7
+edge_config walk walk 225 250 12 60 7
 ```
 
 `parameter_metric` enables KG04-style parameter accuracy: the build samples
@@ -78,6 +78,15 @@ blend weights between adjacent examples, measures each blend's turn rate, and
 stores the inversion table so requested parameters achieve their measured
 meaning. Generated clips also derive their length from the blended example
 durations, so cycle time follows the parameter.
+
+Transition thresholds use Kovar Equation 1's raw weighted squared-sum scale.
+They therefore depend on skeleton point count, window size, weights, and native
+BVH units; calibrate them when any of those inputs change.
+
+An optional `edge_phase_range <source> <target> <src_start> <src_end>
+<tgt_start> <tgt_end>` line restricts the transition search to a per-edge
+phase sub-range (paper §6.3); the default forces an advancing end→start
+transition (`[0.70, 0.95]→[0.05, 0.30]`).
 
 Multidimensional nodes declare one measured property per parameter axis:
 

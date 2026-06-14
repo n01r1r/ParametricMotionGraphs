@@ -86,6 +86,11 @@ For candidate source and target frames, form corresponding point clouds over a
 short time window. A window captures more than pose: frame-to-frame movement
 also influences the distance.
 
+For candidate pair `(i, j)` and window length `k`, the source window is
+`[i, i+k-1]` and the target window is `[j-k+1, j]`, matching Kovar Section 3.1.
+Repository endpoints are clamped when a configured phase range reaches a clip
+boundary.
+
 The paper recommends mesh-derived points. This repository uses skeleton joint
 world positions because the BVH corpus has no skin mesh.
 
@@ -102,8 +107,9 @@ min over yaw, dx, dz:
 The closed-form yaw uses weighted floor-plane dot and cross terms. Translation
 aligns the weighted floor-plane centroids.
 
-Repository distance is the weighted mean squared distance, not the unnormalized
-sum. Threshold values therefore belong to this implementation and corpus.
+Repository distance is this unnormalized weighted sum. Absolute thresholds
+therefore scale with point count, window length, configured weights, and native
+BVH units; they remain corpus/configuration specific.
 
 ### 3. Transition blend
 
