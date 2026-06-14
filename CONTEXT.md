@@ -3,8 +3,8 @@
 A paper-core implementation of Parametric Motion Graphs: a parametric motion
 space per action, connected by sampled transition edges, streamed at runtime
 with aligned, blended transitions. Documented adaptations include joint-based
-point clouds, directional (Kovar) transition-window support shared by the
-offline metric and the runtime, and manual BVH parameterization. This
+point clouds, a directional (Kovar §3.1) transition metric paired with a
+PMG-centered (§5.2.1) runtime blend, and manual BVH parameterization. This
 file fixes the vocabulary so code and conversation stay aligned.
 
 ## Language

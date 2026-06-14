@@ -43,7 +43,7 @@ flowchart TD
     K --> L["Classify GOOD / NEUTRAL / BAD"]
     L --> M["Build and shrink reachable target AABBs"]
     M --> N["Store transition phases"]
-    N --> O["Serialize PMG_GRAPH_V7 artifact"]
+    N --> O["Serialize PMG_GRAPH_V8 artifact"]
     O --> P["Write JSON, CSV, and Markdown reports"]
 ```
 
@@ -130,8 +130,10 @@ BuiltPmgArtifact
     edge build reports
 ```
 
-V7 is the current writer format. V2–V6 remain readable with documented
-fallbacks. Graph runtime requires a V4+ artifact with a non-empty Skeleton.
+V8 is the current writer format (adds the edge transition-window metric
+convention). V2–V7 remain readable with documented fallbacks and pin the
+legacy `kKovarDirectional` metric. Graph runtime requires a V4+ artifact with a
+non-empty Skeleton.
 
 ## Online pipeline
 
@@ -152,19 +154,30 @@ flowchart TD
 
 ### Scheduling contract
 
-The transition blend length equals the artifact edge metric's
-`DistanceGridConfig::window_size`, whose `k` sampled frames span `k-1` frame
-intervals, so the blend lasts `(k-1)/fps`. Stored phases follow the Kovar
-directional metric: the source phase marks the first source blend frame and the
-target phase marks the last target blend frame. The runtime gates at the source
-transition phase, starts the target `k-1` intervals before its last-frame
-reference, keeps both clips advancing through the full blend, and folds completed
-cycles into world placement instead of freezing at clip end. The offline metric,
-the runtime gate, and point-cloud alignment all resolve their blend-frame support
-through one shared `ResolveTransitionFrameWindows` contract, so a transition
-scores and blends the same frame set. Artifacts with inconsistent edge window
-sizes are rejected because the runtime currently has one global transition
-window.
+The transition window is **two separate concerns**, each from a different
+source paper:
+
+- **Metric window (build, Kovar §3.1).** PMG reuses Kovar's distance metric,
+  whose windows are directional: source `[i, i+k-1]`, target `[j-k+1, j]`. The
+  asymmetry aligns the end→start concatenation seam, and the calibrated phase
+  sub-ranges + raw-sum thresholds depend on it. `PmgBuilderConfig::transition_convention`
+  is `kKovarDirectional`. Stored phases are references under this metric.
+- **Blend placement (runtime, PMG §5.2.1).** The runtime centers the blend
+  window on the stored optimal transition point (`RuntimeControllerConfig::convention`
+  = `kPmgCentered` by default), gating half a window early so the optimal point
+  gets maximum blend weight. This is independent of the metric and is not coupled
+  in `RuntimeControllerConfigFromArtifact`.
+
+The blend length equals the edge metric's `DistanceGridConfig::window_size`,
+whose `k` sampled frames span `k-1` intervals, so the blend lasts `(k-1)/fps`.
+Because the centered blend window is `[ref-h, ref+h]` while the directional
+metric window is `[i, i+k-1]`, the blended frames differ from the metric-scored
+frames by half a window — an inherent consequence of pairing Kovar's metric with
+PMG's centered blend (in pure PMG they coincide). Both layers resolve their
+support through the shared `ResolveTransitionFrameWindows`. Both clips advance
+through the full blend and completed cycles fold into world placement instead of
+freezing at clip end. Artifacts with inconsistent edge window sizes are rejected
+because the runtime currently has one global transition window.
 
 ### Runtime request contract
 
