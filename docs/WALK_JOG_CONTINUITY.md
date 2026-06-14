@@ -158,10 +158,13 @@ The implementation choice is based on primary sources:
   parameterization. Its walk experiment reduced 96 examples to 46 after
   redundancy removal.
 - This repository uses three manually selected walk examples, contact anchors,
-  optional slope-constrained DTW, and root-delta reconstruction. It does not
-  reproduce the KG04 match web, match graph/reference selection, monotone cubic
-  B-spline registration, or original walk corpus. Therefore smoothness is an
-  input assumption only approximated here, not a reproduced paper result.
+  slope-constrained DTW, a cubic smoothing-spline registration curve (the KG04
+  spline step, in penalized-second-difference form), and root-delta
+  reconstruction. It does not reproduce the KG04 match web, match graph/reference
+  selection, the per-frame rigid pose alignment + constraint matching of the full
+  registration curve, or the original walk corpus. Smoothness is therefore
+  partially reproduced (the timing curve) and partially still an input
+  assumption (the per-frame pose alignment).
 
 PMG does not continuously change the parameter inside an already generated
 clip. It chooses the next parameter at a graph transition. Short clips provide

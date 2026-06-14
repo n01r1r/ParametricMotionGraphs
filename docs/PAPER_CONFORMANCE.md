@@ -27,18 +27,28 @@ Deviation ids (`D1`–`D8`) are stable and referenced from `README.md` and
 | Scattered-data blend weights, `k = dim + 1` nearest, k-th-neighbor cutoff (Eq. 2) | ✓ | `ComputeLocalBlendWeights` | `src/ParametricMotionSpace.cpp:556`; `docs/adr/0002-pmg-knn-cutoff.md` |
 | Parameter-accurate inverse (authored coordinate → weights that achieve it) | ✓ (D1) | `CalibrateParameterMetrics` / `ParameterCalibration` | `include/pmg/ParametricMotionSpace.h:50` |
 | Blend inherits example timing (cycle length varies with the parameter) | ✓ (D2) | `BlendedDurationSeconds` → `GenerateClip` | `include/pmg/ParametricMotionSpace.h:99` |
-| Time registration so blends combine corresponding moments | ◐ | contact-anchor `TimeWarp` + slope-constrained DTW refine | `include/pmg/MotionRegistration.h:22` |
-| KG04 registration curves (per-frame rigid alignment + constraint matching) | ◐ | approximated by contact anchors + root-delta integration | `include/pmg/ParametricMotionSpace.h:106` |
+| Time registration so blends combine corresponding moments | ✓ | contact-anchor `TimeWarp`, slope-constrained DTW refine, **cubic smoothing-spline** registration curve | `include/pmg/MotionRegistration.h:47` |
+| KG04 registration curves (per-frame rigid alignment + constraint matching) | ◐ | per-frame rigid alignment approximated by root-delta integration | `include/pmg/ParametricMotionSpace.h:106` |
 
-**Registration fidelity (◐).** The paper assumes a *smooth registered motion
-space* produced by KG04 registration curves: per-frame rigid frame alignment,
-dynamic time warping, and constraint matching. This repository approximates
-that with contact-anchor time warps, a slope-constrained DTW refinement pass,
-and root-delta blending. Blends are measurably smooth (the monotone turn-rate
-sweep in `tests/test_parametric_motion_space.cpp`), but this is an
-approximation of the KG04 algorithm, not a reimplementation of it. This is the
-largest remaining *fidelity* gap; it is accepted as a local extension because
-the corpus has no skin mesh and the approximation holds on the included clips.
+**Registration fidelity.** KG04 builds a smooth registered motion space from
+registration *curves*: a dynamic-time-warp correspondence, smoothed by a cubic
+B-spline, plus per-frame rigid frame alignment and constraint matching. The
+timewarp `s(u)` now matches that: the dense slope-constrained DTW correspondence
+is denoised by a cubic smoothing spline (penalized second-difference form, the
+natural-cubic-smoothing-spline equivalent of KG04's B-spline) before it is
+sampled into warp knots — see `RefineRegistrationByDtw`. Measured on
+`specs/walk_curvature` (`--validate-graph`, seed 7), this lowers the production
+best self-transition distance from `0.8878` (prior piecewise-linear refine) to
+`0.8816` against a `0.8604` no-registration baseline — about 23% less
+registration penalty — with runtime pop ratio flat and all tests green. The
+payoff is corpus-density-coupled: with only three clean walk clips the
+within-segment correspondence is already near-linear, so the headroom is small;
+a denser/noisier corpus is where the spline earns more.
+
+What remains ◐ is the rest of the KG04 registration *curve*: per-frame rigid
+pose alignment and constraint matching, here approximated by root-delta
+integration. The corpus has no skin mesh, so this is accepted as a local
+extension that holds on the included clips.
 
 ## §4 — Parametric motion graph construction
 
@@ -110,11 +120,16 @@ not the PMG layer this project implements.
 
 ## What's left, in priority order
 
-1. **◐ Registration fidelity** — KG04's timewarp `s(u)` is implemented (DTW on
-   the point-cloud distance) as a piecewise-**linear** warp; the paper specifies
-   a strictly-increasing **spline**. A monotone (shape-preserving) cubic would
-   close it. Largest faithfulness gap; low marginal payoff on this corpus, and
-   independently confirmed *not* to be the cause of the walk-loop jolt.
+1. **◐ Registration depth** — the timewarp `s(u)` is now a cubic smoothing
+   spline over the dense DTW correspondence (KG04-faithful, measured to beat the
+   prior linear warp; see §3 above), so the *timing* curve is closed. What is
+   still approximated is the rest of KG04's registration curve — per-frame rigid
+   pose alignment and constraint matching — which root-delta integration stands
+   in for. Closing it fully needs skinned/constraint data the corpus lacks.
+   Note: an earlier attempt to cubic-*interpolate* the sparse contact anchors
+   was a measured regression (it injects unsupported curvature); the spline
+   belongs in the *fit* over the dense correspondence, not in the interpolation
+   primitive.
 2. **◐ D6 metric exactness** — match Kovar's asymmetric window placement and
    unnormalized weighted sum if paper-comparable absolute distances are wanted.
    Low: does not change which transitions classify GOOD on this corpus.
