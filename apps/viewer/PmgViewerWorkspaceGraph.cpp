@@ -1094,9 +1094,11 @@ void PmgViewerWorkspace::BuildGraphQuickTab() {
         "Build one node from current motion space. Scratch only; not saveable.");
 
     ImGui::SetNextItemWidth(180.0f);
-    ImGui::SliderFloat("GOOD threshold##quick", &tgood_, 0.0f, 2.0f, "%.3f");
+    ImGui::InputFloat("GOOD threshold##quick", &tgood_, 1.0f, 10.0f, "%.3f");
     ImGui::SetNextItemWidth(180.0f);
-    ImGui::SliderFloat("BAD threshold##quick", &tbad_, 0.0f, 2.0f, "%.3f");
+    ImGui::InputFloat("BAD threshold##quick", &tbad_, 1.0f, 10.0f, "%.3f");
+    tgood_ = std::max(0.0f, tgood_);
+    tbad_ = std::max(tgood_, tbad_);
     if (heatmap_ready_) {
         const bool likely_ok = heatmap_min_distance_ <= tgood_;
         ImGui::TextColored(
@@ -1186,11 +1188,13 @@ void PmgViewerWorkspace::BuildGraphAuthorTab() {
     ImGui::Separator();
     ImGui::TextUnformatted("2. Connect nodes");
     ImGui::TextDisabled(
-        "Thresholds apply to each new edge; units are native distance.");
+        "Thresholds apply to each new edge; raw-sum units are corpus-specific.");
     ImGui::SetNextItemWidth(180.0f);
-    ImGui::SliderFloat("GOOD threshold##author", &tgood_, 0.0f, 2.0f, "%.3f");
+    ImGui::InputFloat("GOOD threshold##author", &tgood_, 1.0f, 10.0f, "%.3f");
     ImGui::SetNextItemWidth(180.0f);
-    ImGui::SliderFloat("BAD threshold##author", &tbad_, 0.0f, 2.0f, "%.3f");
+    ImGui::InputFloat("BAD threshold##author", &tbad_, 1.0f, 10.0f, "%.3f");
+    tgood_ = std::max(0.0f, tgood_);
+    tbad_ = std::max(tgood_, tbad_);
 
     const int node_count = static_cast<int>(authored_nodes_.size());
     if (node_count > 0) {

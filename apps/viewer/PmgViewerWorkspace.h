@@ -226,10 +226,10 @@ private:
     int heatmap_target_index_ = -1;
     pmg::MotionClip heatmap_target_clip_;
     pmg::DistanceGridConfig heatmap_config_{5, 2, 2, 0.70f, 0.95f, 0.05f, 0.30f, {}};
-    // GOOD/BAD transition thresholds. One source of truth shared by the heatmap
-    // classification and the graph edge build (native units; paper 0.5 / 0.7).
-    float tgood_ = 0.5f;
-    float tbad_ = 0.7f;
+    // GOOD/BAD raw-sum thresholds. One source of truth shared by the heatmap
+    // classification and graph edge build.
+    float tgood_ = kDefaultGoodTransitionThreshold;
+    float tbad_ = kDefaultBadTransitionThreshold;
     pmg::DistanceGrid heatmap_grid_;
     bool heatmap_ready_ = false;
     float heatmap_min_distance_ = 0.0f;
