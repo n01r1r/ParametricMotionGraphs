@@ -10,7 +10,6 @@ example walk 0.0 ../BVH/walkCurve.bvh
 example walk 0.5 ../BVH/walkMoreCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
 edge walk walk
-# Thresholds recalibrated for duration-true generated clips (D2): blends now
-# play at the blended example cycle time instead of a stretched fixed 48
-# frames, which raises absolute point-cloud distances across the board.
-edge_config walk walk 1.5 2.0 12 60 7
+# Thresholds calibrated for D6's asymmetric windows and raw weighted squared
+# sum. Values are specific to this 31-joint corpus and five-frame window.
+edge_config walk walk 225 250 12 60 7

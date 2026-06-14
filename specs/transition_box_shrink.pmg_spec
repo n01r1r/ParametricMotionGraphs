@@ -12,4 +12,4 @@ example nonconvex_target 0.5 ../BVH/jogCurve.bvh
 example nonconvex_target 1.0 ../BVH/walkTightCurve.bvh
 
 edge source_walk nonconvex_target
-edge_config source_walk nonconvex_target 1.0 1.5 4 100 31
+edge_config source_walk nonconvex_target 10 100 4 100 31

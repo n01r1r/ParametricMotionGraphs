@@ -10,6 +10,7 @@
 #include "pmg/MotionDistance.h"
 #include "pmg/MotionRegistration.h"
 #include "pmg/ParametricMotionGraph.h"
+#include "pmg/PmgBuilder.h"
 #include "pmg/RuntimeController.h"
 #include "pmg/SkeletonCompatibility.h"
 
@@ -106,11 +107,13 @@ int InspectTransition(const std::string& source_path, const std::string& target_
     const pmg::OptimalTransition transition = pmg::MotionDistance::FindOptimalTransition(
         source.skeleton, source.clip, target.clip, config);
 
-    // PMG's reported starting thresholds. This implementation uses joint
-    // positions and weighted mean squared distance, so thresholds remain
-    // corpus- and metric-specific. See --calibrate-thresholds.
-    constexpr float kGoodThreshold = 0.5f;
-    constexpr float kBadThreshold = 0.7f;
+    // Starting thresholds remain corpus- and metric-specific because raw sums
+    // scale with point count and configured weights. See --calibrate-thresholds.
+    const pmg::PmgBuilderConfig builder_defaults;
+    const float good_threshold =
+        builder_defaults.good_transition_threshold;
+    const float bad_threshold =
+        builder_defaults.bad_transition_threshold;
 
     std::cout << "source_bvh=" << source_path << "\n";
     std::cout << "target_bvh=" << target_path << "\n";
@@ -124,8 +127,8 @@ int InspectTransition(const std::string& source_path, const std::string& target_
     }
 
     const char* classification =
-        transition.distance <= kGoodThreshold   ? "GOOD"
-        : transition.distance >= kBadThreshold  ? "BAD"
+        transition.distance <= good_threshold   ? "GOOD"
+        : transition.distance >= bad_threshold  ? "BAD"
                                                 : "NEUTRAL";
 
     std::cout << "source_frame=" << transition.source_frame << "\n";
@@ -133,13 +136,14 @@ int InspectTransition(const std::string& source_path, const std::string& target_
     std::cout << "source_phase=" << transition.source_phase << "\n";
     std::cout << "target_phase=" << transition.target_phase << "\n";
     std::cout << "distance=" << transition.distance << "\n";
-    std::cout << "TGOOD=" << kGoodThreshold << " TBAD=" << kBadThreshold << "\n";
+    std::cout << "TGOOD=" << good_threshold << " TBAD=" << bad_threshold << "\n";
     std::cout << "classification=" << classification << "\n";
     std::cout << "alignment_yaw=" << transition.alignment.yaw << "\n";
     std::cout << "alignment_dx=" << transition.alignment.dx << "\n";
     std::cout << "alignment_dz=" << transition.alignment.dz << "\n";
-    std::cout << "NOTE: distance is weighted mean squared point distance in the "
-                 "BVH's native units; calibrate thresholds per corpus.\n";
+    std::cout << "NOTE: distance is a raw weighted squared point-distance sum "
+                 "in the BVH's native units; calibrate thresholds per corpus, "
+                 "window, skeleton, and weighting.\n";
     return 0;
 }
 
@@ -355,7 +359,7 @@ int CalibrateThresholds(const std::string& directory_path,
     std::vector<float> accept = self_distances;
     accept.insert(accept.end(), same_distances.begin(), same_distances.end());
 
-    std::cout << "\n=== suggested thresholds (mean-squared world-unit space) ===\n";
+    std::cout << "\n=== suggested thresholds (weighted squared-sum world-unit space) ===\n";
     if (accept.empty()) {
         std::cout << "insufficient accept-class (self+same) samples; inspect histogram manually.\n";
     } else {
@@ -371,7 +375,8 @@ int CalibrateThresholds(const std::string& directory_path,
     }
 
     std::cout << "NOTE: action grouping is a filename heuristic (stem minus trailing variant letter and 'Loop').\n";
-    std::cout << "NOTE: distances are mean-squared per point in the BVH's native units (no loader scaling).\n";
+    std::cout << "NOTE: distances are raw weighted squared sums in the BVH's native units "
+                 "(no loader scaling); scale depends on point count and weights.\n";
     std::cout << "NOTE: non-looping clips show large self/same distance over the late->early window; expected.\n";
     return 0;
 }

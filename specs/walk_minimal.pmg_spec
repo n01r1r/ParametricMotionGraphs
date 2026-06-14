@@ -9,6 +9,5 @@ registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
 example walk 0.0 ../BVH/walkCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
 edge walk walk
-# Self-edge thresholds tuned for duration-true generated clips (see
-# walk_curvature.pmg_spec); the default thresholds reject every sample.
-edge_config walk walk 1.5 2.0 12 60 7
+# Raw-sum thresholds calibrated for the D6 metric (see walk_curvature.pmg_spec).
+edge_config walk walk 225 250 12 60 7

@@ -32,6 +32,8 @@ struct PointCloudWeighting {
 // about +Y, then floor translate). Recovered in closed form (Kovar et al.
 // 2002) as a RigidTransform2D.
 struct AlignedDistanceResult {
+    // Raw weighted squared world-space sum from Kovar et al. 2002 Eq. 1.
+    // Magnitude scales with point count and configured weights.
     float distance = std::numeric_limits<float>::infinity();
     RigidTransform2D alignment;
 };
@@ -96,6 +98,8 @@ public:
         const PointCloud& cloud_b);
 
     // Aligned point-cloud distance over all sampled frame pairs of two clips.
+    // For candidate (i, j), source samples [i, i+k-1] and target samples
+    // [j-k+1, j], endpoint-clamped to preserve point correspondence.
     static DistanceGrid BuildDistanceGrid(
         const Skeleton& skeleton,
         const MotionClip& source_clip,

@@ -7,23 +7,26 @@
 
 namespace pmg {
 
-PointCloud MotionDistance::BuildPointCloud(
+namespace {
+
+PointCloud BuildPointCloudFromFirstFrame(
     const Skeleton& skeleton,
     const MotionClip& clip,
-    int center_frame,
+    int first_frame,
     int window_size,
     const PointCloudWeighting& weighting) {
-    clip.RequireNotEmpty("MotionDistance::BuildPointCloud");
+    clip.RequireNotEmpty("BuildPointCloudFromFirstFrame");
     if (window_size <= 0) {
-        throw std::runtime_error("MotionDistance::BuildPointCloud: window_size must be positive");
+        throw std::runtime_error(
+            "BuildPointCloudFromFirstFrame: window_size must be positive");
     }
     if (!weighting.per_joint_weights.empty() &&
         static_cast<int>(weighting.per_joint_weights.size()) != skeleton.NumJoints()) {
-        throw std::runtime_error("MotionDistance::BuildPointCloud: per_joint_weights size mismatch");
+        throw std::runtime_error(
+            "BuildPointCloudFromFirstFrame: per_joint_weights size mismatch");
     }
 
     const int frame_count = clip.NumFrames();
-    const int half_window = window_size / 2;
 
     PointCloud cloud;
     cloud.points.reserve(static_cast<std::size_t>(window_size) * skeleton.NumJoints());
@@ -34,7 +37,8 @@ PointCloud MotionDistance::BuildPointCloud(
     std::vector<std::vector<Vec3>> windowed_positions;
     windowed_positions.reserve(static_cast<std::size_t>(window_size));
     for (int offset = 0; offset < window_size; ++offset) {
-        const int frame = std::clamp(center_frame - half_window + offset, 0, frame_count - 1);
+        const int frame =
+            std::clamp(first_frame + offset, 0, frame_count - 1);
         windowed_positions.push_back(ComputeJointWorldPositions(skeleton, clip.frames[frame]));
     }
 
@@ -60,6 +64,19 @@ PointCloud MotionDistance::BuildPointCloud(
     }
 
     return cloud;
+}
+
+}  // namespace
+
+PointCloud MotionDistance::BuildPointCloud(
+    const Skeleton& skeleton,
+    const MotionClip& clip,
+    int center_frame,
+    int window_size,
+    const PointCloudWeighting& weighting) {
+    const int half_window = window_size / 2;
+    return BuildPointCloudFromFirstFrame(
+        skeleton, clip, center_frame - half_window, window_size, weighting);
 }
 
 AlignedDistanceResult MotionDistance::AlignedPointCloudDistance(
@@ -143,7 +160,7 @@ AlignedDistanceResult MotionDistance::AlignedPointCloudDistance(
 
     AlignedDistanceResult result;
     result.alignment = alignment;
-    result.distance = weighted_squared * inv_weight;
+    result.distance = weighted_squared;
     return result;
 }
 
@@ -212,18 +229,23 @@ DistanceGrid MotionDistance::BuildDistanceGrid(
                                        config.target_phase_end,
                                        config.target_frame_stride);
 
-    // Build each frame's point cloud once, then fill the grid.
+    // Kovar et al. 2002 Sec. 3.1: source window begins at candidate i;
+    // target window ends at candidate j.
     std::vector<PointCloud> source_clouds;
     source_clouds.reserve(grid.source_frames.size());
     for (const int frame : grid.source_frames) {
         source_clouds.push_back(
-            BuildPointCloud(skeleton, source_clip, frame, config.window_size, config.weighting));
+            BuildPointCloudFromFirstFrame(
+                skeleton, source_clip, frame, config.window_size,
+                config.weighting));
     }
     std::vector<PointCloud> target_clouds;
     target_clouds.reserve(grid.target_frames.size());
     for (const int frame : grid.target_frames) {
         target_clouds.push_back(
-            BuildPointCloud(skeleton, target_clip, frame, config.window_size, config.weighting));
+            BuildPointCloudFromFirstFrame(
+                skeleton, target_clip, frame - config.window_size + 1,
+                config.window_size, config.weighting));
     }
 
     const std::size_t cell_count = source_clouds.size() * target_clouds.size();

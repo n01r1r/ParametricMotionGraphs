@@ -448,6 +448,8 @@ struct ValidateGraphOptions {
     int min_edge_samples = -1;
     float min_good_fraction = -1.0f;
     bool assert_no_regression = false;
+    // Negative disables the comparison. A value of 1.0 requires no increase.
+    float max_preparation_min_distance_ratio = -1.0f;
 };
 
 struct EdgeQuality {
@@ -612,15 +614,27 @@ int ValidateGraphCommand(const ValidateGraphOptions& options) {
                         "production preparation shrank GOOD fraction: " +
                             std::to_string(production.mean_good_fraction) + " < " +
                             std::to_string(naive.mean_good_fraction));
+            }
+        }
+        float max_distance_ratio =
+            options.max_preparation_min_distance_ratio;
+        if (options.assert_no_regression && max_distance_ratio < 0.0f) {
+            max_distance_ratio = 1.05f;
+        }
+        if (max_distance_ratio >= 0.0f) {
+            fail_if(!naive.created || !production.created,
+                    "preparation-distance comparison needs both builds to complete; "
+                    "loosen --tgood/--tbad");
+            if (naive.created && production.created) {
                 // Gate only on the BEST transition per source sample: that is
-                // what the runtime schedules. Median/p25 are reported but not
-                // gated: registration de-smears the targets' timing, so far
-                // parameters legitimately become more distant while the best
-                // transition improves.
-                fail_if(production.mean_min_distance > naive.mean_min_distance * 1.05f,
-                        "production preparation worsened best transition distance: " +
-                            std::to_string(production.mean_min_distance) + " > " +
-                            std::to_string(naive.mean_min_distance));
+                // what the runtime schedules. Median/p25 remain report-only.
+                fail_if(
+                    production.mean_min_distance >
+                        naive.mean_min_distance * max_distance_ratio,
+                    "production/naive mean-min-distance ratio exceeded " +
+                        std::to_string(max_distance_ratio) + ": " +
+                        std::to_string(production.mean_min_distance) + " / " +
+                        std::to_string(naive.mean_min_distance));
             }
         }
     }
@@ -670,6 +684,14 @@ ValidateGraphOptions ParseValidateGraphOptions(int argc, char** argv) {
             options.min_good_fraction = std::stof(require_value("--min-good-fraction"));
         } else if (option == "--assert-no-regression") {
             options.assert_no_regression = true;
+        } else if (option == "--max-preparation-distance-ratio") {
+            options.max_preparation_min_distance_ratio =
+                std::stof(require_value("--max-preparation-distance-ratio"));
+            if (!std::isfinite(options.max_preparation_min_distance_ratio) ||
+                options.max_preparation_min_distance_ratio <= 0.0f) {
+                throw std::runtime_error(
+                    "--max-preparation-distance-ratio must be positive");
+            }
         } else {
             throw std::runtime_error("unknown validate-graph option '" + option + "'");
         }

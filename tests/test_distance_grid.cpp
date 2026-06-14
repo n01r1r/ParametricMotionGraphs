@@ -2,6 +2,7 @@
 #include "pmg/MotionDistance.h"
 #include "pmg/Skeleton.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -47,6 +48,35 @@ pmg::MotionClip MakeClip(float yaw_scale, float lift_scale) {
     return clip;
 }
 
+pmg::PointCloud BuildDirectionalCloud(
+    const pmg::Skeleton& skeleton,
+    const pmg::MotionClip& clip,
+    int candidate_frame,
+    int window_size,
+    bool source_window) {
+    pmg::PointCloud cloud;
+    for (int offset = 0; offset < window_size; ++offset) {
+        const int unclamped_frame =
+            source_window
+                ? candidate_frame + offset
+                : candidate_frame - window_size + 1 + offset;
+        const int frame = std::clamp(
+            unclamped_frame, 0, clip.NumFrames() - 1);
+        const pmg::PointCloud frame_cloud =
+            pmg::MotionDistance::BuildPointCloud(
+                skeleton, clip, frame, /*window_size=*/1);
+        cloud.points.insert(
+            cloud.points.end(),
+            frame_cloud.points.begin(),
+            frame_cloud.points.end());
+        cloud.weights.insert(
+            cloud.weights.end(),
+            frame_cloud.weights.begin(),
+            frame_cloud.weights.end());
+    }
+    return cloud;
+}
+
 }  // namespace
 
 int main() {
@@ -57,14 +87,19 @@ int main() {
     pmg::DistanceGridConfig config;
     config.window_size = 3;
 
-    // Self-grid: the diagonal (same source/target frame) must be ~0.
+    // Kovar's source window starts at i and target window ends at j. Therefore
+    // (i, i + k - 1) compares the same ordered frames and must be ~0.
     {
         const pmg::DistanceGrid grid =
             pmg::MotionDistance::BuildDistanceGrid(skeleton, clip_a, clip_a, config);
         assert(grid.SourceCount() == clip_a.NumFrames());
         assert(grid.TargetCount() == clip_a.NumFrames());
-        for (int i = 0; i < grid.SourceCount(); ++i) {
-            assert(grid.At(i, i) < 1.0e-4f);
+        for (int source_frame = 0;
+             source_frame + config.window_size - 1 < clip_a.NumFrames();
+             ++source_frame) {
+            const int target_frame =
+                source_frame + config.window_size - 1;
+            assert(grid.At(source_frame, target_frame) < 1.0e-4f);
         }
     }
 
@@ -78,12 +113,17 @@ int main() {
         int brute_target = -1;
         for (int sf = 0; sf < clip_a.NumFrames(); ++sf) {
             const pmg::PointCloud source_cloud =
-                pmg::MotionDistance::BuildPointCloud(skeleton, clip_a, sf, config.window_size);
+                BuildDirectionalCloud(
+                    skeleton, clip_a, sf, config.window_size,
+                    /*source_window=*/true);
             for (int tf = 0; tf < clip_b.NumFrames(); ++tf) {
                 const pmg::PointCloud target_cloud =
-                    pmg::MotionDistance::BuildPointCloud(skeleton, clip_b, tf, config.window_size);
+                    BuildDirectionalCloud(
+                        skeleton, clip_b, tf, config.window_size,
+                        /*source_window=*/false);
                 const float distance =
-                    pmg::MotionDistance::AlignedPointCloudDistance(source_cloud, target_cloud).distance;
+                    pmg::MotionDistance::AlignedPointCloudDistance(
+                        source_cloud, target_cloud).distance;
                 if (distance < brute_best) {
                     brute_best = distance;
                     brute_source = sf;
