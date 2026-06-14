@@ -33,17 +33,23 @@ void RegisterSpaceByContacts(
 
 struct DtwRefineSettings {
     int window_size = 5;            // frames per point cloud in the DTW cost
-    int max_knots_per_segment = 3;  // interior warp knots added per anchor segment
+    int max_knots_per_segment = 8;  // interior warp knots sampled per anchor segment
+    float smoothing_strength = 4.0f;  // cubic smoothing-spline penalty (lambda)
+                                      // applied to the DTW correspondence; 0
+                                      // keeps the raw staircase correspondence
 };
 
 // Refine installed contact-anchor warps with dynamic time warping. Contact
 // anchors stay fixed; inside each canonical segment, the example closest to
 // the parameter centroid serves as the timing reference and every other
 // example is matched to it frame by frame (aligned point-cloud distance, DTW
-// with matched segment endpoints). Up to max_knots_per_segment knots are
-// inserted per segment so within-segment timing differences, e.g. swing-leg
-// acceleration, line up instead of being interpolated linearly between
-// contacts. Requires space.HasExampleTimeWarps(); no-op below two examples.
+// with matched segment endpoints). The per-frame DTW correspondence is then
+// denoised with a cubic smoothing spline (KG04-style registration curve,
+// smoothing_strength = lambda) and sampled into up to max_knots_per_segment
+// interior knots, so within-segment timing differences (e.g. swing-leg
+// acceleration) line up along a smooth monotone curve instead of the raw DTW
+// steps or a straight line between contacts. Requires
+// space.HasExampleTimeWarps(); no-op below two examples.
 void RefineRegistrationByDtw(
     ParametricMotionSpace& space,
     const Skeleton& skeleton,

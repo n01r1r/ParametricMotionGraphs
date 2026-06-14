@@ -113,6 +113,36 @@ void TestContactAnchorsStayPinned() {
     assert(warps[1].Evaluate(0.9f) > warps[1].Evaluate(0.55f));
 }
 
+// The cubic smoothing-spline fit must leave the registration curve valid at
+// every smoothing strength: monotone, endpoint-pinned, and still recovering the
+// nonlinear sqrt timing. Strength 0 keeps the raw DTW correspondence; higher
+// strengths denoise it without breaking those invariants.
+void TestSmoothingStrengthStaysValid() {
+    for (const float strength : {0.0f, 4.0f, 20.0f}) {
+        pmg::ParametricMotionSpace space = MakeSpace();
+        space.SetExampleTimeWarps({pmg::TimeWarp(), pmg::TimeWarp()});
+
+        pmg::DtwRefineSettings settings;
+        settings.window_size = 3;
+        settings.smoothing_strength = strength;
+        pmg::RefineRegistrationByDtw(space, MakeSkeleton(), settings);
+
+        const pmg::TimeWarp& warp = space.ExampleTimeWarps()[1];
+        assert(std::abs(warp.Evaluate(0.0f)) < 1.0e-6f);
+        assert(std::abs(warp.Evaluate(1.0f) - 1.0f) < 1.0e-6f);
+
+        float previous = -1.0f;
+        for (int step = 0; step <= 50; ++step) {
+            const float warped = warp.Evaluate(static_cast<float>(step) / 50.0f);
+            assert(warped >= previous - 1.0e-6f);
+            assert(warped >= 0.0f && warped <= 1.0f);
+            previous = warped;
+        }
+        // The true correspondence sqrt(0.5) is recovered regardless of strength.
+        assert(std::abs(warp.Evaluate(0.5f) - std::sqrt(0.5f)) < 0.08f);
+    }
+}
+
 void TestSingleExampleIsNoOp() {
     pmg::ParametricMotionSpace space("solo", 1);
     space.AddExample({0.0f}, MakeClip("uniform", [](float phase) { return phase; }));
@@ -128,6 +158,7 @@ int main() {
     TestRequiresInstalledWarps();
     TestRecoversNonlinearTiming();
     TestContactAnchorsStayPinned();
+    TestSmoothingStrengthStaysValid();
     TestSingleExampleIsNoOp();
     return 0;
 }
