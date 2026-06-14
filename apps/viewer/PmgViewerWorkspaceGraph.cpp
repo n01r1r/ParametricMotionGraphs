@@ -1404,7 +1404,7 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
         ImGui::SameLine();
         ImGui::TextDisabled(
             "rates %.2f .. %.2f rad/s",
-            calibration.lowest_rate, calibration.highest_rate);
+            calibration.LowestRate(), calibration.HighestRate());
     }
     if (goto_active_) {
         const pmg::Pose pose = graph_controller_->CurrentPose();

@@ -325,8 +325,8 @@ void PmgViewerWorkspace::CalibrateSteering() {
         const pmg::SteeringCalibration& calibration =
             steering_->Calibration();
         goto_status_ = "Calibrated: achieved turn rates " +
-                       std::to_string(calibration.lowest_rate) + " .. " +
-                       std::to_string(calibration.highest_rate) + " rad/s.";
+                       std::to_string(calibration.LowestRate()) + " .. " +
+                       std::to_string(calibration.HighestRate()) + " rad/s.";
     } catch (const std::exception& error) {
         steering_.reset();
         goto_status_ = std::string("Calibration failed: ") + error.what();
@@ -345,8 +345,12 @@ void PmgViewerWorkspace::UpdateGotoSteering(const pmg::Pose& pose) {
     pmg::GoalRequest goal;
     goal.target_position = {goto_target_.x, 0.0f, goto_target_.y};
     graph_desired_node_ = graph_controller_->CurrentNode();
-    graph_desired_parameter_ =
-        steering_->RequestForPose(pose, goal).desired_parameter.front();
+    // The core steering now drives every node axis (turn_rate + travel_speed);
+    // keep the whole vector so multidimensional goto is not flattened back to
+    // axis 0. graph_desired_parameter_ mirrors axis 0 for the 1-D slider UI.
+    goto_desired_parameter_ =
+        steering_->RequestForPose(pose, goal).desired_parameter;
+    graph_desired_parameter_ = goto_desired_parameter_.front();
 }
 
 void PmgViewerWorkspace::UpdateRootMotionDiagnostics(
@@ -420,8 +424,12 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
             // start of the next; leaving the request empty would raw-wrap the
             // extracted cycle and expose its joint-space seam.
             request.desired_node = graph_desired_node_;
+            // Active goto supplies a full per-axis steering vector; manual
+            // streaming uses the 1-D slider (axis 0) padded to node dimension.
             request.desired_parameter =
-                DesiredParameterForNode(graph_desired_node_);
+                (goto_active_ && !goto_desired_parameter_.empty())
+                    ? goto_desired_parameter_
+                    : DesiredParameterForNode(graph_desired_node_);
             graph_controller_->Update(delta_seconds * playback_speed_, request);
         }
         const pmg::Pose pose = graph_controller_->CurrentPose();
