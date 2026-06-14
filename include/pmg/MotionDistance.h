@@ -4,6 +4,7 @@
 #include "pmg/MotionClip.h"
 #include "pmg/RigidTransform2D.h"
 #include "pmg/Skeleton.h"
+#include "pmg/TransitionWindow.h"
 
 #include <vector>
 
@@ -43,7 +44,7 @@ struct AlignedDistanceResult {
 // default to the full [0, 1] range, so the grid spans every frame pair unless
 // narrowed. Strides subsample frames for speed (>= 1).
 struct DistanceGridConfig {
-    int window_size = 5;            // frames per point cloud (Phase A window)
+    int window_size = 5;            // sampled frames; temporal span is k-1 intervals
     int source_frame_stride = 1;
     int target_frame_stride = 1;
     float source_phase_start = 0.0f;  // normalized [0,1], inclusive
@@ -74,8 +75,8 @@ struct OptimalTransition {
     int source_frame = -1;
     int target_frame = -1;
     float distance = std::numeric_limits<float>::infinity();
-    float source_phase = 0.0f;  // normalized [0,1]
-    float target_phase = 0.0f;  // normalized [0,1]
+    float source_phase = 0.0f;  // first source support frame, normalized [0,1]
+    float target_phase = 0.0f;  // last target support frame, normalized [0,1]
     RigidTransform2D alignment;
 };
 
@@ -88,6 +89,15 @@ public:
         const Skeleton& skeleton,
         const MotionClip& clip,
         int center_frame,
+        int window_size,
+        const PointCloudWeighting& weighting = {});
+
+    // Build a point cloud from an explicit first frame. Frame support is
+    // [first_frame, first_frame + window_size - 1], endpoint-clamped.
+    static PointCloud BuildPointCloudFromFirstFrame(
+        const Skeleton& skeleton,
+        const MotionClip& clip,
+        int first_frame,
         int window_size,
         const PointCloudWeighting& weighting = {});
 
@@ -106,6 +116,15 @@ public:
         const MotionClip& target_clip,
         const DistanceGridConfig& config = {});
 
+    // Comparison path for transition-contract experiments. The default
+    // BuildDistanceGrid remains Kovar directional for artifact compatibility.
+    static DistanceGrid BuildDistanceGridForConvention(
+        const Skeleton& skeleton,
+        const MotionClip& source_clip,
+        const MotionClip& target_clip,
+        const DistanceGridConfig& config,
+        TransitionWindowConvention convention);
+
     // Minimum cell of the distance grid. The result is `valid` only when the
     // minimum distance is <= `max_distance` (default: accept any finite cell).
     static OptimalTransition FindOptimalTransition(
@@ -113,6 +132,14 @@ public:
         const MotionClip& source_clip,
         const MotionClip& target_clip,
         const DistanceGridConfig& config = {},
+        float max_distance = std::numeric_limits<float>::infinity());
+
+    static OptimalTransition FindOptimalTransitionForConvention(
+        const Skeleton& skeleton,
+        const MotionClip& source_clip,
+        const MotionClip& target_clip,
+        const DistanceGridConfig& config,
+        TransitionWindowConvention convention,
         float max_distance = std::numeric_limits<float>::infinity());
 };
 

@@ -162,6 +162,38 @@ int main() {
             assert(diagnostics->blend_duration_seconds > 0.0f);
             assert(diagnostics->blend_progress >= 0.0f);
             assert(diagnostics->blend_progress <= 1.0f);
+            assert(std::abs(
+                       diagnostics->metric_window_span_seconds -
+                       (4.0f / kFramesPerSecond)) <
+                   1.0e-6f);
+            assert(
+                diagnostics->runtime_windows
+                    .source.sampled_frames.size() == 5);
+            assert(
+                diagnostics->runtime_windows
+                    .target.sampled_frames.size() == 5);
+            assert(
+                diagnostics->transition_window_convention ==
+                pmg::TransitionWindowConvention::kKovarDirectional);
+
+            const int source_reference_frame = static_cast<int>(std::lround(
+                diagnostics->source_transition_phase *
+                static_cast<float>(kRuntimeFrameCount - 1)));
+            const int target_reference_frame = static_cast<int>(std::lround(
+                diagnostics->target_transition_phase *
+                static_cast<float>(kRuntimeFrameCount - 1)));
+            const pmg::TransitionFrameWindows directional_windows =
+                pmg::ResolveTransitionFrameWindows(
+                    kRuntimeFrameCount, kRuntimeFrameCount,
+                    source_reference_frame, target_reference_frame,
+                    /*window_size=*/5,
+                    pmg::TransitionWindowConvention::kKovarDirectional);
+            assert(
+                diagnostics->runtime_windows.source.sampled_frames ==
+                directional_windows.source.sampled_frames);
+            assert(
+                diagnostics->runtime_windows.target.sampled_frames ==
+                directional_windows.target.sampled_frames);
             observed_transition_diagnostics = true;
         } else {
             assert(!controller.ActiveTransitionDiagnostics().has_value());
@@ -176,12 +208,10 @@ int main() {
     assert(controller.CompletedTransitions() >= 2);
     assert(observed_transition_diagnostics);
 
-    // The blend window is centered on the optimal transition point: the
-    // transition begins by the optimal phase (so its midpoint lands on it), and
-    // no earlier than half a metric window before it (default 5 frames at
-    // 30 fps over a ~0.77 s source clip -> half-window ~0.11 phase).
-    assert(first_transition_phase <= source_phase_gate + 1.0e-4f);
-    assert(first_transition_phase >= source_phase_gate - 0.15f);
+    // Directional contract: stored source phase is the first blend frame.
+    // Runtime scheduling may land at most one sampled frame after that gate.
+    assert(first_transition_phase >= source_phase_gate - 1.0e-4f);
+    assert(first_transition_phase <= source_phase_gate + 0.05f);
 
     // Root trajectory is continuous: no per-frame jump far above the typical step.
     float total_step = 0.0f;
@@ -236,10 +266,9 @@ int main() {
         assert(net > 2.0f * kStrideUnits);  // several cycles of forward travel
     }
 
-    // D3/D4 regression: a 9-frame transition centered near source phase 0.95
-    // must cross the source cycle boundary without freezing or popping. The
-    // active duration comes from transition_blend_frames, the same frame count
-    // used by the metric window.
+    // D3/D4 regression: a 9-frame directional transition starting near source
+    // phase 0.95 must cross the source cycle boundary without freezing or
+    // popping. Nine sampled frames span eight runtime frame intervals.
     {
         int boundary_node = -1;
         const pmg::ParametricMotionGraph boundary_graph =
@@ -285,8 +314,8 @@ int main() {
         }
 
         assert(crossed_source_boundary_during_blend);
-        assert(transition_update_count >= 9);
-        assert(transition_update_count <= 10);
+        assert(transition_update_count >= 8);
+        assert(transition_update_count <= 9);
         assert(boundary_controller.CompletedTransitions() == 1);
 
         float boundary_total_step = 0.0f;

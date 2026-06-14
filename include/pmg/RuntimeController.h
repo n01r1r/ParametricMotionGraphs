@@ -4,6 +4,7 @@
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/PoseBlend.h"
 #include "pmg/RigidTransform2D.h"
+#include "pmg/TransitionWindow.h"
 
 #include <optional>
 
@@ -15,11 +16,10 @@ struct RuntimeControlRequest {
 };
 
 struct RuntimeControllerConfig {
-    // Transition blend length in frames at the runtime sampling rate. The
-    // paper measures transition similarity and blends over the same window,
-    // so this must equal the DistanceGridConfig window_size the edges were
-    // built with (callers wire it from the artifact's edge build settings;
-    // the default matches DistanceGridConfig's default).
+    // Number of sampled blend frames at the runtime sampling rate. k samples
+    // span k-1 frame intervals. This must equal the DistanceGridConfig
+    // window_size the edges were built with (callers wire it from the
+    // artifact's edge build settings; the default matches that config).
     int transition_blend_frames = 5;
 };
 
@@ -39,6 +39,10 @@ struct RuntimeTransitionDiagnostics {
     ParameterAabb reachable_target_box;
     float source_transition_phase = 0.0f;
     float target_transition_phase = 0.0f;
+    TransitionWindowConvention transition_window_convention =
+        TransitionWindowConvention::kKovarDirectional;
+    TransitionFrameWindows runtime_windows;
+    float metric_window_span_seconds = 0.0f;
     RigidTransform2D alignment;
     float blend_elapsed_seconds = 0.0f;
     float blend_duration_seconds = 0.0f;

@@ -242,22 +242,20 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
             continue;
         }
 
-        // The blend spans the same temporal window the distance metric scored
-        // (transition_blend_frames = the edges' DistanceGridConfig
-        // window_size), centered on the optimal transition point (paper Sec
-        // 3.1 / Sec 5.2.1: "a short window centered at these frames"). Gate
-        // half a window early so the window's midpoint (alpha = 0.5, max
-        // weight) lands on the optimal point where the two motions are most
-        // similar.
-        const float blend_seconds =
-            static_cast<float>(config_.transition_blend_frames) / frames_per_second_;
+        // Stored phases follow the Kovar directional metric used offline:
+        // source phase is the first source blend frame; target phase is the
+        // last target blend frame. k sampled frames span k-1 frame intervals.
+        const float blend_seconds = TransitionWindowSpanSeconds(
+            config_.transition_blend_frames, frames_per_second_);
         const float source_duration =
             std::max(kSmallEpsilon, current_clip_.DurationSeconds());
-        const float half_window_phase = 0.5f * blend_seconds / source_duration;
-        if (phase < transition->source_transition_phase - half_window_phase) {
+        const float one_frame_phase =
+            (1.0f / frames_per_second_) / source_duration;
+        if (phase < transition->source_transition_phase) {
             continue;
         }
-        if (phase > transition->source_transition_phase + half_window_phase) {
+        if (phase >
+            transition->source_transition_phase + one_frame_phase) {
             continue;
         }
 
@@ -268,19 +266,34 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
             target_parameter, frames_per_second_);
         next_node_ = edge.target_node;
         next_parameter_ = target_parameter;
-        // Start the target half a window before its transition point so the
-        // window is centered on the optimal point (matches the source gate above).
+        // The target reference is the last blend frame, so start k-1 frame
+        // intervals before it.
         const float target_duration = next_clip_.DurationSeconds();
         next_time_seconds_ = std::max(
             0.0f, transition->target_transition_phase * target_duration -
-                      0.5f * blend_seconds);
+                      blend_seconds);
+
+        const int source_reference_frame = static_cast<int>(std::lround(
+            transition->source_transition_phase *
+            static_cast<float>(std::max(1, current_clip_.NumFrames() - 1))));
+        const int target_reference_frame = static_cast<int>(std::lround(
+            transition->target_transition_phase *
+            static_cast<float>(std::max(1, next_clip_.NumFrames() - 1))));
+        const TransitionFrameWindows runtime_windows =
+            ResolveTransitionFrameWindows(
+                current_clip_.NumFrames(), next_clip_.NumFrames(),
+                source_reference_frame, target_reference_frame,
+                config_.transition_blend_frames,
+                TransitionWindowConvention::kKovarDirectional);
 
         // Alignment maps the target clip onto the source clip (target->source:
         // yaw about +Y then floor translation), then composes with the source's
         // accumulated world transform. How it is resolved (paper path: point-cloud; debug path: root-only)
         // lives behind the AlignmentStrategy seam.
         const AlignmentContext alignment_context{
-            current_clip_, next_clip_, CurrentPhase(), *transition};
+            current_clip_, next_clip_, CurrentPhase(), *transition,
+            config_.transition_blend_frames,
+            TransitionWindowConvention::kKovarDirectional};
         const RigidTransform2D alignment = alignment_.Resolve(alignment_context);
         next_world_transform_ = RigidTransform2D::Compose(world_transform_, alignment);
 
@@ -299,6 +312,10 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
             transition->target_parameter_box,
             transition->source_transition_phase,
             transition->target_transition_phase,
+            TransitionWindowConvention::kKovarDirectional,
+            runtime_windows,
+            TransitionWindowSpanSeconds(
+                config_.transition_blend_frames, frames_per_second_),
             alignment,
             0.0f,
             transition_duration_seconds_,

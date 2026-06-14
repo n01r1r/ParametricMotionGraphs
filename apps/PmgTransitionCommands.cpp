@@ -11,8 +11,10 @@
 #include "pmg/MotionRegistration.h"
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/PmgBuilder.h"
+#include "pmg/PoseBlend.h"
 #include "pmg/RuntimeController.h"
 #include "pmg/SkeletonCompatibility.h"
+#include "pmg/TransitionWindow.h"
 
 #include <algorithm>
 #include <cctype>
@@ -144,6 +146,270 @@ int InspectTransition(const std::string& source_path, const std::string& target_
     std::cout << "NOTE: distance is a raw weighted squared point-distance sum "
                  "in the BVH's native units; calibrate thresholds per corpus, "
                  "window, skeleton, and weighting.\n";
+    return 0;
+}
+
+std::string FrameList(const std::vector<int>& frames) {
+    std::ostringstream output;
+    for (std::size_t index = 0; index < frames.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << frames[index];
+    }
+    return output.str();
+}
+
+float PoseHeading(const pmg::Pose& pose) {
+    if (pose.local_rotations.empty()) {
+        return 0.0f;
+    }
+    const pmg::Vec3 forward = pmg::Rotate(
+        pose.local_rotations.front(), {0.0f, 0.0f, 1.0f});
+    return std::atan2(forward.x, forward.z);
+}
+
+float WrappedAngleDelta(float first, float second) {
+    float delta = first - second;
+    while (delta > pmg::kPi) {
+        delta -= 2.0f * pmg::kPi;
+    }
+    while (delta < -pmg::kPi) {
+        delta += 2.0f * pmg::kPi;
+    }
+    return delta;
+}
+
+struct SeamMetrics {
+    float max_mean_joint_step = 0.0f;
+    float max_root_velocity_delta = 0.0f;
+    float max_facing_velocity_delta = 0.0f;
+};
+
+SeamMetrics MeasureSyntheticSeam(
+    const pmg::Skeleton& skeleton,
+    const pmg::MotionClip& source_clip,
+    const pmg::MotionClip& target_clip,
+    const pmg::TransitionFrameWindows& windows,
+    const pmg::RigidTransform2D& alignment) {
+    std::vector<pmg::Pose> poses;
+    poses.reserve(windows.source.sampled_frames.size() + 2);
+
+    const int source_before = std::max(
+        0, windows.source.sampled_frames.front() - 1);
+    poses.push_back(source_clip.frames[source_before]);
+
+    const std::size_t blend_frame_count =
+        windows.source.sampled_frames.size();
+    for (std::size_t index = 0; index < blend_frame_count; ++index) {
+        const float linear_alpha =
+            blend_frame_count <= 1
+                ? 1.0f
+                : static_cast<float>(index) /
+                      static_cast<float>(blend_frame_count - 1);
+        const float alpha =
+            linear_alpha * linear_alpha * (3.0f - 2.0f * linear_alpha);
+        const pmg::Pose target_pose = alignment.Apply(
+            target_clip.frames[windows.target.sampled_frames[index]]);
+        poses.push_back(pmg::BlendPose(
+            source_clip.frames[windows.source.sampled_frames[index]],
+            target_pose, alpha));
+    }
+
+    const int target_after = std::min(
+        target_clip.NumFrames() - 1,
+        windows.target.sampled_frames.back() + 1);
+    poses.push_back(alignment.Apply(target_clip.frames[target_after]));
+
+    SeamMetrics metrics;
+    std::vector<pmg::Vec3> root_steps;
+    std::vector<float> facing_steps;
+    for (std::size_t pose_index = 1; pose_index < poses.size(); ++pose_index) {
+        const std::vector<pmg::Vec3> previous_positions =
+            pmg::ComputeJointWorldPositions(
+                skeleton, poses[pose_index - 1]);
+        const std::vector<pmg::Vec3> current_positions =
+            pmg::ComputeJointWorldPositions(
+                skeleton, poses[pose_index]);
+        float mean_joint_step = 0.0f;
+        for (std::size_t joint = 0; joint < current_positions.size(); ++joint) {
+            mean_joint_step +=
+                (current_positions[joint] - previous_positions[joint]).Norm();
+        }
+        mean_joint_step /= static_cast<float>(current_positions.size());
+        metrics.max_mean_joint_step =
+            std::max(metrics.max_mean_joint_step, mean_joint_step);
+
+        root_steps.push_back(
+            poses[pose_index].root_position -
+            poses[pose_index - 1].root_position);
+        facing_steps.push_back(WrappedAngleDelta(
+            PoseHeading(poses[pose_index]),
+            PoseHeading(poses[pose_index - 1])));
+    }
+
+    for (std::size_t index = 1; index < root_steps.size(); ++index) {
+        metrics.max_root_velocity_delta = std::max(
+            metrics.max_root_velocity_delta,
+            (root_steps[index] - root_steps[index - 1]).Norm());
+        metrics.max_facing_velocity_delta = std::max(
+            metrics.max_facing_velocity_delta,
+            std::abs(WrappedAngleDelta(
+                facing_steps[index], facing_steps[index - 1])));
+    }
+    return metrics;
+}
+
+void PrintConventionResult(
+    const pmg::Skeleton& skeleton,
+    const pmg::MotionClip& source_clip,
+    const pmg::MotionClip& target_clip,
+    const pmg::DistanceGridConfig& config,
+    pmg::TransitionWindowConvention convention) {
+    const pmg::OptimalTransition transition =
+        pmg::MotionDistance::FindOptimalTransitionForConvention(
+            skeleton, source_clip, target_clip, config, convention);
+    if (transition.source_frame < 0) {
+        throw std::runtime_error(
+            "CompareTransitionConventions: empty distance grid");
+    }
+    const pmg::TransitionFrameWindows windows =
+        pmg::ResolveTransitionFrameWindows(
+            source_clip.NumFrames(), target_clip.NumFrames(),
+            transition.source_frame, transition.target_frame,
+            config.window_size, convention);
+    const SeamMetrics seam = MeasureSyntheticSeam(
+        skeleton, source_clip, target_clip, windows, transition.alignment);
+    const char* name = pmg::TransitionWindowConventionName(convention);
+
+    std::cout << "=== " << name << " ===\n";
+    std::cout << "source_reference_frame=" << transition.source_frame << "\n";
+    std::cout << "target_reference_frame=" << transition.target_frame << "\n";
+    std::cout << "source_support="
+              << FrameList(windows.source.sampled_frames) << "\n";
+    std::cout << "target_support="
+              << FrameList(windows.target.sampled_frames) << "\n";
+    std::cout << "distance=" << transition.distance << "\n";
+    std::cout << "alignment_yaw=" << transition.alignment.yaw << "\n";
+    std::cout << "alignment_dx=" << transition.alignment.dx << "\n";
+    std::cout << "alignment_dz=" << transition.alignment.dz << "\n";
+    std::cout << "synthetic_max_mean_joint_step="
+              << seam.max_mean_joint_step << "\n";
+    std::cout << "synthetic_max_root_velocity_delta="
+              << seam.max_root_velocity_delta << "\n";
+    std::cout << "synthetic_max_facing_velocity_delta="
+              << seam.max_facing_velocity_delta << "\n";
+}
+
+void PrintLegacyV7Reinterpretation(
+    const pmg::Skeleton& skeleton,
+    const pmg::MotionClip& source_clip,
+    const pmg::MotionClip& target_clip,
+    const pmg::DistanceGridConfig& config) {
+    const pmg::OptimalTransition stored =
+        pmg::MotionDistance::FindOptimalTransitionForConvention(
+            skeleton, source_clip, target_clip, config,
+            pmg::TransitionWindowConvention::kKovarDirectional);
+    if (stored.source_frame < 0) {
+        throw std::runtime_error(
+            "PrintLegacyV7Reinterpretation: empty distance grid");
+    }
+    const pmg::TransitionFrameWindows offline_windows =
+        pmg::ResolveTransitionFrameWindows(
+            source_clip.NumFrames(), target_clip.NumFrames(),
+            stored.source_frame, stored.target_frame, config.window_size,
+            pmg::TransitionWindowConvention::kKovarDirectional);
+    const pmg::TransitionFrameWindows runtime_windows =
+        pmg::ResolveTransitionFrameWindows(
+            source_clip.NumFrames(), target_clip.NumFrames(),
+            stored.source_frame, stored.target_frame, config.window_size,
+            pmg::TransitionWindowConvention::kPmgCentered);
+
+    const pmg::PointCloud runtime_source_cloud =
+        pmg::MotionDistance::BuildPointCloudFromFirstFrame(
+            skeleton, source_clip,
+            runtime_windows.source.first_unclamped_frame,
+            config.window_size, config.weighting);
+    const pmg::PointCloud runtime_target_cloud =
+        pmg::MotionDistance::BuildPointCloudFromFirstFrame(
+            skeleton, target_clip,
+            runtime_windows.target.first_unclamped_frame,
+            config.window_size, config.weighting);
+    const pmg::AlignedDistanceResult runtime_alignment =
+        pmg::MotionDistance::AlignedPointCloudDistance(
+            runtime_source_cloud, runtime_target_cloud);
+    const SeamMetrics runtime_seam = MeasureSyntheticSeam(
+        skeleton, source_clip, target_clip, runtime_windows,
+        runtime_alignment.alignment);
+
+    const bool source_support_matches =
+        offline_windows.source.sampled_frames ==
+        runtime_windows.source.sampled_frames;
+    const bool target_support_matches =
+        offline_windows.target.sampled_frames ==
+        runtime_windows.target.sampled_frames;
+
+    std::cout << "=== legacy_v7_directional_phase_reinterpreted_centered ===\n";
+    std::cout << "stored_source_reference_frame="
+              << stored.source_frame << "\n";
+    std::cout << "stored_target_reference_frame="
+              << stored.target_frame << "\n";
+    std::cout << "offline_source_support="
+              << FrameList(offline_windows.source.sampled_frames) << "\n";
+    std::cout << "offline_target_support="
+              << FrameList(offline_windows.target.sampled_frames) << "\n";
+    std::cout << "runtime_source_support="
+              << FrameList(runtime_windows.source.sampled_frames) << "\n";
+    std::cout << "runtime_target_support="
+              << FrameList(runtime_windows.target.sampled_frames) << "\n";
+    std::cout << "source_support_matches="
+              << static_cast<int>(source_support_matches) << "\n";
+    std::cout << "target_support_matches="
+              << static_cast<int>(target_support_matches) << "\n";
+    std::cout << "offline_scored_distance=" << stored.distance << "\n";
+    std::cout << "runtime_reinterpreted_distance="
+              << runtime_alignment.distance << "\n";
+    std::cout << "runtime_synthetic_max_mean_joint_step="
+              << runtime_seam.max_mean_joint_step << "\n";
+    std::cout << "runtime_synthetic_max_root_velocity_delta="
+              << runtime_seam.max_root_velocity_delta << "\n";
+    std::cout << "runtime_synthetic_max_facing_velocity_delta="
+              << runtime_seam.max_facing_velocity_delta << "\n";
+}
+
+int CompareTransitionConventions(
+    const std::string& source_path,
+    const std::string& target_path) {
+    const pmg::BvhData source = pmg::BvhLoader::Load(source_path);
+    const pmg::BvhData target = pmg::BvhLoader::Load(target_path);
+    pmg::RequireSkeletonCompatible(
+        source.skeleton, target.skeleton,
+        "CompareTransitionConventions",
+        /*offset_tolerance=*/1.0e-4f);
+
+    const pmg::DistanceGridConfig config = TransitionGridConfig();
+    std::cout << "source_bvh=" << source_path << "\n";
+    std::cout << "target_bvh=" << target_path << "\n";
+    std::cout << "window_sample_count=" << config.window_size << "\n";
+    std::cout << "window_span_seconds="
+              << pmg::TransitionWindowSpanSeconds(
+                     config.window_size, source.clip.frames_per_second)
+              << "\n";
+    std::cout << "runtime_blend_duration_seconds="
+              << pmg::TransitionWindowSpanSeconds(
+                     config.window_size, source.clip.frames_per_second)
+              << "\n";
+    PrintConventionResult(
+        source.skeleton, source.clip, target.clip, config,
+        pmg::TransitionWindowConvention::kKovarDirectional);
+    PrintConventionResult(
+        source.skeleton, source.clip, target.clip, config,
+        pmg::TransitionWindowConvention::kPmgCentered);
+    PrintLegacyV7Reinterpretation(
+        source.skeleton, source.clip, target.clip, config);
+    std::cout << "NOTE: synthetic seam metrics compare one aligned cubic blend "
+                 "plus one boundary frame. They are diagnostics, not perceptual "
+                 "quality claims.\n";
     return 0;
 }
 
@@ -389,6 +655,9 @@ std::optional<int> TryRunTransitionCommand(int argc, char** argv) {
     const std::string command = argc > 1 ? argv[1] : "";
     if (command == "--inspect-transition" && argc == 4) {
         return InspectTransition(argv[2], argv[3]);
+    }
+    if (command == "--compare-transition-conventions" && argc == 4) {
+        return CompareTransitionConventions(argv[2], argv[3]);
     }
     if (command == "--dump-distance-grid" && argc == 5) {
         return DumpDistanceGrid(argv[2], argv[3], argv[4]);
