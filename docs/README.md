@@ -27,9 +27,11 @@ The PDFs are source material, not build inputs.
    mapped to code and tests.
 3. [`PAPER_CONFORMANCE.md`](PAPER_CONFORMANCE.md) - line-by-line conformance
    audit, the deviation list (D1-D8), what's left, and the claim limit.
-4. [`DESIGN.md`](DESIGN.md) - module structure, offline/online pipeline,
+4. [`SPEC_AUDIT.md`](SPEC_AUDIT.md) - semantic audit of every `.pmg_spec`,
+   including node/edge validity, intended role, and visualization expectations.
+5. [`DESIGN.md`](DESIGN.md) - module structure, offline/online pipeline,
    contracts, and failure boundaries.
-5. [`REPRODUCTION.md`](REPRODUCTION.md) - build, validation, artifact, and
+6. [`REPRODUCTION.md`](REPRODUCTION.md) - build, validation, artifact, and
    runtime commands.
 
 ## Supporting References
@@ -37,7 +39,7 @@ The PDFs are source material, not build inputs.
 - [`../CONTEXT.md`](../CONTEXT.md) - canonical project vocabulary and the
   paper-symbol map; code and conversation use these terms exactly.
 - [`MOTION_CORPUS.md`](MOTION_CORPUS.md) - BVH skeleton-compatibility groups,
-  which clips can blend together, and the canonical 2-D steering demo spec.
+  which clips can blend together, and the minimal 2-D calibration fixture.
 - [`WALK_JOG_CONTINUITY.md`](WALK_JOG_CONTINUITY.md) - measured loop-seam
   analysis, paper comparison, jog-domain limits, and desired-parameter
   semantics.

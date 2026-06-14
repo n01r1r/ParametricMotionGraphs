@@ -119,7 +119,7 @@ reject_reason
   .\outputs\paper_core_walk\artifact.pmg
 ```
 
-The runtime requires a V4+ artifact with a skeleton. Current writes use V7.
+The runtime requires a V4+ artifact with a skeleton. Current writes use V8.
 Multidimensional calibration grid density is declared per node with
 `parameter_calibration <node> <samples_per_axis>`; omitted declarations use 9.
 
@@ -161,8 +161,9 @@ Optional final facing:
   --facing-tolerance-degrees 15
 ```
 
-Goal-directed locomotion currently requires a one-dimensional node with useful
-turn-rate variation and a usable self-transition.
+Goal-directed locomotion requires a declared or inferred `turn_rate` axis with
+useful achieved variation and a usable self-transition. Declared
+`travel_speed` axes are also driven.
 
 ## Run Diagnostic Commands
 
@@ -243,14 +244,17 @@ the measured value for this command is `1.0775`.
 
 | Spec | Purpose |
 |---|---|
-| `walk_curvature.pmg_spec` | canonical 1-D walk self-transition runtime |
-| `walk_curvature_speed.pmg_spec` | 2-D real-BVH turn-rate/travel-speed calibration |
-| `walk_jog.pmg_spec` | two-node walk/jog cross-transition graph |
+| `walk_minimal.pmg_spec` | canonical minimal 1-D walk self-transition runtime |
+| `walk_curvature.pmg_spec` | permissive three-anchor walk runtime with non-monotone signed turn response |
+| `walk_curvature_speed.pmg_spec` | minimal triangular 2-D turn-rate/travel-speed calibration |
+| `walk_jog.pmg_spec` | cross-gait stress graph with a fixed single-example jog node |
 | `walk_curvature_selective.pmg_spec` | selective GOOD/NEUTRAL/BAD classification |
 | `transition_box_shrink.pmg_spec` | non-convex target stress case for BAD exclusion |
 
 `transition_box_shrink.pmg_spec` deliberately violates smooth-space assumptions.
 Use it only to test conservative AABB shrink behavior.
+See [SPEC_AUDIT.md](SPEC_AUDIT.md) for semantic classifications and expected
+visual evidence.
 
 ## Build and Run Viewer
 
@@ -307,8 +311,8 @@ Machine-dependent fields:
 - **Registration failure**: missing contacts or inconsistent contact structure.
 - **Edge rejection**: at least one sampled source lacks a valid target region.
 - **Runtime config failure**: artifact edges disagree on transition window.
-- **Goal-control failure**: node is not one-dimensional or has insufficient
-  achieved turn-rate range.
+- **Goal-control failure**: node has no usable `turn_rate` axis, insufficient
+  achieved turn-rate range, or no usable self-transition.
 
 Do not increase thresholds before inspecting the edge report. A higher threshold
 trades transition quality for connectivity.

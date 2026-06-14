@@ -12,7 +12,7 @@ BVH examples
   -> point-cloud transition distance grids
   -> sampled GOOD/NEUTRAL/BAD target regions
   -> interpolated PMG edges
-  -> V7 offline artifact
+  -> V8 offline artifact
   -> point-cloud-aligned online runtime
 ```
 
@@ -102,7 +102,7 @@ distances by sampled range, and stores the full example-weight vector.
 `parameter_calibration` exposes deterministic grid density; default is 9
 samples per axis.
 
-Build a complete V7 artifact:
+Build a complete V8 artifact:
 
 ```powershell
 .\build\Debug\pmg_cli.exe --build-graph `
@@ -122,13 +122,13 @@ outputs/paper_core_walk/
     `-- edge_samples.csv
 ```
 
-V7 stores the Skeleton, registered motion spaces, TimeWarps, multidimensional
+V8 stores the Skeleton, registered motion spaces, TimeWarps, multidimensional
 parameter calibrations, transition samples, runtime sampling rate, source
-paths, seeds, thresholds, and edge build reports. V5/V6 scalar calibration
-tables remain readable and are converted to the unified in-memory form; V5
-also uses scalar transition-phase fallback. V4 lacks parameter calibrations.
-V2/V3 remain readable but lack the Skeleton required for standalone
-point-cloud alignment.
+paths, seeds, thresholds, edge build reports, and metric-window convention.
+V5/V6 scalar calibration tables remain readable and are converted to the
+unified in-memory form; V5 also uses scalar transition-phase fallback. V4 lacks
+parameter calibrations. V2/V3 remain readable but lack the Skeleton required
+for standalone point-cloud alignment.
 
 ## Runtime
 
@@ -153,10 +153,14 @@ parameter-to-achieved-turn-rate behavior through the runtime graph.
 
 ## Validation Specs
 
-- `specs/walk_curvature.pmg_spec`: permissive one-node runtime graph.
-- `specs/walk_jog.pmg_spec`: two-node walk/jog cross-transition graph.
-- `specs/walk_curvature_speed.pmg_spec`: real-BVH 2-D turn-rate/travel-speed
-  calibration fixture.
+- `specs/walk_minimal.pmg_spec`: canonical minimal 1-D self-edge stream.
+- `specs/walk_curvature.pmg_spec`: permissive three-anchor walk graph; its
+  signed turn response is non-monotone, so it is not a simple wide-to-tight
+  control axis.
+- `specs/walk_jog.pmg_spec`: cross-gait stress graph; the jog node has one fixed
+  example and is not a controllable jog family.
+- `specs/walk_curvature_speed.pmg_spec`: minimal triangular 2-D
+  turn-rate/travel-speed calibration fixture, not robust rectangular coverage.
 - `specs/walk_curvature_selective.pmg_spec`: real-BVH
   GOOD/NEUTRAL/BAD classification.
 - `specs/transition_box_shrink.pmg_spec`: real-BVH non-convex target stress
@@ -175,12 +179,14 @@ not part of the stored PMG runtime contract.
 - [docs/PAPER_CONFORMANCE.md](docs/PAPER_CONFORMANCE.md) — line-by-line paper
   audit, the prioritized deviation list (D1–D8), what's left, and the claim
   limit.
+- [docs/SPEC_AUDIT.md](docs/SPEC_AUDIT.md) — semantic classification of every
+  `.pmg_spec`, including expected diagnostics and visualization.
 - [docs/DESIGN.md](docs/DESIGN.md) — module structure, offline/online pipeline,
   contracts, failure boundaries, and limitations.
 - [docs/REPRODUCTION.md](docs/REPRODUCTION.md) — build, validation, runtime,
   deterministic inputs, and output schemas.
 - [docs/MOTION_CORPUS.md](docs/MOTION_CORPUS.md) — BVH skeleton-compatibility
-  groups and the canonical 2-D steering demo spec.
+  groups and the minimal 2-D calibration fixture.
 - [CONTEXT.md](CONTEXT.md) — project vocabulary and paper-symbol map; code and
   conversation use these terms exactly.
 - [docs/adr/](docs/adr) — accepted architecture decisions (complete artifact

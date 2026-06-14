@@ -17,7 +17,7 @@ GraphSpec
       -> optional DTW refinement
       -> PmgBuilder edge sampling
   -> BuiltPmgArtifact            (offline/online seam)
-      -> GraphIo V7
+      -> GraphIo V8
       -> RuntimeController
       -> GoalDirectedLocomotion
 ```
@@ -265,8 +265,9 @@ The full prioritized deviation list lives in
 - The included corpus validates walking/jogging behavior, not the original
   boxing/platform experiments.
 - Transition regions are axis-aligned boxes and clips transition near their end;
-  mid-clip transitions and paper Section 6.3 restricted source-domain nodes
-  remain future work.
-- Goal-directed control currently steers one parameter axis; multidimensional
-  control is the primary open feature (see PAPER_CONFORMANCE §5).
+  per-edge phase ranges are configurable, but general mid-clip graph
+  transitions are not a runtime authoring feature.
+- Goal-directed control steers declared `turn_rate` and `travel_speed` axes.
+  Sparse/coupled corpus support remains a spec-level limitation; see
+  [SPEC_AUDIT.md](SPEC_AUDIT.md).
 - Foot locking is optional and not serialized as runtime behavior.

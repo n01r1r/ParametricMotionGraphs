@@ -231,7 +231,7 @@ Stable ids for the adaptations and gaps above.
 - Contact registration and DTW refinement instantiate the smooth registered
   motion-space assumption the paper relies on (see the §3 registration note).
 - Root-delta blending and optional foot locking address observed BVH artifacts.
-- Complete (V7) artifacts and structured build reports add reproducibility not
+- Complete (V8) artifacts and structured build reports add reproducibility not
   specified by the original paper.
 
 ## Claim limit
@@ -240,3 +240,8 @@ The code estimates transition validity and control behavior under this corpus,
 distance metric, registration, sampling, and runtime configuration. It does not
 establish general motion quality, global controllability, or reproduction of
 the paper's unavailable datasets.
+
+Spec-level conformance is narrower still: a spec that parses and builds may be
+a minimal fixture or deliberate stress case rather than a meaningful motion
+family. [`SPEC_AUDIT.md`](SPEC_AUDIT.md) classifies every current spec and
+records single-example, sparse-domain, threshold, and parameter-semantic limits.

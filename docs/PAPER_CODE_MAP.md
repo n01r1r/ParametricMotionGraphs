@@ -156,7 +156,7 @@ Key files:
 | PMG lookup handles exact and interpolated queries | `test_edge_lookup` |
 | Registration preserves shared contact structure | `test_motion_registration`, `test_registered_blending` |
 | DTW refinement preserves contact anchors | `test_dtw_refine` |
-| V7 round-trip preserves multidimensional calibration/runtime behavior | `test_graph_io` |
+| V8 round-trip preserves multidimensional calibration/runtime behavior | `test_graph_io` |
 | Runtime world placement remains continuous | `test_runtime_controller` |
 | Goal control maps world goals to achievable turn rates | `test_goal_directed_locomotion` |
 | Included BVH graph builds and streams | CTest CLI cases in `CMakeLists.txt` |
