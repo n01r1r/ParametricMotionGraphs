@@ -319,39 +319,97 @@ GraphSpec LoadGraphSpec(const std::string& path) {
         }
 
         if (keyword == "edge_config") {
-            GraphSpecEdge configured_edge;
-            if (!(line >> configured_edge.source_node >> configured_edge.target_node >>
-                  configured_edge.build_config.good_transition_threshold >>
-                  configured_edge.build_config.bad_transition_threshold >>
-                  configured_edge.build_config.source_sample_count >>
-                  configured_edge.build_config.target_sample_count >>
-                  configured_edge.build_config.seed)) {
+            std::string source_node;
+            std::string target_node;
+            float good_threshold = 0.0f;
+            float bad_threshold = 0.0f;
+            int source_samples = 0;
+            int target_samples = 0;
+            unsigned int seed = 0u;
+            if (!(line >> source_node >> target_node >> good_threshold >>
+                  bad_threshold >> source_samples >> target_samples >> seed)) {
                 throw std::runtime_error(
                     "LoadGraphSpec line " + std::to_string(line_number) +
                     ": expected edge_config <source> <target> <tgood> <tbad> "
                     "<source_samples> <target_samples> <seed>");
             }
-            (void)FindSpecNode(spec, configured_edge.source_node);
-            (void)FindSpecNode(spec, configured_edge.target_node);
+            (void)FindSpecNode(spec, source_node);
+            (void)FindSpecNode(spec, target_node);
             auto edge_it = std::find_if(
                 spec.edges.begin(), spec.edges.end(),
                 [&](const GraphSpecEdge& edge) {
-                    return edge.source_node == configured_edge.source_node &&
-                           edge.target_node == configured_edge.target_node;
+                    return edge.source_node == source_node &&
+                           edge.target_node == target_node;
                 });
             if (edge_it == spec.edges.end()) {
                 throw std::runtime_error(
                     "LoadGraphSpec line " + std::to_string(line_number) +
                     ": edge_config requires a preceding matching edge");
             }
-            if (edge_it->has_build_config) {
+            if (edge_it->has_threshold_config) {
                 throw std::runtime_error("LoadGraphSpec line " +
                                          std::to_string(line_number) +
                                          ": duplicate edge_config");
             }
-            configured_edge.has_build_config = true;
+            // Merge only the fields this line sets, preserving any distance-grid
+            // phase range already installed by an edge_phase_range line.
             edge_it->has_build_config = true;
-            edge_it->build_config = configured_edge.build_config;
+            edge_it->has_threshold_config = true;
+            edge_it->build_config.good_transition_threshold = good_threshold;
+            edge_it->build_config.bad_transition_threshold = bad_threshold;
+            edge_it->build_config.source_sample_count = source_samples;
+            edge_it->build_config.target_sample_count = target_samples;
+            edge_it->build_config.seed = seed;
+            continue;
+        }
+
+        if (keyword == "edge_phase_range") {
+            std::string source_node;
+            std::string target_node;
+            float source_start = 0.0f;
+            float source_end = 0.0f;
+            float target_start = 0.0f;
+            float target_end = 0.0f;
+            if (!(line >> source_node >> target_node >> source_start >>
+                  source_end >> target_start >> target_end)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": expected edge_phase_range <source> <target> <src_start> "
+                    "<src_end> <tgt_start> <tgt_end>");
+            }
+            const auto valid_range = [](float start, float end) {
+                return start >= 0.0f && end <= 1.0f && start < end;
+            };
+            if (!valid_range(source_start, source_end) ||
+                !valid_range(target_start, target_end)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": edge_phase_range values must satisfy 0 <= start < end <= 1");
+            }
+            (void)FindSpecNode(spec, source_node);
+            (void)FindSpecNode(spec, target_node);
+            auto edge_it = std::find_if(
+                spec.edges.begin(), spec.edges.end(),
+                [&](const GraphSpecEdge& edge) {
+                    return edge.source_node == source_node &&
+                           edge.target_node == target_node;
+                });
+            if (edge_it == spec.edges.end()) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": edge_phase_range requires a preceding matching edge");
+            }
+            if (edge_it->has_phase_range) {
+                throw std::runtime_error("LoadGraphSpec line " +
+                                         std::to_string(line_number) +
+                                         ": duplicate edge_phase_range");
+            }
+            edge_it->has_build_config = true;
+            edge_it->has_phase_range = true;
+            edge_it->build_config.distance_grid.source_phase_start = source_start;
+            edge_it->build_config.distance_grid.source_phase_end = source_end;
+            edge_it->build_config.distance_grid.target_phase_start = target_start;
+            edge_it->build_config.distance_grid.target_phase_end = target_end;
             continue;
         }
 

@@ -33,7 +33,11 @@ struct GraphSpecExample {
 struct GraphSpecEdge {
     std::string source_node;
     std::string target_node;
+    // True when any per-edge build line (edge_config / edge_phase_range) was
+    // seen, so the build uses build_config instead of the caller default.
     bool has_build_config = false;
+    bool has_threshold_config = false;  // edge_config duplicate guard
+    bool has_phase_range = false;       // edge_phase_range duplicate guard
     PmgBuilderConfig build_config;
 };
 
@@ -53,6 +57,10 @@ struct GraphSpec {
 //   edge <source_node> <target_node>
 //   edge_config <source> <target> <tgood> <tbad> <source_samples>
 //               <target_samples> <seed>
+//   edge_phase_range <source> <target> <src_start> <src_end>
+//               <tgt_start> <tgt_end>   # transition-search sub-range (§6.3),
+//               each in [0,1] with start < end; pairs with edge_config to also
+//               set thresholds (otherwise default thresholds apply)
 // Lines starting with '#' are ignored. Relative BVH paths are resolved against
 // the spec file's directory by LoadGraphSpec(). Names and paths may not contain
 // whitespace.

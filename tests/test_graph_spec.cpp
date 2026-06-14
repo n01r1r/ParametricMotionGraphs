@@ -97,6 +97,52 @@ int main() {
     }
     assert(invalid_metric_count_threw);
 
+    // edge_phase_range sets the distance-grid search sub-range and merges with
+    // edge_config regardless of line order (phase_range first here).
+    const std::filesystem::path phase_range_spec_path =
+        directory / "phase_range.txt";
+    {
+        std::ofstream phase_range_spec(phase_range_spec_path);
+        phase_range_spec
+            << "node walk 1\n"
+            << "registration walk - - 3 0\n"
+            << "example walk 0 walk_a.bvh\n"
+            << "example walk 1 walk_b.bvh\n"
+            << "edge walk walk\n"
+            << "edge_phase_range walk walk 0.6 0.9 0.1 0.4\n"
+            << "edge_config walk walk 10 20 2 3 99\n";
+    }
+    const pmg::GraphSpec phase_range_parsed =
+        pmg::LoadGraphSpec(phase_range_spec_path.string());
+    assert(phase_range_parsed.edges[0].has_build_config);
+    assert(phase_range_parsed.edges[0].has_phase_range);
+    assert(phase_range_parsed.edges[0].has_threshold_config);
+    const pmg::DistanceGridConfig& phase_range_grid =
+        phase_range_parsed.edges[0].build_config.distance_grid;
+    assert(phase_range_grid.source_phase_start == 0.6f);
+    assert(phase_range_grid.source_phase_end == 0.9f);
+    assert(phase_range_grid.target_phase_start == 0.1f);
+    assert(phase_range_grid.target_phase_end == 0.4f);
+    // The later edge_config merged its fields without clobbering the range.
+    assert(phase_range_parsed.edges[0].build_config.seed == 99);
+
+    // Inverted range (start >= end) is rejected.
+    const std::filesystem::path bad_range_spec_path = directory / "bad_range.txt";
+    {
+        std::ofstream bad_range_spec(bad_range_spec_path);
+        bad_range_spec << "node walk 1\n"
+                       << "example walk 0 walk_a.bvh\n"
+                       << "edge walk walk\n"
+                       << "edge_phase_range walk walk 0.9 0.6 0.1 0.4\n";
+    }
+    bool bad_range_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(bad_range_spec_path.string());
+    } catch (const std::runtime_error&) {
+        bad_range_threw = true;
+    }
+    assert(bad_range_threw);
+
     pmg::PmgBuilderConfig config;
     config.source_sample_count = 1;
     config.target_sample_count = 1;
