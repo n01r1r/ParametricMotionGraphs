@@ -153,12 +153,17 @@ flowchart TD
 ### Scheduling contract
 
 The transition blend length equals the artifact edge metric's
-`DistanceGridConfig::window_size`. The runtime gates half a window before the
-source transition phase, starts the target half a window before the target
-transition phase, places the point-cloud optimum near blend midpoint, keeps both
-clips advancing through the full blend, and folds completed cycles into world
-placement instead of freezing at clip end. Artifacts with inconsistent edge
-window sizes are rejected because the runtime currently has one global transition
+`DistanceGridConfig::window_size`, whose `k` sampled frames span `k-1` frame
+intervals, so the blend lasts `(k-1)/fps`. Stored phases follow the Kovar
+directional metric: the source phase marks the first source blend frame and the
+target phase marks the last target blend frame. The runtime gates at the source
+transition phase, starts the target `k-1` intervals before its last-frame
+reference, keeps both clips advancing through the full blend, and folds completed
+cycles into world placement instead of freezing at clip end. The offline metric,
+the runtime gate, and point-cloud alignment all resolve their blend-frame support
+through one shared `ResolveTransitionFrameWindows` contract, so a transition
+scores and blends the same frame set. Artifacts with inconsistent edge window
+sizes are rejected because the runtime currently has one global transition
 window.
 
 ### Runtime request contract

@@ -44,7 +44,7 @@ that diagnostic scale and window placement. Under the exact asymmetric raw-sum
 metric (`specs/walk_curvature`, `--validate-graph`, seed 7), current
 production/authored mean-min distances are `156.654 / 145.385 = 1.0775`; the
 regression gate records that corpus-specific penalty explicitly and caps it at
-`1.10`. All 37 core tests pass. The payoff is corpus-density-coupled: with only
+`1.10`. All 38 core tests pass. The payoff is corpus-density-coupled: with only
 three clean walk clips the within-segment correspondence is already near-linear,
 so headroom is small.
 
@@ -146,8 +146,8 @@ The wide-turn walk-loop jolt was diagnosed as a corpus periodicity limit
 `docs/WALK_JOG_CONTINUITY.md`.
 
 Multidimensional runtime control (formerly item 1) landed: the control layer
-now drives every node axis. The core algorithm is faithful and verified (37/37
-core tests, 39/39 with the viewer). What remains is registration depth and small
+now drives every node axis. The core algorithm is faithful and verified (38/38
+core tests, 40/40 with the viewer). What remains is registration depth and small
 per-edge plumbing, not correctness or feature breadth.
 
 ## Deviation register
@@ -182,6 +182,16 @@ Stable ids for the adaptations and gaps above.
   `DistanceGridConfig::window_size` and drives runtime blending, point-cloud
   alignment, and goal-directed calibration. Artifacts whose edge builds record
   different window sizes are rejected explicitly (one global runtime window).
+  The runtime, the offline metric, and alignment now resolve their blend-frame
+  support through one shared `ResolveTransitionFrameWindows` so a transition
+  scores and blends the identical frame set; `k` sampled frames span `k-1`
+  intervals, so the blend lasts `(k-1)/fps`. This adopts the Kovar directional
+  window (source phase = first source frame, target phase = last target frame)
+  as canonical rather than the centered placement Heck PMG §5.2.1 describes —
+  the two papers differ, and directional keeps the offline/runtime support
+  consistent. `kPmgCentered` survives only as a comparison path
+  (`--compare-transition-conventions`); `test_transition_window_contract`
+  regresses the former cross-layer mismatch.
 - **D5 — Transition phases remain target-dependent.**
   Each source sample stores the phase pair measured at every retained GOOD
   target sample inside its shrunk box. Runtime clamps the requested target,
