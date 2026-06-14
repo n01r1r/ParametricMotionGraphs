@@ -1032,6 +1032,204 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
         "cyan active | gold target | orange transition | white selected | drag node");
 }
 
+void PmgViewerWorkspace::DrawParameterCoverage() {
+    ImGui::TextUnformatted("Parameter-space coverage");
+    ImGui::TextDisabled(
+        "Example samples and the axis-extreme corners of the parameter box. A "
+        "red ring marks a corner no example reaches (that quadrant is "
+        "extrapolation, not interpolation).");
+    if (!graph_ready_ || graph_.NumNodes() == 0) {
+        ImGui::TextDisabled("Load or build a graph to inspect coverage.");
+        return;
+    }
+
+    selected_graph_node_ =
+        std::clamp(selected_graph_node_, 0, graph_.NumNodes() - 1);
+    if (ImGui::BeginCombo("Node##coverage_node",
+                          graph_.Node(selected_graph_node_).name.c_str())) {
+        for (int index = 0; index < graph_.NumNodes(); ++index) {
+            const bool selected = index == selected_graph_node_;
+            if (ImGui::Selectable(graph_.Node(index).name.c_str(), selected)) {
+                selected_graph_node_ = index;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    const pmg::ParametricMotionSpace& space =
+        graph_.Node(selected_graph_node_).motion_space;
+    const std::vector<pmg::ExampleMotion>& examples = space.Examples();
+    const int dimension = space.ParameterDimension();
+    if (examples.empty() || dimension <= 0) {
+        ImGui::TextDisabled("Node has no examples.");
+        return;
+    }
+    const pmg::ParameterVector min_parameter = space.MinParameter();
+    const pmg::ParameterVector max_parameter = space.MaxParameter();
+
+    // Spanned axes and full-dimension corner coverage, the same quantities the
+    // spec `expect` validator checks offline.
+    int spanned_axes = 0;
+    for (int axis = 0; axis < dimension; ++axis) {
+        const float first = examples.front().parameter[axis];
+        for (const pmg::ExampleMotion& example : examples) {
+            if (example.parameter[axis] != first) {
+                ++spanned_axes;
+                break;
+            }
+        }
+    }
+    constexpr int kMaxCornerDimension = 8;
+    int sampled_corners = 0;
+    int total_corners = 0;
+    if (dimension <= kMaxCornerDimension) {
+        total_corners = 1 << dimension;
+        for (int mask = 0; mask < total_corners; ++mask) {
+            bool found = false;
+            for (const pmg::ExampleMotion& example : examples) {
+                bool matches = true;
+                for (int axis = 0; axis < dimension; ++axis) {
+                    const float want = (mask & (1 << axis)) ? max_parameter[axis]
+                                                            : min_parameter[axis];
+                    if (example.parameter[axis] != want) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                ++sampled_corners;
+            }
+        }
+    }
+    if (total_corners > 0) {
+        ImGui::Text("%d samples \xc2\xb7 spans %d of %d axes \xc2\xb7 "
+                    "%d/%d box corners sampled",
+                    static_cast<int>(examples.size()), spanned_axes, dimension,
+                    sampled_corners, total_corners);
+    } else {
+        ImGui::Text("%d samples \xc2\xb7 spans %d of %d axes",
+                    static_cast<int>(examples.size()), spanned_axes, dimension);
+    }
+
+    const int x_axis = 0;
+    const int y_axis = dimension >= 2 ? 1 : -1;
+    if (dimension > 2) {
+        ImGui::TextDisabled("%d-D space; plotting axes 0 and 1.", dimension);
+    } else if (dimension == 1) {
+        ImGui::TextDisabled("1-D space; samples shown along the axis.");
+    }
+
+    const ImVec2 canvas_origin = ImGui::GetCursorScreenPos();
+    const float canvas_width =
+        std::max(ImGui::GetContentRegionAvail().x, 160.0f);
+    const float canvas_height = 240.0f;
+    ImGui::Dummy(ImVec2(canvas_width, canvas_height));
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddRectFilled(
+        canvas_origin,
+        ImVec2(canvas_origin.x + canvas_width, canvas_origin.y + canvas_height),
+        IM_COL32(18, 22, 30, 255));
+
+    const float pad = 40.0f;
+    const float left = canvas_origin.x + pad;
+    const float right = canvas_origin.x + canvas_width - pad;
+    const float top = canvas_origin.y + 24.0f;
+    const float bottom = canvas_origin.y + canvas_height - pad;
+
+    auto axis_bounds = [&](int axis, float& lo, float& hi) {
+        lo = (axis >= 0 && axis < static_cast<int>(min_parameter.size()))
+                 ? min_parameter[axis]
+                 : 0.0f;
+        hi = (axis >= 0 && axis < static_cast<int>(max_parameter.size()))
+                 ? max_parameter[axis]
+                 : 1.0f;
+    };
+    float x_lo = 0.0f;
+    float x_hi = 1.0f;
+    float y_lo = 0.0f;
+    float y_hi = 1.0f;
+    axis_bounds(x_axis, x_lo, x_hi);
+    if (y_axis >= 0) {
+        axis_bounds(y_axis, y_lo, y_hi);
+    }
+    // Display ranges pad zero-width axes so a single value still renders.
+    float x_view_lo = x_lo;
+    float x_view_hi = x_hi;
+    if (x_view_hi - x_view_lo < kEpsilon) {
+        x_view_lo -= 0.5f;
+        x_view_hi += 0.5f;
+    }
+    float y_view_lo = y_lo;
+    float y_view_hi = y_hi;
+    if (y_view_hi - y_view_lo < kEpsilon) {
+        y_view_lo -= 0.5f;
+        y_view_hi += 0.5f;
+    }
+    auto to_screen = [&](float value_x, float value_y) {
+        const float tx = (value_x - x_view_lo) / (x_view_hi - x_view_lo);
+        const float ty = (y_axis >= 0)
+                             ? (value_y - y_view_lo) / (y_view_hi - y_view_lo)
+                             : 0.5f;
+        return ImVec2(left + tx * (right - left), bottom - ty * (bottom - top));
+    };
+
+    // Parameter box (the example AABB).
+    draw_list->AddRect(to_screen(x_lo, y_lo), to_screen(x_hi, y_hi),
+                       IM_COL32(70, 110, 160, 200));
+
+    // Mark every box corner of the displayed axes; red ring where unsampled.
+    if (dimension >= 1) {
+        const float corner_x[2] = {x_lo, x_hi};
+        const float corner_y[2] = {y_lo, y_hi};
+        const int y_count = (y_axis >= 0) ? 2 : 1;
+        for (int ix = 0; ix < 2; ++ix) {
+            for (int iy = 0; iy < y_count; ++iy) {
+                bool sampled = false;
+                for (const pmg::ExampleMotion& example : examples) {
+                    const bool x_ok = example.parameter[x_axis] == corner_x[ix];
+                    const bool y_ok =
+                        (y_axis < 0) || example.parameter[y_axis] == corner_y[iy];
+                    if (x_ok && y_ok) {
+                        sampled = true;
+                        break;
+                    }
+                }
+                if (!sampled) {
+                    const ImVec2 p = to_screen(corner_x[ix], corner_y[iy]);
+                    draw_list->AddCircle(p, 9.0f, IM_COL32(235, 90, 110, 255),
+                                         0, 2.0f);
+                    draw_list->AddText(ImVec2(p.x + 8.0f, p.y - 16.0f),
+                                       IM_COL32(235, 90, 110, 255), "no sample");
+                }
+            }
+        }
+    }
+
+    // Example samples.
+    for (const pmg::ExampleMotion& example : examples) {
+        const float vx = example.parameter[x_axis];
+        const float vy = (y_axis >= 0) ? example.parameter[y_axis] : 0.0f;
+        const ImVec2 p = to_screen(vx, vy);
+        draw_list->AddCircleFilled(p, 5.0f, IM_COL32(120, 200, 255, 255));
+        draw_list->AddText(ImVec2(p.x + 7.0f, p.y - 6.0f),
+                           IM_COL32(200, 220, 240, 255),
+                           ShortClipLabel(example.clip.name).c_str());
+    }
+
+    // Axis labels.
+    draw_list->AddText(ImVec2(right - 36.0f, bottom + 6.0f),
+                       IM_COL32(150, 160, 175, 255), "axis 0");
+    if (y_axis >= 0) {
+        draw_list->AddText(ImVec2(canvas_origin.x + 4.0f, top - 18.0f),
+                           IM_COL32(150, 160, 175, 255), "axis 1");
+    }
+}
+
 void PmgViewerWorkspace::BuildGraphSection() {
     ImGui::Text("Current graph: %s", GraphOriginLabel());
     ImGui::SameLine();
@@ -1058,6 +1256,10 @@ void PmgViewerWorkspace::BuildGraphSection() {
     }
     if (ImGui::BeginTabItem("Quick self-edge")) {
         BuildGraphQuickTab();
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Coverage")) {
+        DrawParameterCoverage();
         ImGui::EndTabItem();
     }
 

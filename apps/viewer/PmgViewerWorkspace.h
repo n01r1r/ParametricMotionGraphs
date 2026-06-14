@@ -112,6 +112,12 @@ private:
     void BuildGraphQuickTab();
     void BuildGraphRuntimeTab();
     void DrawParameterSpace(int axis);
+    // 2-D scatter of a node's example parameters with the parameter-box corners,
+    // marking corners no example reaches. Makes a declared N-D space that is
+    // really a lower-dimensional simplex (e.g. the missing tight-jog corner)
+    // visible instead of implied. Mirrors the spec `expect corner_coverage`
+    // check in the viewer.
+    void DrawParameterCoverage();
     void DrawPhaseTimeline(float canonical_phase);
     void DrawGraphCanvas();
     void DrawTransitionPipeline();
