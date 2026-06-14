@@ -1,6 +1,6 @@
 # Walk/Jog Continuity and Control Audit
 
-Last updated: 2026-06-13.
+Last updated: 2026-06-14.
 
 ## Purpose
 
@@ -87,6 +87,62 @@ Nine frames help wide and middle turns and jog, but slightly worsen the tight
 turn. Distance magnitude also changes with window size, so all edge thresholds
 would need reproducible recalibration. The production window remains five
 frames until that full edge-quality sweep exists.
+
+## Transition-distance re-analysis (2026-06-14)
+
+A second pass grounded the jolt in the point-cloud transition distance `D` at
+the chosen optimal cell, measured with `--diagnose-graph-edge` over every
+`walk_jog` edge (proper end->start sub-range `[0.70,0.95]->[0.05,0.30]`):
+
+| Edge | T_GOOD | D (min, over source samples) | Reading |
+|---|---:|---|---|
+| walk -> walk | 1.5 | 0.46 (tight) .. 1.23 (wide) | wide anchor weakly periodic |
+| walk -> jog | 3.5 | 2.58 .. 3.23 | T raised to admit; gait gap |
+| jog -> walk | 3.5 | 2.90 .. 3.24 | same |
+| jog -> jog | 2.0 | 1.77 | single jog example, no self-blend |
+
+The jolt magnitude tracks `D`, and `D` tracks which BVH anchor is active: under
+one identical pipeline (same runtime, registration, range, blend) only the
+anchor clip changes, yet wide-turn `D` is 1.23 while tight-turn `D` is 0.46. The
+runtime is paper-faithful (`RuntimeController::TryScheduleTransition` centers the
+blend window on the optimal cell per PMG §5.2.1); the limiter is clip
+self-similarity, not code or registration smoothness. **All four edges are
+data-bound:** the wide-turn anchor's periodicity floor and the single-example
+`jog` node (which also forces T_GOOD up to 3.5 / 2.0 to admit its transitions).
+
+### Phase-range widening is a degenerate trap
+
+`edge_phase_range` (added to the spec format) makes the §6.3 search sub-range
+tunable, so the obvious idea -- widen it to find a lower-`D` cell -- is now
+testable. It does not help. Widening admits "transition to the same phase"
+cells: `D` falls but the character stops advancing.
+
+| walk->walk range | wide-anchor `D` | runtime median_step | transitions/20s | pop_ratio |
+|---|---:|---:|---:|---:|
+| `0.70-0.95 / 0.05-0.30` (default) | 1.23 | 0.403 | 33 | 1.66 |
+| `0.55-0.98 / 0.02-0.45` | 0.19 | 0.227 | 98 | 1.87 |
+| `0.50-1.0 / 0.0-0.5` | 0.0 | 0.366 | 21 | 3.06 |
+
+The collapsing `median_step` and exploding transition count confirm stutter in
+place. The default range is correct: it forces a genuine advancing end->start
+transition, so `D = 1.23` is the true periodicity cost of the wide anchor.
+
+### Anchor swap is a tradeoff, not a free win
+
+Replacing the wide-turn anchor `walkCurve` with `walkSpiral` (the only
+Group-B curvature candidate) lowers the proper-range `D` from 1.23 to 0.42, but
+`walkSpiral` has shorter steps and a different curvature, so runtime
+`median_step` drops 0.403 -> 0.271 and the normalized `pop_ratio` rises
+1.66 -> 1.83. Confirming the earlier caution, an anchor cannot be swapped on
+transition score alone; it changes the locomotion semantics and needs full
+turn-rate re-calibration. Left as a corpus-curation decision, not applied.
+
+### Conclusion
+
+The residual walk-loop jolt is a corpus periodicity limit (wide-turn anchor and
+single-example jog), not a runtime, registration, or config defect. The
+`edge_phase_range` plumbing is retained as a real conformance/tunability feature
+(§6.3) but is documented here as ineffective against this particular jolt.
 
 ## Paper Comparison
 

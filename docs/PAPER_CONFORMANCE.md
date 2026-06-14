@@ -53,13 +53,17 @@ the corpus has no skin mesh and the approximation holds on the included clips.
 | Enclose GOOD targets in an AABB, shrink to exclude BAD | ✓ | `ParameterAabb::ShrinkToExclude` | `src/PmgBuilder.cpp` |
 | Reject the edge if any source sample has no reachable box | ✓ | `BuildEdgeWithReport` | `include/pmg/PmgBuilder.h:77` |
 | Per-target transition phase (not a single scalar) | ✓ (D5) | `TargetTransitionPhaseSample` | `include/pmg/TransitionTypes.h` |
-| Restrict the transition search to a source-phase sub-range (§6.3) | ◐ | `DistanceGridConfig` defaults (source `[0.70, 0.95]`, target `[0.05, 0.30]`) | `include/pmg/PmgBuilder.h:31` |
+| Restrict the transition search to a source-phase sub-range (§6.3) | ✓ | `DistanceGridConfig` (default source `[0.70, 0.95]`, target `[0.05, 0.30]`), per-edge via `edge_phase_range` | `include/pmg/PmgBuilder.h:31`; `src/GraphSpec.cpp` |
 
-**Source-range restriction (◐).** The mechanism exists and is on by default,
-but the `.pmg_spec` `edge_config` line only exposes thresholds, sample counts,
-and seed (`include/pmg/GraphSpec.h:54`). The phase ranges and metric window
-size are hardwired builder defaults, not per-edge tunable. Making them
-spec-controllable is small, bounded plumbing.
+**Source-range restriction (✓).** The mechanism is on by default and now
+per-edge tunable: the `.pmg_spec` `edge_phase_range <source> <target>
+<src_start> <src_end> <tgt_start> <tgt_end>` line sets the search sub-range
+(the builder and `GraphIo` already consumed and serialized
+`DistanceGridConfig`'s phase fields). The metric window size stays a single
+global value by D4 (the runtime requires one blend window across all edges), so
+it is intentionally not per-edge. Widening the range is documented as
+*ineffective* against the wide-turn walk-loop jolt — it admits degenerate
+same-phase transitions; see `docs/WALK_JOG_CONTINUITY.md`.
 
 ## §5 — Runtime and control
 
@@ -106,16 +110,22 @@ not the PMG layer this project implements.
 
 ## What's left, in priority order
 
-1. **◐ Registration fidelity** — KG04 registration curves vs. the
-   contact-anchor + DTW approximation. Largest faithfulness gap; large effort,
-   low marginal payoff on this corpus.
-2. **◐ Spec-expose the distance-grid phase ranges and window size** — small
-   plumbing that makes the §6.3 source-range restriction tunable per edge.
-3. **◐ D6 metric exactness** — match Kovar's asymmetric window placement and
+1. **◐ Registration fidelity** — KG04's timewarp `s(u)` is implemented (DTW on
+   the point-cloud distance) as a piecewise-**linear** warp; the paper specifies
+   a strictly-increasing **spline**. A monotone (shape-preserving) cubic would
+   close it. Largest faithfulness gap; low marginal payoff on this corpus, and
+   independently confirmed *not* to be the cause of the walk-loop jolt.
+2. **◐ D6 metric exactness** — match Kovar's asymmetric window placement and
    unnormalized weighted sum if paper-comparable absolute distances are wanted.
    Low: does not change which transitions classify GOOD on this corpus.
-4. **○ Everything else** — out-of-scope boundaries, correctly excluded per the
+3. **○ Everything else** — out-of-scope boundaries, correctly excluded per the
    Claim Limit.
+
+Spec-exposing the distance-grid phase ranges (formerly item 2) landed via the
+`edge_phase_range` line; the metric window size stays one global value by D4.
+The wide-turn walk-loop jolt was diagnosed as a corpus periodicity limit
+(data-bound), not a code/registration/config gap — see
+`docs/WALK_JOG_CONTINUITY.md`.
 
 Multidimensional runtime control (formerly item 1) landed: the control layer
 now drives every node axis. The core algorithm is faithful and verified (37/37

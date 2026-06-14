@@ -79,6 +79,11 @@ stores the inversion table so requested parameters achieve their measured
 meaning. Generated clips also derive their length from the blended example
 durations, so cycle time follows the parameter.
 
+An optional `edge_phase_range <source> <target> <src_start> <src_end>
+<tgt_start> <tgt_end>` line restricts the transition search to a per-edge
+phase sub-range (paper §6.3); the default forces an advancing end→start
+transition (`[0.70, 0.95]→[0.05, 0.30]`).
+
 Multidimensional nodes declare one measured property per parameter axis:
 
 ```text
