@@ -31,15 +31,6 @@ const GraphSpecNode& FindSpecNode(const GraphSpec& spec, const std::string& name
     throw std::runtime_error("GraphSpec: unknown node '" + name + "'");
 }
 
-int FindNodeIndex(const ParametricMotionGraph& graph, const std::string& name) {
-    for (int index = 0; index < graph.NumNodes(); ++index) {
-        if (graph.Node(index).name == name) {
-            return index;
-        }
-    }
-    throw std::runtime_error("BuildGraphFromSpec: unknown graph node '" + name + "'");
-}
-
 std::string ResolveRelativePath(const std::filesystem::path& base_directory,
                                 const std::string& path_text) {
     const std::filesystem::path path(path_text);
@@ -429,49 +420,6 @@ GraphSpec LoadGraphSpec(const std::string& path) {
         }
     }
     return spec;
-}
-
-ParametricMotionGraph BuildGraphFromSpec(
-    const GraphSpec& spec,
-    const PmgBuilderConfig& builder_config,
-    float skeleton_offset_tolerance) {
-    MotionSpacePreparationConfig preparation_config;
-    preparation_config.calibration_frames_per_second =
-        builder_config.generated_frames_per_second;
-    preparation_config.skeleton_offset_tolerance =
-        skeleton_offset_tolerance;
-    const PreparedMotionSpaces prepared =
-        PrepareMotionSpaces(spec, preparation_config);
-
-    ParametricMotionGraph graph;
-    for (const GraphSpecNode& node : spec.nodes) {
-        graph.AddNode(node.name, prepared.Node(node.name).production);
-    }
-
-    for (const GraphSpecEdge& edge_spec : spec.edges) {
-        const int source_index = FindNodeIndex(graph, edge_spec.source_node);
-        const int target_index = FindNodeIndex(graph, edge_spec.target_node);
-        EdgeBuildResult edge_result = PmgBuilder::BuildEdgeWithReport(
-            prepared.skeleton,
-            source_index,
-            target_index,
-            graph.Node(source_index).motion_space,
-            graph.Node(target_index).motion_space,
-            builder_config);
-        // Paper: a graph is the set of edges that pass. A single
-        // transition-incompatible pair must not abort the whole build (this
-        // matches the viewer's tolerant build); rejected edges are skipped.
-        if (!edge_result.edge.samples.empty()) {
-            graph.AddEdge(std::move(edge_result.edge));
-        }
-    }
-
-    if (!spec.edges.empty() && graph.NumEdges() == 0) {
-        throw std::runtime_error(
-            "BuildGraphFromSpec: every declared edge was rejected; no "
-            "transitions built");
-    }
-    return graph;
 }
 
 BuiltPmgArtifact BuildPmgArtifactFromSpec(

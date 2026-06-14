@@ -150,12 +150,12 @@ int main() {
     config.good_transition_threshold = 1.0e9f;
     config.bad_transition_threshold = 2.0e9f;
 
-    const pmg::ParametricMotionGraph graph = pmg::BuildGraphFromSpec(parsed, config);
-    assert(graph.NumNodes() == 1);
-    assert(graph.NumEdges() == 1);
-    assert(graph.Node(0).motion_space.NumExamples() == 2);
-    assert(!graph.Edge(0).samples.empty());
-
+    // One build path defines what a spec means: BuildPmgArtifactFromSpec honors
+    // each edge's parsed edge_config (seed 99 and the spec's sample counts) and
+    // the graph is read back from the artifact. The former graph-only
+    // BuildGraphFromSpec shim ignored per-edge config and built a divergent
+    // graph from the same spec; it was removed so tests validate the graph
+    // production actually ships.
     pmg::ArtifactBuildConfig artifact_config;
     artifact_config.default_edge_config = config;
     artifact_config.default_contact_joints.clear();
@@ -163,7 +163,10 @@ int main() {
     const pmg::BuiltPmgArtifact artifact =
         pmg::BuildPmgArtifactFromSpec(parsed, artifact_config);
     assert(artifact.skeleton.NumJoints() > 0);
+    assert(artifact.graph.NumNodes() == 1);
     assert(artifact.graph.NumEdges() == 1);
+    assert(artifact.graph.Node(0).motion_space.NumExamples() == 2);
+    assert(!artifact.graph.Edge(0).samples.empty());
     assert(artifact.metadata.edge_builds[0].config.seed == 99);
 
     const std::filesystem::path invalid_spec_path =
