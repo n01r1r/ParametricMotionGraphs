@@ -283,6 +283,21 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
                                   kMarkerLineRadius));
         cylinder_mesh_.Draw();
     }
+
+    if (!is_depth_pass) {
+        for (const DiagnosticPoint& point : scene.diagnostic_points) {
+            set_object_color(point.color, 0);
+            set_model(glm::scale(
+                glm::translate(glm::mat4(1.0f), point.position),
+                glm::vec3(point.radius)));
+            sphere_mesh_.Draw();
+        }
+        for (const DiagnosticLine& line : scene.diagnostic_lines) {
+            set_object_color(line.color, 0);
+            set_model(BoneModelMatrix(line.start, line.end, line.radius));
+            cylinder_mesh_.Draw();
+        }
+    }
 }
 
 void SkeletonRenderer::RenderShadowPass(const RenderScene& scene,

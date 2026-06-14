@@ -79,6 +79,10 @@ private:
     pmg::Pose CurrentPose() const;
     const pmg::Skeleton& ActiveSkeleton() const;
     void RebuildScene(const pmg::Pose& pose);
+    void ResetRuntimeTrace();
+    void RecordRuntimeTracePoint(const pmg::Pose& pose);
+    void RecordTransitionMarker(
+        const pmg::RuntimeTransitionDiagnostics& transition);
 
     void AddCurrentClipToSpace(const pmg::ParameterVector& parameter);
     void RebuildPmgSpace();
@@ -249,6 +253,15 @@ private:
     std::optional<pmg::PointCloudAlignment> graph_alignment_;
     std::optional<pmg::RuntimeController> graph_controller_;
     bool graph_ready_ = false;
+    struct TransitionTraceMarker {
+        glm::vec2 root_position{0.0f};
+        int source_node = -1;
+        int target_node = -1;
+    };
+    std::vector<glm::vec2> graph_path_points_;
+    std::vector<TransitionTraceMarker> graph_transition_markers_;
+    bool show_graph_path_trail_ = true;
+    bool show_graph_transition_markers_ = true;
     GraphOrigin graph_origin_ = GraphOrigin::None;
     bool graph_open_runtime_tab_ = false;
     float graph_desired_parameter_ = 0.0f;

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -42,6 +43,19 @@ void DrawPhaseMarker(ImDrawList* draw_list, float phase, float left, float top,
 std::string ShortClipLabel(const std::string& name) {
     const std::size_t cut = name.find_last_of("/\\");
     return cut == std::string::npos ? name : name.substr(cut + 1);
+}
+
+std::string FrameList(const std::vector<int>& frames) {
+    std::ostringstream output;
+    output << '[';
+    for (std::size_t index = 0; index < frames.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << frames[index];
+    }
+    output << ']';
+    return output.str();
 }
 
 std::string MotionSpaceClipSummary(
@@ -227,6 +241,7 @@ void PmgViewerWorkspace::AdoptArtifact(
         graph_, *graph_alignment_, graph_runtime_config_);
     graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
     graph_ready_ = true;
+    ResetRuntimeTrace();
     graph_origin_ = origin;
     graph_open_runtime_tab_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
@@ -400,6 +415,7 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
 
     graph_ready_ = true;
+    ResetRuntimeTrace();
     graph_origin_ = origin;
     graph_open_runtime_tab_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
@@ -1395,6 +1411,17 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
         current_pose.root_position.z,
         root_heading_radians_ * 180.0f / pmg::kPi,
         actual_turn_rate_radians_per_second_);
+    ImGui::Checkbox("Path trail", &show_graph_path_trail_);
+    ImGui::SameLine();
+    ImGui::Checkbox(
+        "Transition markers", &show_graph_transition_markers_);
+    ImGui::SameLine();
+    if (ImGui::Button("Clear trace")) {
+        ResetRuntimeTrace();
+    }
+    ImGui::TextDisabled(
+        "%zu trail points | %zu transitions",
+        graph_path_points_.size(), graph_transition_markers_.size());
     DrawTransitionPipeline();
 
     ImGui::Separator();
@@ -1462,12 +1489,16 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     constexpr const char* kSourceParameterLabel = "SOURCE";
     constexpr const char* kReachableTargetLabel = "TARGET RANGE";
     constexpr const char* kTransitionPhasesLabel = "PHASES";
+    constexpr const char* kMetricSupportLabel = "METRIC SUPPORT";
+    constexpr const char* kRuntimeSupportLabel = "RUNTIME SUPPORT";
     constexpr const char* kAlignmentTransformLabel = "ALIGNMENT";
     constexpr const char* kRuntimeBlendWindowLabel = "BLEND";
     const float widest_label_width = std::max({
         ImGui::CalcTextSize(kSourceParameterLabel).x,
         ImGui::CalcTextSize(kReachableTargetLabel).x,
         ImGui::CalcTextSize(kTransitionPhasesLabel).x,
+        ImGui::CalcTextSize(kMetricSupportLabel).x,
+        ImGui::CalcTextSize(kRuntimeSupportLabel).x,
         ImGui::CalcTextSize(kAlignmentTransformLabel).x,
         ImGui::CalcTextSize(kRuntimeBlendWindowLabel).x,
     });
@@ -1552,6 +1583,81 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
             draw_list, target_phase, origin.x, origin.y + 2.0f,
             width, 12.0f, IM_COL32(245, 180, 65, 255));
         ImGui::InvisibleButton("##transition_phases", ImVec2(width, 20.0f));
+    }
+
+    ImGui::TextColored(
+        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
+        kMetricSupportLabel);
+    ImGui::SameLine(value_column_x);
+    if (active.has_value()) {
+        pmg::TransitionWindowConvention metric_convention =
+            pmg::TransitionWindowConvention::kKovarDirectional;
+        int metric_window_size =
+            graph_runtime_config_.transition_blend_frames;
+        if (source_artifact_.has_value()) {
+            const std::string& source_name =
+                graph_.Node(active->source_node).name;
+            const std::string& target_name =
+                graph_.Node(active->target_node).name;
+            for (const pmg::EdgeBuildMetadata& edge_build :
+                 source_artifact_->metadata.edge_builds) {
+                if (edge_build.source_node == source_name &&
+                    edge_build.target_node == target_name) {
+                    metric_convention =
+                        edge_build.config.transition_convention;
+                    metric_window_size =
+                        edge_build.config.distance_grid.window_size;
+                    break;
+                }
+            }
+        }
+        const pmg::MotionClip source_clip =
+            graph_.Node(active->source_node).motion_space.GenerateClip(
+                active->source_parameter, graph_fps_);
+        const pmg::MotionClip target_clip =
+            graph_.Node(active->target_node).motion_space.GenerateClip(
+                active->actual_target_parameter, graph_fps_);
+        const int source_reference_frame = static_cast<int>(std::lround(
+            active->source_transition_phase *
+            static_cast<float>(
+                std::max(1, source_clip.NumFrames() - 1))));
+        const int target_reference_frame = static_cast<int>(std::lround(
+            active->target_transition_phase *
+            static_cast<float>(
+                std::max(1, target_clip.NumFrames() - 1))));
+        const pmg::TransitionFrameWindows metric_windows =
+            pmg::ResolveTransitionFrameWindows(
+                source_clip.NumFrames(), target_clip.NumFrames(),
+                source_reference_frame, target_reference_frame,
+                metric_window_size, metric_convention);
+        const std::string source_frames =
+            FrameList(metric_windows.source.sampled_frames);
+        const std::string target_frames =
+            FrameList(metric_windows.target.sampled_frames);
+        ImGui::Text(
+            "%s  src %s  tgt %s",
+            pmg::TransitionWindowConventionName(metric_convention),
+            source_frames.c_str(), target_frames.c_str());
+    } else {
+        ImGui::TextDisabled("available during active transition");
+    }
+
+    ImGui::TextColored(
+        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
+        kRuntimeSupportLabel);
+    ImGui::SameLine(value_column_x);
+    if (active.has_value()) {
+        const std::string source_frames =
+            FrameList(active->runtime_windows.source.sampled_frames);
+        const std::string target_frames =
+            FrameList(active->runtime_windows.target.sampled_frames);
+        ImGui::Text(
+            "%s  src %s  tgt %s",
+            pmg::TransitionWindowConventionName(
+                active->transition_window_convention),
+            source_frames.c_str(), target_frames.c_str());
+    } else {
+        ImGui::TextDisabled("available during active transition");
     }
 
     ImGui::TextColored(

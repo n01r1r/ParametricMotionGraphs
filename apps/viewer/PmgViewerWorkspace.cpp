@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
@@ -28,8 +29,26 @@ constexpr float kEpsilon = 1.0e-6f;
 constexpr float kParameterCanvasHeight = 88.0f;
 constexpr float kPhaseRowHeight = 26.0f;
 constexpr int kSteeringCurveSamples = 24;  // turn-rate plot resolution
+constexpr std::size_t kMaxRuntimePathPoints = 600;
+constexpr std::size_t kMaxTransitionMarkers = 128;
+constexpr float kMinimumTracePointDistance = 0.01f;
 
 glm::vec3 ToGlm(const pmg::Vec3& v) { return glm::vec3(v.x, v.y, v.z); }
+
+glm::vec3 TransitionMarkerColor(int source_node, int target_node) {
+    const std::array<glm::vec3, 6> kEdgeColors = {
+        glm::vec3(0.94f, 0.45f, 0.14f),
+        glm::vec3(0.86f, 0.23f, 0.45f),
+        glm::vec3(0.61f, 0.35f, 0.89f),
+        glm::vec3(0.13f, 0.65f, 0.82f),
+        glm::vec3(0.18f, 0.72f, 0.45f),
+        glm::vec3(0.93f, 0.72f, 0.17f),
+    };
+    const int edge_key = source_node * 31 + target_node;
+    const std::size_t edge_index =
+        static_cast<std::size_t>(std::abs(edge_key));
+    return kEdgeColors[edge_index % kEdgeColors.size()];
+}
 
 float NormalizedPhase(float time_seconds, float duration_seconds) {
     if (duration_seconds <= kEpsilon) {
@@ -294,6 +313,52 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     // (native target back into display space, same transform as the root).
     scene_.marker_points.clear();
     scene_.marker_lines.clear();
+    scene_.diagnostic_points.clear();
+    scene_.diagnostic_lines.clear();
+
+    if (GraphRuntimeActive() && show_graph_path_trail_ &&
+        graph_path_points_.size() >= 2) {
+        constexpr glm::vec3 kPathTrailColor(0.10f, 0.70f, 0.95f);
+        const float trail_height = 0.05f * display_scale_;
+        const float trail_radius = 0.012f * display_scale_;
+        for (std::size_t index = 1; index < graph_path_points_.size();
+             ++index) {
+            const glm::vec2& previous = graph_path_points_[index - 1];
+            const glm::vec2& current = graph_path_points_[index];
+            scene_.diagnostic_lines.push_back({
+                glm::vec3(previous.x * display_scale_, trail_height,
+                          previous.y * display_scale_),
+                glm::vec3(current.x * display_scale_, trail_height,
+                          current.y * display_scale_),
+                kPathTrailColor,
+                trail_radius,
+            });
+        }
+    }
+
+    if (GraphRuntimeActive() && show_graph_transition_markers_) {
+        const float marker_height = 0.25f * display_scale_;
+        const float marker_radius = 0.045f * display_scale_;
+        const float line_radius = 0.01f * display_scale_;
+        for (const TransitionTraceMarker& marker :
+             graph_transition_markers_) {
+            const glm::vec3 color =
+                TransitionMarkerColor(marker.source_node, marker.target_node);
+            const glm::vec3 ground_position(
+                marker.root_position.x * display_scale_,
+                0.08f * display_scale_,
+                marker.root_position.y * display_scale_);
+            scene_.diagnostic_points.push_back(
+                {ground_position, color, marker_radius});
+            scene_.diagnostic_lines.push_back({
+                ground_position,
+                ground_position + glm::vec3(0.0f, marker_height, 0.0f),
+                color,
+                line_radius,
+            });
+        }
+    }
+
     if (goto_active_ && GraphRuntimeActive()) {
         const glm::vec3 base(goto_target_.x * display_scale_, 0.0f,
                              goto_target_.y * display_scale_);
@@ -303,6 +368,50 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     }
 
     scene_.focus_point = centroid;
+}
+
+void PmgViewerWorkspace::ResetRuntimeTrace() {
+    graph_path_points_.clear();
+    graph_transition_markers_.clear();
+    if (graph_controller_.has_value()) {
+        RecordRuntimeTracePoint(graph_controller_->CurrentPose());
+    }
+}
+
+void PmgViewerWorkspace::RecordRuntimeTracePoint(const pmg::Pose& pose) {
+    if (!graph_ready_) {
+        return;
+    }
+    const glm::vec2 root_position(
+        pose.root_position.x, pose.root_position.z);
+    if (!graph_path_points_.empty()) {
+        const glm::vec2 delta = root_position - graph_path_points_.back();
+        if (glm::dot(delta, delta) <
+            kMinimumTracePointDistance * kMinimumTracePointDistance) {
+            return;
+        }
+    }
+    graph_path_points_.push_back(root_position);
+    if (graph_path_points_.size() > kMaxRuntimePathPoints) {
+        graph_path_points_.erase(graph_path_points_.begin());
+    }
+}
+
+void PmgViewerWorkspace::RecordTransitionMarker(
+    const pmg::RuntimeTransitionDiagnostics& transition) {
+    if (!graph_controller_.has_value()) {
+        return;
+    }
+    const pmg::Pose pose = graph_controller_->CurrentPose();
+    graph_transition_markers_.push_back({
+        glm::vec2(pose.root_position.x, pose.root_position.z),
+        transition.source_node,
+        transition.target_node,
+    });
+    if (graph_transition_markers_.size() > kMaxTransitionMarkers) {
+        graph_transition_markers_.erase(
+            graph_transition_markers_.begin());
+    }
 }
 
 // --- Goto steering (viewer port of CLI --goto) ------------------------------
@@ -414,6 +523,8 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
     // Graph runtime: drive the RuntimeController and render its streamed pose.
     if (GraphRuntimeActive()) {
         if (playing_) {
+            const bool was_transitioning =
+                graph_controller_->IsTransitioning();
             if (goto_active_ && steering_.has_value()) {
                 UpdateGotoSteering(graph_controller_->CurrentPose());
             }
@@ -431,8 +542,17 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
                     ? goto_desired_parameter_
                     : DesiredParameterForNode(graph_desired_node_);
             graph_controller_->Update(delta_seconds * playback_speed_, request);
+            if (!was_transitioning &&
+                graph_controller_->IsTransitioning()) {
+                const auto transition =
+                    graph_controller_->ActiveTransitionDiagnostics();
+                if (transition.has_value()) {
+                    RecordTransitionMarker(*transition);
+                }
+            }
         }
         const pmg::Pose pose = graph_controller_->CurrentPose();
+        RecordRuntimeTracePoint(pose);
         UpdateRootMotionDiagnostics(
             pose, playing_ ? delta_seconds * playback_speed_ : 0.0f);
         RebuildScene(pose);
@@ -852,6 +972,7 @@ void PmgViewerWorkspace::BuildTransportSection() {
         if (ImGui::Button("Restart graph")) {
             graph_controller_->Start(graph_controller_->CurrentNode(),
                                      graph_controller_->CurrentParameter(), graph_fps_);
+            ResetRuntimeTrace();
         }
     }
 
