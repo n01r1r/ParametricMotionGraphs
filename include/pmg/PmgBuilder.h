@@ -37,6 +37,14 @@ struct PmgBuilderConfig {
         /*target_phase_end=*/0.30f,
         /*weighting=*/{},
     };
+    // Window convention for the transition METRIC (paper §3.1). PMG reuses
+    // Kovar's distance metric, whose windows are directional: source [i, i+k-1],
+    // target [j-k+1, j]. This asymmetry aligns the end->start concatenation seam
+    // and the repo's calibrated phase sub-ranges/thresholds depend on it, so the
+    // metric stays directional. (PMG's "centered" is a runtime BLEND-placement
+    // choice, separate from the metric; see RuntimeControllerConfig::convention.)
+    TransitionWindowConvention transition_convention =
+        TransitionWindowConvention::kKovarDirectional;
 };
 
 struct SourceSampleBuildReport {

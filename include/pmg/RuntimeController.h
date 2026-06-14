@@ -21,6 +21,15 @@ struct RuntimeControllerConfig {
     // window_size the edges were built with (callers wire it from the
     // artifact's edge build settings; the default matches that config).
     int transition_blend_frames = 5;
+    // Runtime BLEND placement around the stored optimal transition point.
+    // kPmgCentered (paper §5.2.1, "blending window centered at the optimal
+    // transition point") gates half a window early so the optimal point gets
+    // maximum blend weight; kKovarDirectional places the blend forward from the
+    // point. This is independent of the metric window convention
+    // (PmgBuilderConfig::transition_convention) -- PMG locates the transition
+    // with Kovar's directional metric, then centers the blend on it.
+    TransitionWindowConvention convention =
+        TransitionWindowConvention::kPmgCentered;
 };
 
 // Read-only snapshot of the transition currently being blended.

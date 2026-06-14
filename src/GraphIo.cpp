@@ -24,16 +24,18 @@ struct GraphPayloadFormat {
     bool has_vector_calibration;     // V7+ store multidimensional calibration
     bool has_target_phase_samples;   // V6+ store per-target transition phases
     bool quoted_names;               // V4+ quote node/clip/joint names
+    bool has_transition_convention;  // V8+ store the edge transition-window convention
 };
 
 std::optional<GraphPayloadFormat> FormatForHeader(const std::string& header) {
-    //                                       meta+skel warp  calib vector target quoted
-    if (header == "PMG_GRAPH_V7") return GraphPayloadFormat{true,  true,  true,  true,  true,  true};
-    if (header == "PMG_GRAPH_V6") return GraphPayloadFormat{true,  true,  true,  false, true,  true};
-    if (header == "PMG_GRAPH_V5") return GraphPayloadFormat{true,  true,  true,  false, false, true};
-    if (header == "PMG_GRAPH_V4") return GraphPayloadFormat{true,  true,  false, false, false, true};
-    if (header == "PMG_GRAPH_V3") return GraphPayloadFormat{false, true,  false, false, false, false};
-    if (header == "PMG_GRAPH_V2") return GraphPayloadFormat{false, false, false, false, false, false};
+    //                                       meta+skel warp  calib vector target quoted conv
+    if (header == "PMG_GRAPH_V8") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true};
+    if (header == "PMG_GRAPH_V7") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false};
+    if (header == "PMG_GRAPH_V6") return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false};
+    if (header == "PMG_GRAPH_V5") return GraphPayloadFormat{true,  true,  true,  false, false, true,  false};
+    if (header == "PMG_GRAPH_V4") return GraphPayloadFormat{true,  true,  false, false, false, true,  false};
+    if (header == "PMG_GRAPH_V3") return GraphPayloadFormat{false, true,  false, false, false, false, false};
+    if (header == "PMG_GRAPH_V2") return GraphPayloadFormat{false, false, false, false, false, false, false};
     return std::nullopt;
 }
 
@@ -152,10 +154,12 @@ void WriteBuilderConfig(std::ostream& output, const PmgBuilderConfig& config) {
            << grid.window_size << ' ' << grid.source_frame_stride << ' '
            << grid.target_frame_stride << ' ' << grid.source_phase_start << ' '
            << grid.source_phase_end << ' ' << grid.target_phase_start << ' '
-           << grid.target_phase_end;
+           << grid.target_phase_end << ' '
+           << static_cast<int>(config.transition_convention);
 }
 
-PmgBuilderConfig ReadBuilderConfig(std::istream& input) {
+PmgBuilderConfig ReadBuilderConfig(
+    std::istream& input, const GraphPayloadFormat& format) {
     PmgBuilderConfig config;
     int include_examples = 0;
     DistanceGridConfig& grid = config.distance_grid;
@@ -167,6 +171,18 @@ PmgBuilderConfig ReadBuilderConfig(std::istream& input) {
           >> grid.target_frame_stride >> grid.source_phase_start
           >> grid.source_phase_end >> grid.target_phase_start
           >> grid.target_phase_end;
+    if (format.has_transition_convention) {
+        int convention_value = 0;
+        input >> convention_value;
+        config.transition_convention =
+            static_cast<TransitionWindowConvention>(convention_value);
+    } else {
+        // Pre-V8 artifacts were built with the Kovar directional window; pin
+        // legacy semantics explicitly so the centered default does not silently
+        // reinterpret them.
+        config.transition_convention =
+            TransitionWindowConvention::kKovarDirectional;
+    }
     if (!input) {
         throw std::runtime_error(
             "LoadPmgArtifactText: invalid edge builder configuration");
@@ -652,7 +668,8 @@ void WriteMetadata(std::ostream& output, const PmgArtifactMetadata& metadata) {
     }
 }
 
-PmgArtifactMetadata ReadMetadata(std::istream& input) {
+PmgArtifactMetadata ReadMetadata(
+    std::istream& input, const GraphPayloadFormat& format) {
     std::string keyword;
     PmgArtifactMetadata metadata;
     input >> keyword >> metadata.generated_frame_count
@@ -719,7 +736,7 @@ PmgArtifactMetadata ReadMetadata(std::istream& input) {
             throw std::runtime_error(
                 "LoadPmgArtifactText: invalid edge_build record");
         }
-        edge.config = ReadBuilderConfig(input);
+        edge.config = ReadBuilderConfig(input, format);
         input >> edge_created >> std::quoted(edge.report.reject_reason)
               >> source_report_count;
         edge.report.edge_created = edge_created != 0;
@@ -757,7 +774,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V7\n";
+    output << "PMG_GRAPH_V8\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
@@ -775,12 +792,12 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     const std::optional<GraphPayloadFormat> format = FormatForHeader(header);
     if (!format) {
         throw std::runtime_error(
-            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V7");
+            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V8");
     }
 
     BuiltPmgArtifact artifact;
     if (format->has_metadata_and_skeleton) {
-        artifact.metadata = ReadMetadata(input);
+        artifact.metadata = ReadMetadata(input, *format);
         artifact.skeleton = ReadSkeleton(input);
     }
     artifact.graph = ReadGraphPayload(input, *format);

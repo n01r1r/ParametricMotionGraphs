@@ -172,9 +172,11 @@ int main() {
             assert(
                 diagnostics->runtime_windows
                     .target.sampled_frames.size() == 5);
+            // Default runtime blend placement is PMG centered (§5.2.1): the
+            // blend window is centered on the stored optimal transition point.
             assert(
                 diagnostics->transition_window_convention ==
-                pmg::TransitionWindowConvention::kKovarDirectional);
+                pmg::TransitionWindowConvention::kPmgCentered);
 
             const int source_reference_frame = static_cast<int>(std::lround(
                 diagnostics->source_transition_phase *
@@ -182,18 +184,18 @@ int main() {
             const int target_reference_frame = static_cast<int>(std::lround(
                 diagnostics->target_transition_phase *
                 static_cast<float>(kRuntimeFrameCount - 1)));
-            const pmg::TransitionFrameWindows directional_windows =
+            const pmg::TransitionFrameWindows expected_windows =
                 pmg::ResolveTransitionFrameWindows(
                     kRuntimeFrameCount, kRuntimeFrameCount,
                     source_reference_frame, target_reference_frame,
                     /*window_size=*/5,
-                    pmg::TransitionWindowConvention::kKovarDirectional);
+                    pmg::TransitionWindowConvention::kPmgCentered);
             assert(
                 diagnostics->runtime_windows.source.sampled_frames ==
-                directional_windows.source.sampled_frames);
+                expected_windows.source.sampled_frames);
             assert(
                 diagnostics->runtime_windows.target.sampled_frames ==
-                directional_windows.target.sampled_frames);
+                expected_windows.target.sampled_frames);
             observed_transition_diagnostics = true;
         } else {
             assert(!controller.ActiveTransitionDiagnostics().has_value());
@@ -208,10 +210,16 @@ int main() {
     assert(controller.CompletedTransitions() >= 2);
     assert(observed_transition_diagnostics);
 
-    // Directional contract: stored source phase is the first blend frame.
-    // Runtime scheduling may land at most one sampled frame after that gate.
-    assert(first_transition_phase >= source_phase_gate - 1.0e-4f);
-    assert(first_transition_phase <= source_phase_gate + 0.05f);
+    // PMG centered blend (§5.2.1): the blend window is centered on the stored
+    // optimal transition point, so scheduling gates about half a window before
+    // it (then lands within one sampled frame of that gate).
+    const int kHalfWindow = 5 / 2;  // default transition_blend_frames / 2
+    const float half_window_phase =
+        static_cast<float>(kHalfWindow) /
+        static_cast<float>(kRuntimeFrameCount - 1);
+    const float centered_gate = source_phase_gate - half_window_phase;
+    assert(first_transition_phase >= centered_gate - 1.0e-4f);
+    assert(first_transition_phase <= centered_gate + 0.05f);
 
     // Root trajectory is continuous: no per-frame jump far above the typical step.
     float total_step = 0.0f;

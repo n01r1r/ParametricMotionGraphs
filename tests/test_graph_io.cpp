@@ -253,7 +253,7 @@ int main() {
         std::ifstream input(path);
         std::string header;
         input >> header;
-        assert(header == "PMG_GRAPH_V7");
+        assert(header == "PMG_GRAPH_V8");
     }
     const pmg::BuiltPmgArtifact loaded =
         pmg::LoadPmgArtifactText(path.string());
