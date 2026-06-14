@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pmg/ParametricMotionGraph.h"
+#include "pmg/ParametricMotionSpace.h"
 #include "pmg/RuntimeController.h"
 #include "pmg/Skeleton.h"
 
@@ -20,13 +21,29 @@ struct SteeringCalibrationConfig {
     float minimum_rate_range = 1.0e-4f;
 };
 
+// One node parameter axis, calibrated as a sampled inverse map from the
+// achieved runtime metric back to the axis value. The turn_rate axis steers
+// heading; travel_speed axes set forward pace.
+struct SteeringAxis {
+    ParameterMetric metric = ParameterMetric::kNone;
+    std::vector<float> parameters;       // sampled axis values
+    std::vector<float> achieved_metric;  // achieved runtime metric per sample
+    float lowest = 0.0f;                 // min achieved metric over the sweep
+    float highest = 0.0f;                // max achieved metric over the sweep
+};
+
+// Per-axis steering calibration for one node. Measures achieved runtime metrics
+// rather than assuming authored clip behavior equals streamed graph behavior.
 struct SteeringCalibration {
-    std::vector<float> parameters;
-    std::vector<float> achieved_turn_rates;
-    float lowest_rate = 0.0f;
-    float highest_rate = 0.0f;
+    std::vector<SteeringAxis> axes;  // one entry per node parameter axis
+    int heading_axis = -1;           // axis whose metric is kTurnRate
     float travel_heading_offset = 0.0f;
     float cycle_seconds = 1.0f;
+
+    // Heading (turn_rate) axis convenience accessors.
+    const SteeringAxis& HeadingAxis() const;
+    float LowestRate() const;   // HeadingAxis().lowest
+    float HighestRate() const;  // HeadingAxis().highest
 };
 
 struct GoalRequest {
@@ -40,11 +57,21 @@ struct GoalDirectedLocomotionConfig {
     float swing_enter_error_radians = 0.5f;
     float swing_exit_error_radians = 0.2f;
     float orientation_blend_distance = 5.0f;
+    // Travel-speed axes cruise at their fastest achievable pace until within
+    // this floor distance of the goal, then ease toward their slowest so the
+    // controller settles onto the target instead of overshooting it.
+    float arrival_speed_distance = 3.0f;
+    // Optional per-axis metric override (size must equal the node dimension).
+    // Empty = read from the node's parameter calibration; a 1-D node with no
+    // calibration defaults to a single turn_rate axis.
+    std::vector<ParameterMetric> axis_metrics;
 };
 
-// Maps semantic locomotion goals to the one-dimensional parameter of a
-// registered PMG node. Calibration measures achieved runtime turn rates rather
-// than assuming authored clip curvature equals streamed graph behavior.
+// Maps semantic locomotion goals to the parameter vector of a registered PMG
+// node. Drives every declared axis: the turn_rate axis tracks the goal heading
+// (with a swing-through branch for targets behind), and travel_speed axes cruise
+// at their fastest achievable pace and ease in on arrival. Reduces exactly to
+// the prior single-axis steering for a one-dimensional turn_rate node.
 class GoalDirectedLocomotion {
 public:
     GoalDirectedLocomotion(
@@ -65,8 +92,14 @@ public:
     void Reset();
 
 private:
-    float MeasureAchievedTurnRate(float parameter) const;
-    float ParameterForRate(float desired_rate) const;
+    // Streams the graph at a held parameter and measures the achieved runtime
+    // metric (turn_rate or travel_speed) over the calibration window.
+    float MeasureAchievedMetric(
+        const ParameterVector& parameter, ParameterMetric metric) const;
+    // Piecewise-linear inversion of one axis's sampled (achieved metric -> axis
+    // value) map, clamped to the measured metric range.
+    float AxisValueForMetric(int axis, float desired_metric) const;
+    ParameterVector DomainMidpoint() const;
 
     const ParametricMotionGraph& graph_;
     const Skeleton& skeleton_;

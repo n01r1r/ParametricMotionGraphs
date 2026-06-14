@@ -260,6 +260,15 @@ if(PMG_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature_speed.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg)
 
+    # Multidimensional goal-directed control: the 2-D (turn_rate, travel_speed)
+    # node must stream end-to-end through --goto, steering both axes. Report-only
+    # (no reach assertion) since the categorical jog anchor is not a controllable
+    # arrival gait; this guards the N-D control path against regressions/crashes.
+    add_test(NAME cli_goto_walk_2d
+        COMMAND pmg_cli --goto
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature_speed.pmg_spec 10 10
+            --seconds 20 --max-pop-ratio 8.0)
+
     # Diagnose must honor the spec's per-edge edge_config: walk->jog needs
     # TGOOD=3.5, so default 0.5 would falsely report a reject (exit 1).
     add_test(NAME cli_diagnose_walk_jog_edge

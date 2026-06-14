@@ -49,6 +49,54 @@ float EstimateTravelHeadingOffset(const MotionClip& clip) {
     return std::atan2(weighted_sine, weighted_cosine);
 }
 
+const SteeringAxis& SteeringCalibration::HeadingAxis() const {
+    if (heading_axis < 0 ||
+        heading_axis >= static_cast<int>(axes.size())) {
+        throw std::runtime_error(
+            "SteeringCalibration: no heading (turn_rate) axis");
+    }
+    return axes[static_cast<std::size_t>(heading_axis)];
+}
+
+float SteeringCalibration::LowestRate() const {
+    return HeadingAxis().lowest;
+}
+
+float SteeringCalibration::HighestRate() const {
+    return HeadingAxis().highest;
+}
+
+namespace {
+
+// Resolves one ParameterMetric per axis: explicit config override, else the
+// node's parameter calibration, else a one-dimensional turn_rate default.
+std::vector<ParameterMetric> ResolveAxisMetrics(
+    const ParametricMotionSpace& space,
+    const std::vector<ParameterMetric>& override_metrics) {
+    const int dimension = space.ParameterDimension();
+    if (!override_metrics.empty()) {
+        if (static_cast<int>(override_metrics.size()) != dimension) {
+            throw std::runtime_error(
+                "GoalDirectedLocomotion: axis_metrics size must match the node "
+                "parameter dimension");
+        }
+        return override_metrics;
+    }
+    if (space.HasParameterCalibration() &&
+        static_cast<int>(space.ParameterCalibrationData().metrics.size()) ==
+            dimension) {
+        return space.ParameterCalibrationData().metrics;
+    }
+    if (dimension == 1) {
+        return {ParameterMetric::kTurnRate};
+    }
+    throw std::runtime_error(
+        "GoalDirectedLocomotion: multidimensional node needs declared "
+        "parameter metrics to steer");
+}
+
+}  // namespace
+
 GoalDirectedLocomotion::GoalDirectedLocomotion(
     const ParametricMotionGraph& graph,
     const Skeleton& skeleton,
@@ -61,9 +109,10 @@ GoalDirectedLocomotion::GoalDirectedLocomotion(
       frames_per_second_(frames_per_second),
       config_(config) {
     const ParametricMotionSpace& space = graph_.Node(node_index_).motion_space;
-    if (space.ParameterDimension() != 1) {
+    const int dimension = space.ParameterDimension();
+    if (dimension < 1) {
         throw std::runtime_error(
-            "GoalDirectedLocomotion: node must have one parameter");
+            "GoalDirectedLocomotion: node has no parameter axis");
     }
     if (frames_per_second_ <= 0.0f) {
         throw std::runtime_error(
@@ -71,101 +120,169 @@ GoalDirectedLocomotion::GoalDirectedLocomotion(
     }
     if (config_.calibration.sample_count < 2 ||
         config_.calibration.sample_seconds <= 0.0f ||
-        config_.orientation_blend_distance <= 0.0f) {
+        config_.orientation_blend_distance <= 0.0f ||
+        config_.arrival_speed_distance <= 0.0f) {
         throw std::runtime_error(
             "GoalDirectedLocomotion: invalid calibration/control settings");
     }
 
-    const float parameter_min = space.MinParameter().front();
-    const float parameter_max = space.MaxParameter().front();
-    for (int sample = 0; sample < config_.calibration.sample_count; ++sample) {
-        const float alpha = static_cast<float>(sample) /
-                            static_cast<float>(
-                                config_.calibration.sample_count - 1);
-        const float parameter =
-            parameter_min + alpha * (parameter_max - parameter_min);
-        calibration_.parameters.push_back(parameter);
-        calibration_.achieved_turn_rates.push_back(
-            MeasureAchievedTurnRate(parameter));
+    const std::vector<ParameterMetric> metrics =
+        ResolveAxisMetrics(space, config_.axis_metrics);
+    calibration_.heading_axis = -1;
+    for (int axis = 0; axis < dimension; ++axis) {
+        if (metrics[static_cast<std::size_t>(axis)] ==
+            ParameterMetric::kTurnRate) {
+            calibration_.heading_axis = axis;
+            break;
+        }
     }
-    calibration_.lowest_rate = *std::min_element(
-        calibration_.achieved_turn_rates.begin(),
-        calibration_.achieved_turn_rates.end());
-    calibration_.highest_rate = *std::max_element(
-        calibration_.achieved_turn_rates.begin(),
-        calibration_.achieved_turn_rates.end());
-    if (calibration_.highest_rate - calibration_.lowest_rate <
+    if (calibration_.heading_axis < 0) {
+        throw std::runtime_error(
+            "GoalDirectedLocomotion: node needs a turn_rate axis to steer "
+            "heading");
+    }
+
+    const std::vector<float> parameter_min = space.MinParameter();
+    const std::vector<float> parameter_max = space.MaxParameter();
+    const ParameterVector midpoint = DomainMidpoint();
+    calibration_.axes.resize(static_cast<std::size_t>(dimension));
+    for (int axis = 0; axis < dimension; ++axis) {
+        SteeringAxis& axis_calibration =
+            calibration_.axes[static_cast<std::size_t>(axis)];
+        axis_calibration.metric = metrics[static_cast<std::size_t>(axis)];
+        for (int sample = 0; sample < config_.calibration.sample_count;
+             ++sample) {
+            const float alpha =
+                static_cast<float>(sample) /
+                static_cast<float>(config_.calibration.sample_count - 1);
+            const float value =
+                parameter_min[static_cast<std::size_t>(axis)] +
+                alpha * (parameter_max[static_cast<std::size_t>(axis)] -
+                         parameter_min[static_cast<std::size_t>(axis)]);
+            ParameterVector held = midpoint;
+            held[static_cast<std::size_t>(axis)] = value;
+            axis_calibration.parameters.push_back(value);
+            axis_calibration.achieved_metric.push_back(
+                axis_calibration.metric == ParameterMetric::kNone
+                    ? 0.0f
+                    : MeasureAchievedMetric(held, axis_calibration.metric));
+        }
+        axis_calibration.lowest = *std::min_element(
+            axis_calibration.achieved_metric.begin(),
+            axis_calibration.achieved_metric.end());
+        axis_calibration.highest = *std::max_element(
+            axis_calibration.achieved_metric.begin(),
+            axis_calibration.achieved_metric.end());
+    }
+
+    const SteeringAxis& heading = calibration_.HeadingAxis();
+    if (heading.highest - heading.lowest <
         config_.calibration.minimum_rate_range) {
         throw std::runtime_error(
             "GoalDirectedLocomotion: node has no achievable turn-rate variation");
     }
     calibration_.travel_heading_offset =
         EstimateTravelHeadingOffset(space.Examples().front().clip);
-    // Cycle time now follows the blended example durations (D2); use the
-    // domain midpoint as the representative steering cadence.
+    // Cycle time follows the blended example durations (D2); use the domain
+    // midpoint as the representative steering cadence.
     calibration_.cycle_seconds = std::max(
-        1.0f / frames_per_second_,
-        space.BlendedDurationSeconds(
-            {0.5f * (parameter_min + parameter_max)}));
+        1.0f / frames_per_second_, space.BlendedDurationSeconds(midpoint));
 }
 
 const SteeringCalibration& GoalDirectedLocomotion::Calibration() const {
     return calibration_;
 }
 
-float GoalDirectedLocomotion::MeasureAchievedTurnRate(float parameter) const {
+ParameterVector GoalDirectedLocomotion::DomainMidpoint() const {
+    const ParametricMotionSpace& space = graph_.Node(node_index_).motion_space;
+    const std::vector<float> parameter_min = space.MinParameter();
+    const std::vector<float> parameter_max = space.MaxParameter();
+    ParameterVector midpoint(parameter_min.size(), 0.0f);
+    for (std::size_t axis = 0; axis < parameter_min.size(); ++axis) {
+        midpoint[axis] = 0.5f * (parameter_min[axis] + parameter_max[axis]);
+    }
+    return midpoint;
+}
+
+float GoalDirectedLocomotion::MeasureAchievedMetric(
+    const ParameterVector& parameter, ParameterMetric metric) const {
     PointCloudAlignment alignment(
         skeleton_, config_.runtime.transition_blend_frames);
     RuntimeController controller(graph_, alignment, config_.runtime);
-    controller.Start(node_index_, {parameter}, frames_per_second_);
+    controller.Start(node_index_, parameter, frames_per_second_);
 
     RuntimeControlRequest request;
     request.desired_node = node_index_;
-    request.desired_parameter = {parameter};
+    request.desired_parameter = parameter;
 
     const float delta_seconds = 1.0f / frames_per_second_;
     const int frame_count = std::max(
         1, static_cast<int>(
                config_.calibration.sample_seconds * frames_per_second_));
-    float unwrapped_heading = 0.0f;
-    float previous_heading = PoseFacingYaw(controller.CurrentPose());
-    for (int frame = 0; frame < frame_count; ++frame) {
-        controller.Update(delta_seconds, request);
-        const float heading = PoseFacingYaw(controller.CurrentPose());
-        unwrapped_heading +=
-            WrapAngleRadians(heading - previous_heading);
-        previous_heading = heading;
+
+    if (metric == ParameterMetric::kTurnRate) {
+        float unwrapped_heading = 0.0f;
+        float previous_heading = PoseFacingYaw(controller.CurrentPose());
+        for (int frame = 0; frame < frame_count; ++frame) {
+            controller.Update(delta_seconds, request);
+            const float heading = PoseFacingYaw(controller.CurrentPose());
+            unwrapped_heading += WrapAngleRadians(heading - previous_heading);
+            previous_heading = heading;
+        }
+        return unwrapped_heading /
+               (static_cast<float>(frame_count) * delta_seconds);
     }
-    return unwrapped_heading /
-           (static_cast<float>(frame_count) * delta_seconds);
+    if (metric == ParameterMetric::kTravelSpeed) {
+        float floor_distance = 0.0f;
+        Pose previous_pose = controller.CurrentPose();
+        for (int frame = 0; frame < frame_count; ++frame) {
+            controller.Update(delta_seconds, request);
+            const Pose pose = controller.CurrentPose();
+            const float step_x =
+                pose.root_position.x - previous_pose.root_position.x;
+            const float step_z =
+                pose.root_position.z - previous_pose.root_position.z;
+            floor_distance += std::sqrt(step_x * step_x + step_z * step_z);
+            previous_pose = pose;
+        }
+        return floor_distance /
+               (static_cast<float>(frame_count) * delta_seconds);
+    }
+    throw std::runtime_error(
+        "GoalDirectedLocomotion::MeasureAchievedMetric: unsupported metric");
 }
 
-float GoalDirectedLocomotion::ParameterForRate(float desired_rate) const {
-    const float clamped_rate = std::clamp(
-        desired_rate, calibration_.lowest_rate, calibration_.highest_rate);
+float GoalDirectedLocomotion::AxisValueForMetric(
+    int axis, float desired_metric) const {
+    const SteeringAxis& axis_calibration =
+        calibration_.axes[static_cast<std::size_t>(axis)];
+    const float clamped_metric = std::clamp(
+        desired_metric, axis_calibration.lowest, axis_calibration.highest);
     for (std::size_t segment = 0;
-         segment + 1 < calibration_.achieved_turn_rates.size(); ++segment) {
-        const float rate_a = calibration_.achieved_turn_rates[segment];
-        const float rate_b = calibration_.achieved_turn_rates[segment + 1];
-        if ((clamped_rate - rate_a) * (clamped_rate - rate_b) <= 0.0f &&
-            std::abs(rate_b - rate_a) > kSmallEpsilon) {
+         segment + 1 < axis_calibration.achieved_metric.size(); ++segment) {
+        const float metric_a = axis_calibration.achieved_metric[segment];
+        const float metric_b = axis_calibration.achieved_metric[segment + 1];
+        if ((clamped_metric - metric_a) * (clamped_metric - metric_b) <= 0.0f &&
+            std::abs(metric_b - metric_a) > kSmallEpsilon) {
             const float alpha =
-                (clamped_rate - rate_a) / (rate_b - rate_a);
-            return calibration_.parameters[segment] +
-                   alpha * (calibration_.parameters[segment + 1] -
-                            calibration_.parameters[segment]);
+                (clamped_metric - metric_a) / (metric_b - metric_a);
+            return axis_calibration.parameters[segment] +
+                   alpha * (axis_calibration.parameters[segment + 1] -
+                            axis_calibration.parameters[segment]);
         }
     }
 
     std::size_t closest = 0;
     for (std::size_t sample = 1;
-         sample < calibration_.achieved_turn_rates.size(); ++sample) {
-        if (std::abs(calibration_.achieved_turn_rates[sample] - clamped_rate) <
-            std::abs(calibration_.achieved_turn_rates[closest] - clamped_rate)) {
+         sample < axis_calibration.achieved_metric.size(); ++sample) {
+        if (std::abs(axis_calibration.achieved_metric[sample] -
+                     clamped_metric) <
+            std::abs(axis_calibration.achieved_metric[closest] -
+                     clamped_metric)) {
             closest = sample;
         }
     }
-    return calibration_.parameters[closest];
+    return axis_calibration.parameters[closest];
 }
 
 RuntimeControlRequest GoalDirectedLocomotion::RequestForPose(
@@ -191,17 +308,17 @@ RuntimeControlRequest GoalDirectedLocomotion::RequestForPose(
         WrapAngleRadians(desired_heading - travel_heading);
     const float desired_rate =
         heading_error / calibration_.cycle_seconds;
+
+    const SteeringAxis& heading = calibration_.HeadingAxis();
     const float tightest_rate =
-        std::abs(calibration_.lowest_rate) >
-                std::abs(calibration_.highest_rate)
-            ? calibration_.lowest_rate
-            : calibration_.highest_rate;
-    const float same_direction_limit = std::clamp(
-        desired_rate, calibration_.lowest_rate, calibration_.highest_rate);
+        std::abs(heading.lowest) > std::abs(heading.highest)
+            ? heading.lowest
+            : heading.highest;
+    const float same_direction_limit =
+        std::clamp(desired_rate, heading.lowest, heading.highest);
     if (!swinging_long_way_ &&
         std::abs(heading_error) > config_.swing_enter_error_radians &&
-        (desired_rate > calibration_.highest_rate ||
-         desired_rate < calibration_.lowest_rate) &&
+        (desired_rate > heading.highest || desired_rate < heading.lowest) &&
         std::abs(same_direction_limit) < 0.5f * std::abs(tightest_rate)) {
         swinging_long_way_ = true;
     }
@@ -209,15 +326,34 @@ RuntimeControlRequest GoalDirectedLocomotion::RequestForPose(
         std::abs(heading_error) < config_.swing_exit_error_radians) {
         swinging_long_way_ = false;
     }
-
     const float commanded_rate =
         swinging_long_way_ ? tightest_rate : same_direction_limit;
+
     const ParametricMotionSpace& space =
         graph_.Node(node_index_).motion_space;
+    ParameterVector parameter = DomainMidpoint();
+    for (int axis = 0; axis < static_cast<int>(parameter.size()); ++axis) {
+        const SteeringAxis& axis_calibration =
+            calibration_.axes[static_cast<std::size_t>(axis)];
+        if (axis == calibration_.heading_axis) {
+            parameter[static_cast<std::size_t>(axis)] =
+                AxisValueForMetric(axis, commanded_rate);
+        } else if (axis_calibration.metric == ParameterMetric::kTravelSpeed) {
+            // Cruise far from the goal, ease toward the slowest pace on arrival.
+            const float arrival = std::clamp(
+                distance / config_.arrival_speed_distance, 0.0f, 1.0f);
+            const float desired_speed =
+                axis_calibration.lowest +
+                arrival * (axis_calibration.highest - axis_calibration.lowest);
+            parameter[static_cast<std::size_t>(axis)] =
+                AxisValueForMetric(axis, desired_speed);
+        }
+        // kNone axes keep the domain-midpoint value.
+    }
+
     RuntimeControlRequest request;
     request.desired_node = node_index_;
-    request.desired_parameter = space.ClampToDomain(
-        {ParameterForRate(commanded_rate)});
+    request.desired_parameter = space.ClampToDomain(parameter);
     return request;
 }
 
