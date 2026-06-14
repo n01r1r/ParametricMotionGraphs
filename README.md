@@ -28,6 +28,10 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
+All 37 tests pass on MSVC 2022 Debug (39 with the viewer enabled). See
+[docs/REPRODUCTION.md](docs/REPRODUCTION.md) for the full build, validation, and
+runtime command set.
+
 The viewer is optional:
 
 ```powershell
@@ -159,18 +163,16 @@ not part of the stored PMG runtime contract.
   *Motion Graphs*, *Parametric Motion Graphs*, and repository scope.
 - [docs/PAPER_CODE_MAP.md](docs/PAPER_CODE_MAP.md) — paper sections and
   equations mapped to implementation and tests.
-- [docs/PIPELINE.md](docs/PIPELINE.md) — offline build, artifact, and online
-  runtime contracts.
+- [docs/PAPER_CONFORMANCE.md](docs/PAPER_CONFORMANCE.md) — line-by-line paper
+  audit, the prioritized deviation list (D1–D8), what's left, and the claim
+  limit.
+- [docs/DESIGN.md](docs/DESIGN.md) — module structure, offline/online pipeline,
+  contracts, failure boundaries, and limitations.
 - [docs/REPRODUCTION.md](docs/REPRODUCTION.md) — build, validation, runtime,
   deterministic inputs, and output schemas.
-- [docs/GLOSSARY.md](docs/GLOSSARY.md) — paper terminology, code symbols,
-  units, and naming rules.
-- [CONTEXT.md](CONTEXT.md) — project vocabulary; code and conversation use
-  these terms exactly.
-- [docs/DESIGN.md](docs/DESIGN.md) — module structure, contracts, limitations.
-- [docs/PAPER_CONFORMANCE.md](docs/PAPER_CONFORMANCE.md) — what matches the
-  papers, the prioritized deviation list (D1–D8), and the claim limit.
-- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — completed
-  paper-core and prioritized remaining work.
+- [docs/MOTION_CORPUS.md](docs/MOTION_CORPUS.md) — BVH skeleton-compatibility
+  groups and the canonical 2-D steering demo spec.
+- [CONTEXT.md](CONTEXT.md) — project vocabulary and paper-symbol map; code and
+  conversation use these terms exactly.
 - [docs/adr/](docs/adr) — accepted architecture decisions (complete artifact
   seam, k-NN cutoff interpretation, parameter-accuracy calibration).

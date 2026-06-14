@@ -179,8 +179,10 @@ For `walk_curvature_speed.pmg_spec`:
 
 - axis 0: turn/curvature;
 - axis 1: gait/speed, calibrated with `travel_speed`;
-- current runtime viewer exposes only axis 0 and holds axis 1 at its midpoint.
+- goal-directed goto now drives both axes (turn_rate heading + travel_speed
+  pace); the manual blend slider still exposes axis 0 and holds axis 1 at its
+  midpoint.
 
-Therefore `walk_curvature.pmg_spec` is the current clean one-slider steering
-demo. `walk_curvature_speed.pmg_spec` is the correct 2-D data contract, but the
-runtime UI still needs one control per axis before it is fully steerable.
+`walk_curvature.pmg_spec` remains the clean one-slider steering demo.
+`walk_curvature_speed.pmg_spec` is the 2-D data contract and is now fully
+steerable under goto; only the manual per-axis slider UI is still 1-D.
