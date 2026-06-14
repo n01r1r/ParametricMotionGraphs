@@ -11,4 +11,4 @@ example walk_2d 0.0 0.0 ../BVH/walkCurve.bvh
 example walk_2d 1.0 0.0 ../BVH/walkTightCurve.bvh
 example walk_2d 0.0 1.0 ../BVH/jogCurve.bvh
 edge walk_2d walk_2d
-edge_config walk_2d walk_2d 10.0 20.0 3 6 41
+edge_config walk_2d walk_2d 300 400 3 6 41

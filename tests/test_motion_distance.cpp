@@ -128,5 +128,27 @@ int main() {
         assert(std::abs(ab - ba) < 1.0e-3f);
     }
 
+    // Equation 1 returns the raw weighted squared sum, not a weighted mean.
+    {
+        pmg::PointCloud cloud_a;
+        cloud_a.points = {
+            {0.0f, 0.0f, 0.0f},
+            {1.0f, 0.0f, 0.0f},
+        };
+        cloud_a.weights = {2.0f, 3.0f};
+
+        pmg::PointCloud cloud_b;
+        cloud_b.points = {
+            {0.0f, 1.0f, 0.0f},
+            {1.0f, 2.0f, 0.0f},
+        };
+
+        const pmg::AlignedDistanceResult result =
+            pmg::MotionDistance::AlignedPointCloudDistance(cloud_a, cloud_b);
+        constexpr float kExpectedWeightedSquaredSum =
+            2.0f * 1.0f * 1.0f + 3.0f * 2.0f * 2.0f;
+        assert(std::abs(result.distance - kExpectedWeightedSquaredSum) < 1.0e-5f);
+    }
+
     return 0;
 }

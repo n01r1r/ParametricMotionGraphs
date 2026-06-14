@@ -131,6 +131,86 @@ int PhaseToFrame(float phase, int frame_count) {
         std::lround(phase * static_cast<float>(frame_count - 1)));
 }
 
+// Cubic smoothing spline (discrete penalized form): minimize
+// ||f - y||^2 + lambda * sum_i (f_{i-1} - 2 f_i + f_{i+1})^2. The minimizer
+// solves (I + lambda * D^T D) f = y where D is the second-difference operator;
+// its continuous analogue is the natural cubic smoothing spline. KG04 registers
+// motions by fitting a cubic B-spline to the dense time-alignment correspondence
+// -- this is the equivalent penalized form, used here to denoise the staircase
+// DTW frame correspondence into a smooth monotone registration curve before it
+// is sampled into warp knots. The result is projected to be non-decreasing.
+// Returns the input unchanged when there are too few points to denoise.
+std::vector<float> FitSmoothingSpline(
+    const std::vector<float>& samples, float lambda) {
+    const int count = static_cast<int>(samples.size());
+    if (count < 4 || lambda <= 0.0f) {
+        return samples;
+    }
+
+    // A = I + lambda * D^T D: symmetric positive definite, pentadiagonal.
+    std::vector<float> matrix(static_cast<std::size_t>(count) * count, 0.0f);
+    const auto at = [&](int row, int col) -> float& {
+        return matrix[static_cast<std::size_t>(row) * count + col];
+    };
+    for (int i = 0; i < count; ++i) {
+        at(i, i) = 1.0f;
+    }
+    for (int center = 1; center + 1 < count; ++center) {
+        const int index[3] = {center - 1, center, center + 1};
+        const float coeff[3] = {1.0f, -2.0f, 1.0f};
+        for (int p = 0; p < 3; ++p) {
+            for (int q = 0; q < 3; ++q) {
+                at(index[p], index[q]) += lambda * coeff[p] * coeff[q];
+            }
+        }
+    }
+
+    // Dense Cholesky A = L L^T (count is a per-segment row count: tens).
+    std::vector<float> lower(static_cast<std::size_t>(count) * count, 0.0f);
+    const auto low = [&](int row, int col) -> float& {
+        return lower[static_cast<std::size_t>(row) * count + col];
+    };
+    for (int i = 0; i < count; ++i) {
+        for (int j = 0; j <= i; ++j) {
+            float sum = at(i, j);
+            for (int k = 0; k < j; ++k) {
+                sum -= low(i, k) * low(j, k);
+            }
+            if (i == j) {
+                if (sum <= 0.0f) {
+                    return samples;  // not SPD (unexpected); bail safely
+                }
+                low(i, j) = std::sqrt(sum);
+            } else {
+                low(i, j) = sum / low(j, j);
+            }
+        }
+    }
+
+    // Forward solve L z = samples, back solve L^T f = z.
+    std::vector<float> intermediate(count, 0.0f);
+    for (int i = 0; i < count; ++i) {
+        float sum = samples[i];
+        for (int k = 0; k < i; ++k) {
+            sum -= low(i, k) * intermediate[k];
+        }
+        intermediate[i] = sum / low(i, i);
+    }
+    std::vector<float> smoothed(count, 0.0f);
+    for (int i = count - 1; i >= 0; --i) {
+        float sum = intermediate[i];
+        for (int k = i + 1; k < count; ++k) {
+            sum -= low(k, i) * smoothed[k];
+        }
+        smoothed[i] = sum / low(i, i);
+    }
+
+    for (int i = 1; i < count; ++i) {
+        smoothed[i] = std::max(smoothed[i], smoothed[i - 1]);
+    }
+    return smoothed;
+}
+
 }  // namespace
 
 std::vector<float> ContactAnchorPhases(
@@ -302,15 +382,26 @@ void RefineRegistrationByDtw(
                 const std::vector<PointCloud> example_clouds(
                     clouds[example_index].begin() + example_first,
                     clouds[example_index].begin() + example_last + 1);
-                const std::vector<float> mean_example_frames =
+                const std::vector<float> raw_example_frames =
                     DtwMeanExampleFrames(reference_clouds, example_clouds);
+                // Denoise the staircase DTW correspondence into a smooth monotone
+                // curve (KG04 cubic-spline registration), then sample it densely
+                // so the stored warp follows the spline rather than the raw steps.
+                const std::vector<float> mean_example_frames =
+                    FitSmoothingSpline(raw_example_frames, settings.smoothing_strength);
 
+                // Place one knot per few reference rows, capped, so dense
+                // segments track the smooth curve and short ones stay sparse.
+                const int interior_rows = reference_last - reference_first - 1;
+                const int knot_count = std::clamp(
+                    std::min(settings.max_knots_per_segment, interior_rows),
+                    0, settings.max_knots_per_segment);
                 for (int knot = 1;
-                     !mean_example_frames.empty() && knot <= settings.max_knots_per_segment;
+                     !mean_example_frames.empty() && knot <= knot_count;
                      ++knot) {
                     const float alpha =
                         static_cast<float>(knot) /
-                        static_cast<float>(settings.max_knots_per_segment + 1);
+                        static_cast<float>(knot_count + 1);
                     const float canonical_phase =
                         canonical_start + alpha * (canonical_end - canonical_start);
                     const float reference_row =
