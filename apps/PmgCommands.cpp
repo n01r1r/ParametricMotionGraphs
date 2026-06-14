@@ -31,7 +31,9 @@ void PrintUsage() {
               << "      [--min-edge-samples N] [--min-good-fraction F] [--assert-no-regression]\n"
               << "      registration options must match explicit GraphSpec settings\n"
               << "  pmg_cli --random-walk graph_spec.txt|graph.pmg [--seconds S] [--walk-seed N]\n"
-              << "      [--min-transitions N] [--max-pop-ratio X] [builder/registration opts]\n"
+              << "      [--min-transitions N] [--max-pop-ratio X]\n"
+              << "      [--blend-placement directional|centered] [--dump-motion-csv out.csv]\n"
+              << "      [builder/registration opts]\n"
               << "  pmg_cli --goto graph_spec.txt|graph.pmg x z [--seconds S] [--tolerance D]\n"
               << "      [--facing-degrees DEG --facing-tolerance-degrees DEG]\n"
               << "      [--max-pop-ratio X] [builder/registration opts]\n";

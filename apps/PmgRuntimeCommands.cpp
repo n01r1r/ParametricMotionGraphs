@@ -150,6 +150,9 @@ struct RandomWalkOptions {
     float max_pop_ratio = -1.0f;
     // Override runtime blend placement (default: artifact-derived / centered).
     std::optional<pmg::TransitionWindowConvention> blend_placement;
+    // Per-frame motion trace for offline plotting (path, pop-over-time,
+    // before/after). Empty = no dump.
+    std::string dump_motion_csv;
 };
 
 // Paper application A: stream random transitions through the graph and verify
@@ -209,9 +212,42 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
     poses.reserve(static_cast<std::size_t>(total_frames));
     poses.push_back(controller.CurrentPose());
 
+    // Per-frame trace for --dump-motion-csv.
+    struct MotionRow {
+        float time_seconds;
+        float root_x;
+        float root_z;
+        float facing_degrees;
+        float step;
+        int transitioning;
+        int node;
+    };
+    const bool dump_motion = !options.dump_motion_csv.empty();
+    std::vector<MotionRow> motion_rows;
+    constexpr float kRadToDeg = 57.2957795f;
+    if (dump_motion) {
+        motion_rows.reserve(static_cast<std::size_t>(total_frames + 1));
+        const pmg::Pose& first = poses.front();
+        motion_rows.push_back({0.0f, first.root_position.x, first.root_position.z,
+                               pmg::PoseFacingYaw(first) * kRadToDeg, 0.0f,
+                               controller.IsTransitioning() ? 1 : 0,
+                               controller.CurrentNode()});
+    }
+
     for (int frame = 0; frame < total_frames; ++frame) {
         controller.Update(dt, request);
         poses.push_back(controller.CurrentPose());
+
+        if (dump_motion) {
+            const pmg::Pose& cur = poses.back();
+            motion_rows.push_back(
+                {static_cast<float>(frame + 1) * dt, cur.root_position.x,
+                 cur.root_position.z, pmg::PoseFacingYaw(cur) * kRadToDeg,
+                 MeanJointDistance(artifact.skeleton,
+                                   poses[poses.size() - 2], cur),
+                 controller.IsTransitioning() ? 1 : 0,
+                 controller.CurrentNode()});
+        }
 
         if (!hold && controller.CompletedTransitions() != last_transition_count) {
             last_transition_count = controller.CompletedTransitions();
@@ -219,6 +255,25 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
                           artifact.graph, controller.CurrentNode(), rng)
                           .request;
         }
+    }
+
+    if (dump_motion) {
+        std::ofstream csv(options.dump_motion_csv);
+        if (!csv) {
+            throw std::runtime_error(
+                "--dump-motion-csv: cannot open '" + options.dump_motion_csv +
+                "'");
+        }
+        csv << "frame,time_seconds,root_x,root_z,facing_degrees,step,"
+               "transitioning,node\n";
+        for (std::size_t i = 0; i < motion_rows.size(); ++i) {
+            const MotionRow& r = motion_rows[i];
+            csv << i << ',' << r.time_seconds << ',' << r.root_x << ','
+                << r.root_z << ',' << r.facing_degrees << ',' << r.step << ','
+                << r.transitioning << ',' << r.node << '\n';
+        }
+        std::cout << "motion_csv=" << options.dump_motion_csv << " rows="
+                  << motion_rows.size() << "\n";
     }
 
     if (hold) {
@@ -497,6 +552,8 @@ RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
                 throw std::runtime_error(
                     "--blend-placement expects 'directional' or 'centered'");
             }
+        } else if (option == "--dump-motion-csv") {
+            options.dump_motion_csv = require_value("--dump-motion-csv");
         } else {
             throw std::runtime_error("unknown random-walk option '" + option + "'");
         }
