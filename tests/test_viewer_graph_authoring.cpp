@@ -10,6 +10,12 @@ int main() {
     using pmgviewer::AddAuthoredEdgeResult;
     using pmgviewer::AuthoredEdge;
 
+    const AuthoredEdge defaults;
+    assert(defaults.tgood ==
+           pmgviewer::kDefaultGoodTransitionThreshold);
+    assert(defaults.tbad ==
+           pmgviewer::kDefaultBadTransitionThreshold);
+
     std::vector<AuthoredEdge> edges;
     assert(AddAuthoredEdge(2, 0, 1, 0.5f, 0.7f, edges) ==
            AddAuthoredEdgeResult::Added);

@@ -1385,8 +1385,10 @@ void PmgViewerWorkspace::BuildDistanceGridSection() {
     }
 
     // Shared GOOD/BAD thresholds -- also drive the graph edge build.
-    ImGui::SliderFloat("TGOOD", &tgood_, 0.0f, 2.0f, "%.3f");
-    ImGui::SliderFloat("TBAD", &tbad_, 0.0f, 2.0f, "%.3f");
+    ImGui::InputFloat("TGOOD", &tgood_, 1.0f, 10.0f, "%.3f");
+    ImGui::InputFloat("TBAD", &tbad_, 1.0f, 10.0f, "%.3f");
+    tgood_ = std::max(0.0f, tgood_);
+    tbad_ = std::max(tgood_, tbad_);
 
     if (ImGui::Button("Recompute")) {
         RecomputeHeatmap();

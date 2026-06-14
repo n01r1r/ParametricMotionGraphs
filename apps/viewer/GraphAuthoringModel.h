@@ -5,13 +5,17 @@
 
 namespace pmgviewer {
 
+inline constexpr float kDefaultGoodTransitionThreshold = 80.0f;
+inline constexpr float kDefaultBadTransitionThreshold = 110.0f;
+
 // Directed edge description used by viewer-side graph authoring.
-// Thresholds are native point-cloud-distance units.
+// Thresholds are raw weighted squared-sum units. Defaults preserve the prior
+// mean-squared scale for the repository's 31-joint, 5-frame baseline.
 struct AuthoredEdge {
     int source_node = 0;
     int target_node = 0;
-    float tgood = 0.5f;
-    float tbad = 0.7f;
+    float tgood = kDefaultGoodTransitionThreshold;
+    float tbad = kDefaultBadTransitionThreshold;
 };
 
 enum class AddAuthoredEdgeResult {
