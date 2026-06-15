@@ -272,6 +272,37 @@ are too sensitive for hard rejection. A permissive `2.5` ablation still rejects
 every candidate and stalls the random walk. Keep yaw gating diagnostic-only
 until the metric, support, and threshold have independent validation.
 
+## Transition-quality gate ablation
+
+`pmg_cli --quality-gate` is opt-in experimental diagnostic tooling. It is
+disabled by default, so default random-walk scheduling and motion output remain
+unchanged. Gate-disabled transition and motion CSV SHA-256 hashes matched the
+previous baseline exactly.
+
+The 30-second walk/jog ablation used runtime seed `99`. The baseline completed
+42 transitions, including 24 cross-node transitions.
+
+| Gate | Completed transitions | Cross-node transitions | Result |
+|---|---:|---:|---|
+| disabled | 42 | 24 | baseline unchanged |
+| root-speed ratio `1.4` | 22 | 0 | removed all cross-node motion |
+| yaw-rate ratio `2.5` | 0 | 0 | rejected every encountered candidate |
+| contact drift `5.0` | 1 | 0 | nearly stalled; only one self-edge completed |
+| combined | 0 | 0 | stalled |
+
+All active gate configurations removed or effectively stalled cross-node
+walk/jog transitions. The current yaw-rate ratio and thresholds are not
+suitable for hard rejection: yaw failure is global, including low-pop
+self-edges, rather than a reliable discriminator for bad cross-node
+transitions. These results do not justify build-time candidate rejection,
+threshold changes, or production runtime control.
+
+**Status: PASS WITH LIMITATION.** The diagnostic is reproducible and default
+behavior is unchanged, but `demo_walk_jog_topology` remains a corpus-limitation
+case and not a production walk/jog controller. Keep the gate diagnostic-only.
+Before production control, collect cyclic-continuity evidence and improve clip
+cut points and corpus coverage.
+
 ### Conclusion
 
 The residual walk-loop jolt is **mostly** a corpus periodicity limit (wide-turn
