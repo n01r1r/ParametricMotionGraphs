@@ -288,7 +288,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
         graph_path_points_.size() >= 2) {
         constexpr glm::vec3 kPathTrailColor(0.10f, 0.70f, 0.95f);
         const float trail_height = 0.05f * display_scale_;
-        const float trail_radius = 0.012f * display_scale_;
+        const float trail_radius = 0.035f * display_scale_;
         for (std::size_t index = 1; index < graph_path_points_.size();
              ++index) {
             const glm::vec2& previous = graph_path_points_[index - 1];
@@ -306,8 +306,8 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
 
     if (GraphRuntimeActive() && show_graph_transition_markers_) {
         const float marker_height = 0.25f * display_scale_;
-        const float marker_radius = 0.045f * display_scale_;
-        const float line_radius = 0.01f * display_scale_;
+        const float marker_radius = 0.065f * display_scale_;
+        const float line_radius = 0.022f * display_scale_;
         for (const TransitionTraceMarker& marker :
              graph_transition_markers_) {
             const glm::vec3 color =
@@ -404,7 +404,9 @@ void PmgViewerWorkspace::AppendPathPreview() {
     }
 
     const int ghost_count = std::clamp(path_preview_count_, 2, 12);
-    const float ghost_radius = 0.012f * display_scale_;
+    // Roughly two-thirds of the live bone radius: clearly visible as a trail
+    // while staying thinner than the active skeleton.
+    const float ghost_radius = 0.065f * display_scale_;
     for (int ghost = 0; ghost < ghost_count; ++ghost) {
         const float phase =
             static_cast<float>(ghost) / static_cast<float>(ghost_count - 1);

@@ -30,10 +30,6 @@ public:
 
     OrbitCamera& Camera() { return camera_; }
 
-    // WASD panning takes manual control of the target, so it turns auto-follow
-    // off; "Reset camera" / the checkbox turn it back on.
-    void SetFollowSceneFocus(bool follow) { follow_scene_focus_ = follow; }
-
 private:
     void BuildViewUi();
 
