@@ -268,7 +268,11 @@ Stable ids for the adaptations and gaps above.
   fields and before/after contact states beside `D`. `cyclic_seam_mismatch` is
   reserved until the CyclicContinuity contract supplies raw seam evidence.
   Thresholds are diagnostic defaults, not universal perceptual limits, and do
-  not participate in PMG edge construction or runtime scheduling.
+  not participate in PMG edge construction or default runtime scheduling.
+  An opt-in CLI-only `--quality-gate` prospectively simulates a candidate and
+  skips it by root speed, yaw rate, contact drift, contact mismatch, or
+  insufficient data. This is an ablation adapter, disabled by default, and is
+  not claimed as a paper algorithm or production controller.
 - **D5 — Transition phases remain target-dependent.**
   Each source sample stores the phase pair measured at every retained GOOD
   target sample inside its shrunk box. Runtime clamps the requested target,
