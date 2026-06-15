@@ -52,6 +52,12 @@ struct DistanceGridConfig {
     float target_phase_start = 0.0f;
     float target_phase_end = 1.0f;
     PointCloudWeighting weighting;
+    // Ablation (default off = endpoint clamp). When true the windowed point
+    // cloud wraps frame indices modulo the clip length instead of clamping at
+    // the endpoints, so a cyclic self-edge metric sees the real previous/next
+    // cycle frames rather than a repeated endpoint. Only valid for a single
+    // cyclic clip (self-edge); leave false for cross-node clips.
+    bool cyclic_wrap = false;
 };
 
 // Aligned point-cloud distance for every sampled (source_frame, target_frame)

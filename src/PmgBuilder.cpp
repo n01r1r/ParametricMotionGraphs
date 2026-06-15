@@ -113,6 +113,14 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
     result.report.source_node = source_node_index;
     result.report.target_node = target_node_index;
 
+    // A self-edge concatenates a cyclic clip end onto its own start, so (when the
+    // ablation is enabled) its metric windows wrap across the cycle boundary
+    // instead of clamping at the endpoints. Cross-node edges keep clamped windows.
+    DistanceGridConfig edge_grid = config.distance_grid;
+    if (config.self_edge_cyclic_metric && source_node_index == target_node_index) {
+        edge_grid.cyclic_wrap = true;
+    }
+
     std::mt19937 rng(config.seed);
     const std::vector<ParameterVector> source_samples = BuildParameterSamples(
         source_space, config.source_sample_count, config.include_example_parameters, rng);
@@ -152,7 +160,7 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
             const OptimalTransition transition =
                 MotionDistance::FindOptimalTransitionForConvention(
                     skeleton, source_clip, target_clips[target_index],
-                    config.distance_grid, config.transition_convention);
+                    edge_grid, config.transition_convention);
             const float distance = transition.distance;
             distances.push_back(distance);
 

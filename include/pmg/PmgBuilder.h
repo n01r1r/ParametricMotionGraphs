@@ -45,6 +45,11 @@ struct PmgBuilderConfig {
     // choice, separate from the metric; see RuntimeControllerConfig::convention.)
     TransitionWindowConvention transition_convention =
         TransitionWindowConvention::kKovarDirectional;
+    // Ablation (default off). When true, a self-edge (source node == target node)
+    // builds its distance grid with a wrap-aware cyclic point cloud instead of
+    // endpoint-clamped windows, so the metric scores the real cycle-boundary
+    // frames. Cross-node edges are unaffected. See DistanceGridConfig::cyclic_wrap.
+    bool self_edge_cyclic_metric = false;
 };
 
 struct SourceSampleBuildReport {

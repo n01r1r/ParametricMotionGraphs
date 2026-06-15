@@ -565,6 +565,8 @@ RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
                 throw std::runtime_error(
                     "--blend-placement expects 'directional' or 'centered'");
             }
+        } else if (option == "--self-edge-cyclic-metric") {
+            options.builder.self_edge_cyclic_metric = true;
         } else if (option == "--preroll-policy") {
             const std::string value = require_value("--preroll-policy");
             if (value == "clamp") {
