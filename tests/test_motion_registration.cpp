@@ -54,6 +54,41 @@ void TestMismatchedContactStructureThrows() {
     assert(threw);
 }
 
+void TestBlendableMotionFamilyAcceptsUniformCycles() {
+    // Two cyclic examples (two intervals each), four anchors each: blendable.
+    const std::vector<std::vector<pmg::ContactInterval>> intervals = {
+        {{0, 3, 7}, {1, 18, 24}},
+        {{0, 4, 8}, {1, 19, 25}},
+    };
+    pmg::RequireBlendableMotionFamily(intervals, {31, 31});  // no throw
+}
+
+void TestBlendableMotionFamilyRejectsAcyclicExample() {
+    bool threw = false;
+    try {
+        // Second example has a single contact interval -> non-looping (vault).
+        pmg::RequireBlendableMotionFamily(
+            {{{0, 3, 7}, {1, 18, 24}}, {{0, 5, 9}}}, {31, 31});
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    assert(threw);
+}
+
+void TestBlendableMotionFamilyRejectsStructureMismatch() {
+    bool threw = false;
+    try {
+        // Both cyclic but different anchor counts (4 vs 6).
+        pmg::RequireBlendableMotionFamily(
+            {{{0, 3, 7}, {1, 18, 24}},
+             {{0, 3, 7}, {1, 12, 16}, {0, 20, 26}}},
+            {31, 31});
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    assert(threw);
+}
+
 }  // namespace
 
 int main() {
@@ -61,5 +96,8 @@ int main() {
     TestBuildRegistrationWarps();
     TestAnchorlessExamplesGetIdentityWarps();
     TestMismatchedContactStructureThrows();
+    TestBlendableMotionFamilyAcceptsUniformCycles();
+    TestBlendableMotionFamilyRejectsAcyclicExample();
+    TestBlendableMotionFamilyRejectsStructureMismatch();
     return 0;
 }

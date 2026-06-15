@@ -233,6 +233,82 @@ std::vector<float> ContactAnchorPhases(
     return anchors;
 }
 
+void RequireBlendableMotionFamily(
+    const std::vector<std::vector<ContactInterval>>& example_intervals,
+    const std::vector<int>& example_frame_counts) {
+    if (example_intervals.empty()) {
+        throw std::runtime_error(
+            "RequireBlendableMotionFamily: no examples given");
+    }
+    if (example_intervals.size() != example_frame_counts.size()) {
+        throw std::runtime_error(
+            "RequireBlendableMotionFamily: interval/frame-count size mismatch");
+    }
+    // A single-example space never blends, so it cannot be a cross-family blend;
+    // the premise only constrains spaces that actually interpolate two or more
+    // examples. (A single non-looping clip looping at runtime is a separate
+    // concern, not a blend-space defect.)
+    if (example_intervals.size() < 2) {
+        return;
+    }
+
+    std::size_t expected_anchor_count = 0;
+    bool expected_set = false;
+    for (std::size_t example_index = 0;
+         example_index < example_intervals.size(); ++example_index) {
+        const std::vector<ContactInterval>& intervals =
+            example_intervals[example_index];
+        if (intervals.size() < 2) {
+            throw std::runtime_error(
+                "RequireBlendableMotionFamily: example " +
+                std::to_string(example_index) +
+                " is not a single looping cycle (found " +
+                std::to_string(intervals.size()) +
+                " contact interval(s)); a non-looping motion (e.g. a vault) "
+                "must be its own graph node joined by a transition edge, not a "
+                "blend-space example");
+        }
+        const std::size_t anchor_count =
+            ContactAnchorPhases(intervals, example_frame_counts[example_index])
+                .size();
+        if (!expected_set) {
+            expected_anchor_count = anchor_count;
+            expected_set = true;
+        } else if (anchor_count != expected_anchor_count) {
+            throw std::runtime_error(
+                "RequireBlendableMotionFamily: example " +
+                std::to_string(example_index) + " has " +
+                std::to_string(anchor_count) + " contact anchors, expected " +
+                std::to_string(expected_anchor_count) +
+                "; different motion families must be separate nodes joined by "
+                "a transition edge, not examples of one blend space");
+        }
+    }
+}
+
+void RequireBlendableMotionFamily(
+    const Skeleton& skeleton,
+    const std::vector<MotionClip>& examples,
+    const std::vector<int>& contact_joints,
+    const ContactDetectionSettings& settings) {
+    if (contact_joints.empty()) {
+        throw std::runtime_error(
+            "RequireBlendableMotionFamily: no contact joints given; cannot "
+            "verify motion-family compatibility");
+    }
+
+    std::vector<std::vector<ContactInterval>> example_intervals;
+    std::vector<int> example_frame_counts;
+    example_intervals.reserve(examples.size());
+    example_frame_counts.reserve(examples.size());
+    for (const MotionClip& clip : examples) {
+        example_intervals.push_back(
+            DetectContacts(skeleton, clip, contact_joints, settings));
+        example_frame_counts.push_back(clip.NumFrames());
+    }
+    RequireBlendableMotionFamily(example_intervals, example_frame_counts);
+}
+
 std::vector<TimeWarp> BuildRegistrationWarps(
     const std::vector<std::vector<float>>& example_anchor_phases) {
     if (example_anchor_phases.empty()) {

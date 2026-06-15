@@ -22,6 +22,30 @@ std::vector<float> ContactAnchorPhases(
 std::vector<TimeWarp> BuildRegistrationWarps(
     const std::vector<std::vector<float>>& example_anchor_phases);
 
+// Enforce the motion-family premise for a parametric blend space. Heck-Gleicher
+// and KG04 blend only structurally similar, registered example motions, so a
+// blend space must hold a single motion family. Each example must be one looping
+// cycle (at least two contact intervals -- a non-looping motion such as a vault
+// has too few) and every example must expose the same ContactAnchorPhases count.
+// Throws std::runtime_error naming the offending example otherwise. Different
+// motion families belong in separate graph nodes joined by a transition edge,
+// not as examples of one blend space.
+//
+// Pure structural overload: takes each example's detected contact intervals and
+// frame count, so it is checkable without forward kinematics.
+void RequireBlendableMotionFamily(
+    const std::vector<std::vector<ContactInterval>>& example_intervals,
+    const std::vector<int>& example_frame_counts);
+
+// Convenience overload: detects contacts on every example, then applies the
+// structural check above. Used by motion-space preparation and interactive
+// authoring so both reject cross-family blends the same way.
+void RequireBlendableMotionFamily(
+    const Skeleton& skeleton,
+    const std::vector<MotionClip>& examples,
+    const std::vector<int>& contact_joints,
+    const ContactDetectionSettings& settings);
+
 // Convenience: detect contacts on every example of `space`, derive anchors,
 // and install the registration warps so EvaluatePose blends structurally
 // corresponding moments. Throws if the examples' contact structures differ.
