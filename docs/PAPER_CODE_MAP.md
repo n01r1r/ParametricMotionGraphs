@@ -63,7 +63,7 @@ thresholds corpus/configuration specific.
 | Sec. 3.2 source/target random sampling | Direct | `PmgBuilder::BuildEdgeWithReport` | `test_pmg_builder` |
 | GOOD / NEUTRAL / BAD thresholds | Direct | `PmgBuilderConfig` classification | `test_pmg_builder`, `cli_validate_graph_walk` |
 | GOOD bounding box | Direct | `ParameterAabb::ExpandToInclude` | `test_pmg_builder` |
-| BAD exclusion by minimal box adjustment | Direct | `ParameterAabb::ShrinkToExclude` | `test_pmg_builder`, `transition_box_shrink.pmg_spec` |
+| BAD exclusion by minimal box adjustment | Direct | `ParameterAabb::ShrinkToExclude` | `test_pmg_builder`, `fixture_transition_box_shrink.pmg_spec` |
 | Reject edge when a source sample has no target region | Direct for sampled sources | early return from `BuildEdgeWithReport` | `test_pmg_builder` |
 | Average normalized transition point | Direct compatibility field | scalar fields in `TransitionSample` | `test_pmg_builder`, `test_graph_io` |
 | Target-dependent phase field | Extension | `TargetTransitionPhaseSample`, `ResolveTargetPhases` | `test_edge_lookup`, `test_graph_io` |

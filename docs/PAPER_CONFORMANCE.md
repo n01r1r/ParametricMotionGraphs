@@ -48,10 +48,11 @@ centered mean-distance diagnostic, this lowered production best self-transition
 distance from `0.8878` (prior piecewise-linear refine) to `0.8816` against a
 `0.8604` no-registration baseline, with runtime pop ratio flat. D6 replaced
 that diagnostic scale and window placement. Under the exact asymmetric raw-sum
-metric (`specs/walk_curvature`, `--validate-graph`, seed 7), current
+metric (`specs/legacy_walk_curvature`, `--validate-graph`, seed 7), current
 production/authored mean-min distances are `156.654 / 145.385 = 1.0775`; the
 regression gate records that corpus-specific penalty explicitly and caps it at
-`1.10`. All 38 core tests pass. The payoff is corpus-density-coupled: with only
+`1.10`. All 40 configured CTest checks pass as of 2026-06-15. The payoff is
+corpus-density-coupled: with only
 three clean walk clips the within-segment correspondence is already near-linear,
 so headroom is small.
 
@@ -132,7 +133,7 @@ config override); a one-dimensional `turn_rate` node reduces to the prior
 single-axis behavior exactly. The CLI `--goto` and the viewer goto both drive
 the full vector. Verified by `test_goal_directed_locomotion` (a 2-D node with
 both axes driven) and the `cli_goto_walk_2d` end-to-end smoke test on the real
-`walk_curvature_speed` artifact. The remaining `◐` on goal-directed control is
+`demo_walk_2d_triangle` artifact. The remaining `◐` on goal-directed control is
 the local-greedy vs. branch-and-bound search adaptation, not dimensionality.
 
 ## Out-of-scope boundaries (○)

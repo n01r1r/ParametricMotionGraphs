@@ -4,7 +4,8 @@ Last updated: 2026-06-15.
 
 ## Purpose
 
-Explain the visible walk loop interruption in `specs/walk_jog.pmg_spec`,
+Explain the visible walk loop interruption in
+`specs/demo_walk_jog_topology.pmg_spec`,
 quantify it, define the `jog` and desired-parameter contracts, and separate
 paper-faithful behavior from useful but non-equivalent reference code.
 
@@ -28,7 +29,7 @@ phase reset is intentional clip concatenation; the blend is what hides it.
 
 Setup:
 
-- graph: `specs/walk_jog.pmg_spec`;
+- graph: `specs/demo_walk_jog_topology.pmg_spec`;
 - runtime rate: 30 frames/s;
 - sample duration: 20 seconds;
 - transition blend: 5 frames, cubic smoothstep;
@@ -92,7 +93,8 @@ frames until that full edge-quality sweep exists.
 
 A second pass grounded the jolt in the point-cloud transition distance `D` at
 the chosen optimal cell, measured with `--diagnose-graph-edge` over every
-`walk_jog` edge (proper end->start sub-range `[0.70,0.95]->[0.05,0.30]`):
+`demo_walk_jog_topology` edge (proper end->start sub-range
+`[0.70,0.95]->[0.05,0.30]`):
 
 | Edge | T_GOOD | D (min, over source samples) | Reading |
 |---|---:|---|---|
@@ -144,9 +146,11 @@ cases flagged in an external continuity review. Each began as an opt-in ablation
 toggle (PR #44); the self-edge pre-roll wrap then **landed as the default**
 (`TransitionPreRollPolicy::kWrapCyclicSelfEdges`, commit `f3576c3`; the policy was
 later gated on per-node cyclic metadata so only cyclic self-edges wrap), so the
-improved column below is now the shipped behavior, not an opt-in. The `walk_jog`
+improved column below is now the shipped behavior, not an opt-in. The
+`demo_walk_jog_topology`
 node is cyclic (registration `cycle_joint`), so its self-edge wraps. Measured on the
-`walk_jog` self-edge, centered runtime blend, 20 s, reported as `pop_ratio`
+`demo_walk_jog_topology` self-edge, centered runtime blend, 20 s, reported as
+`pop_ratio`
 (max step / median step):
 
 | configuration | wide 0.0 | mid 0.5 | tight 1.0 |
@@ -253,7 +257,7 @@ graph or distance code would reduce paper fidelity.
 
 ## Why Jog Cannot Be Adjusted
 
-`walk_jog.pmg_spec` declares:
+`demo_walk_jog_topology.pmg_spec` declares:
 
 ```text
 node jog 1
@@ -282,12 +286,12 @@ parametric motion space:
 4. target node generates the next short clip at the clamped coordinate;
 5. runtime aligns and blends into it at the stored transition phases.
 
-For `walk_jog`:
+For `demo_walk_jog_topology`:
 
 - `walk`: authored scalar 0..1, calibrated against measured `turn_rate`;
 - `jog`: singleton scalar fixed at 0.
 
-For `walk_curvature_speed.pmg_spec`:
+For `demo_walk_2d_triangle.pmg_spec`:
 
 - axis 0: turn/curvature;
 - axis 1: gait/speed, calibrated with `travel_speed`;
@@ -295,6 +299,7 @@ For `walk_curvature_speed.pmg_spec`:
   pace); the manual blend slider still exposes axis 0 and holds axis 1 at its
   midpoint.
 
-`walk_curvature.pmg_spec` remains the clean one-slider steering demo.
-`walk_curvature_speed.pmg_spec` is the 2-D data contract and is now fully
+`legacy_walk_curvature.pmg_spec` remains available for one-slider steering
+regression, but its non-monotone signed response excludes it from the curated
+demo set. `demo_walk_2d_triangle.pmg_spec` is the 2-D data contract and is
 steerable under goto; only the manual per-axis slider UI is still 1-D.
