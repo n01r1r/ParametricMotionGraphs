@@ -1,5 +1,6 @@
 #include "PmgViewerWorkspace.h"
 
+#include "GraphAuthoringModel.h"
 #include "PmgViewerWorkspaceFactory.h"
 
 #include <imgui.h>
@@ -730,6 +731,35 @@ void PmgViewerWorkspace::RefreshExampleContacts(PmgExample& example) {
     }
 }
 
+std::string PmgViewerWorkspace::CheckBlendableMotionFamily() const {
+    // Gather the dim-matching members (the ones RebuildPmgSpace actually adds)
+    // and delegate the decision to the pure, unit-tested
+    // pmgviewer::FirstNonBlendableExample (see GraphAuthoringModel.h for the
+    // single-family rationale).
+    const std::size_t dim = static_cast<std::size_t>(std::max(1, pmg_dimension_));
+    std::vector<const PmgExample*> members;
+    std::vector<int> contact_counts;
+    for (const PmgExample& example : pmg_examples_) {
+        if (example.parameter.size() == dim) {
+            members.push_back(&example);
+            contact_counts.push_back(
+                static_cast<int>(example.contact_intervals.size()));
+        }
+    }
+    const bool have_foot_joints = !ResolveContactJointIndices().empty();
+    const int offender =
+        pmgviewer::FirstNonBlendableExample(contact_counts, have_foot_joints);
+    if (offender < 0) {
+        return {};
+    }
+    const PmgExample& example = *members[static_cast<std::size_t>(offender)];
+    return "Example '" + example.label + "' is not a cyclic locomotion clip (" +
+           std::to_string(example.contact_intervals.size()) +
+           " foot contact). A parametric blend space holds one motion family; "
+           "mixing an acyclic clip jolts the blend. Remove it, or give it its "
+           "own graph node and a transition edge.";
+}
+
 void PmgViewerWorkspace::ResizeParameterVectors() {
     const std::size_t dim = static_cast<std::size_t>(std::max(1, pmg_dimension_));
     pmg_parameter_.resize(dim, 0.0f);
@@ -742,6 +772,7 @@ void PmgViewerWorkspace::RebuildPmgSpace() {
     ResizeParameterVectors();
     if (pmg_examples_.empty()) {
         pmg_space_ready_ = false;
+        pmg_space_blend_error_.clear();
         pmg_preview_clip_ = pmg::MotionClip{};
         steering_turn_rate_curve_.clear();
         steering_travel_speed_curve_.clear();
@@ -782,6 +813,16 @@ void PmgViewerWorkspace::RebuildPmgSpace() {
         }
         pmg_parameter_[axis] = std::clamp(
             pmg_parameter_[axis], pmg_parameter_min_[axis], pmg_parameter_max_[axis]);
+    }
+    // Reject a cross-family blend at the authoring boundary instead of silently
+    // generating a jolting preview. Keep the space un-ready so Parametric blend
+    // stays gated; the reason surfaces in the Motion-space section.
+    pmg_space_blend_error_ = CheckBlendableMotionFamily();
+    if (!pmg_space_blend_error_.empty()) {
+        pmg_space_ready_ = false;
+        status_message_ = pmg_space_blend_error_;
+        mode_ = ViewerPlaybackMode::ClipPlayback;
+        return;
     }
     pmg_space_ready_ = true;
     RecomputeSteeringCurve();
@@ -1148,6 +1189,13 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
         "Graph NODE = this parametric motion space: a blend of its sample clips.");
     ImGui::TextDisabled(
         "Graph EDGES = sampled transitions between nodes (see the Graph tab).");
+
+    if (!pmg_space_blend_error_.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.55f, 0.25f, 1.0f));
+        ImGui::TextWrapped("Blend space rejected: %s",
+                           pmg_space_blend_error_.c_str());
+        ImGui::PopStyleColor();
+    }
 
     if (pmg_space_ready_) {
         ImGui::Separator();

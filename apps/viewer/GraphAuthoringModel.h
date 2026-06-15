@@ -1,9 +1,37 @@
 #pragma once
 
+#include <cstddef>
 #include <cmath>
 #include <vector>
 
 namespace pmgviewer {
+
+// Authoring-boundary motion-family guard (mirrors core
+// RequireBlendableMotionFamily, strict-(a)). A parametric blend space holds one
+// motion family: structurally similar, registered examples. Folding an acyclic
+// clip (e.g. a vault) in with cyclic locomotion blends raw phases and bleeds the
+// odd clip's pose (the walk+vault arm-high jolt). Rule: in a multi-example space
+// every example must be cyclic (>=2 foot contacts).
+//
+// Returns the index of the first example that breaks the premise, or -1 when the
+// space is blendable. A single-example space (<2 examples) and the case where
+// cyclicity cannot be judged (have_foot_joints == false) both return -1: a lone
+// example never blends, and contact-detection failure must never block
+// authoring. Structural-equality (equal anchor counts) is deliberately not
+// checked: viewer examples are raw clips, not cycle-extracted, so same-family
+// clips of differing length legitimately carry differing contact counts.
+inline int FirstNonBlendableExample(
+    const std::vector<int>& example_contact_counts, bool have_foot_joints) {
+    if (example_contact_counts.size() < 2 || !have_foot_joints) {
+        return -1;
+    }
+    for (std::size_t index = 0; index < example_contact_counts.size(); ++index) {
+        if (example_contact_counts[index] < 2) {
+            return static_cast<int>(index);
+        }
+    }
+    return -1;
+}
 
 inline constexpr float kDefaultGoodTransitionThreshold = 80.0f;
 inline constexpr float kDefaultBadTransitionThreshold = 110.0f;
