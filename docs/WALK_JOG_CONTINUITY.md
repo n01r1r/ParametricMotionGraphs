@@ -1,6 +1,6 @@
 # Walk/Jog Continuity and Control Audit
 
-Last updated: 2026-06-15.
+Last updated: 2026-06-16.
 
 ## Purpose
 
@@ -214,9 +214,21 @@ yaw rates use a `0.05 rad/s` deadband. `cyclic_seam_mismatch` is reserved until
 the CyclicContinuity contract provides raw seam evidence. This diagnostic does
 not change PMG thresholds, scheduling, alignment, or blending.
 
-Smoke evidence on `demo_walk_self_edge_minimal`, 8 seconds, seed 99: 12
-transitions completed and 12 CSV rows were written. This validates diagnostic
-coverage, not perceptual smoothness.
+The first 30-second evidence sweep (2026-06-16, runtime seed 99) is recorded in
+`outputs/transition_quality/TRANSITION_QUALITY_SWEEP.md`. The minimal self-edge
+demo completed 47 transitions with 47 CSV rows and maximum local pop ratio
+`1.615`, below the requested `3.0` gate. The walk/jog topology demo completed
+42 transitions, including 24 cross-node transitions; none of those cross-node
+transitions wrapped pre-roll.
+
+Every transition in both runs classified as `yaw_rate_discontinuity`. The
+self-edge median yaw-rate ratio was `3.535`; the walk/jog median was `9.649`
+and maximum was `42.116`. Cross-node edges also had worse D, pose pop, and root
+speed ratios than the `0 -> 0` self-edge. This is evidence for future
+velocity/yaw/contact-aware rejection, not permission to tune thresholds or
+claim a production walk-jog controller. No transition classified as
+`contact_mismatch`; foot drift remains observational when the same foot is not
+in contact on both sides.
 
 ### Conclusion
 

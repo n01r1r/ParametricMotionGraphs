@@ -51,8 +51,8 @@ that diagnostic scale and window placement. Under the exact asymmetric raw-sum
 metric (`specs/legacy_walk_curvature`, `--validate-graph`, seed 7), current
 production/authored mean-min distances are `156.654 / 145.385 = 1.0775`; the
 regression gate records that corpus-specific penalty explicitly and caps it at
-`1.10`. All 40 configured CTest checks pass as of 2026-06-15. The payoff is
-corpus-density-coupled: with only
+`1.10`. All 42 configured CTest checks pass as of 2026-06-16, including
+`test_transition_quality`. The payoff is corpus-density-coupled: with only
 three clean walk clips the within-segment correspondence is already near-linear,
 so headroom is small.
 
