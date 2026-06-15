@@ -18,35 +18,28 @@ struct RuntimeControlRequest {
 // How the runtime starts the target clip when a centered pre-roll would land
 // before its phase-0 frame. See RuntimeControllerConfig::preroll_policy.
 enum class TransitionPreRollPolicy {
-    kClampAtClipStart,  // clamp the start to phase 0 (default, cross-node safe)
-    kWrapCyclicClip,    // wrap into the previous cycle tail (cyclic self-edge)
+    kClampAtClipStart,  // Clamp every target pre-roll at phase 0.
+    kWrapCyclicClip,    // Wrap every target pre-roll; diagnostic/ablation mode.
+    kWrapSelfEdges,     // Wrap only source==target cyclic self-edges.
 };
 
 struct RuntimeControllerConfig {
     // Number of sampled blend frames at the runtime sampling rate. k samples
     // span k-1 frame intervals. This must equal the DistanceGridConfig
-    // window_size the edges were built with (callers wire it from the
-    // artifact's edge build settings; the default matches that config).
+    // window_size the edges were built with.
     int transition_blend_frames = 5;
-    // Runtime BLEND placement around the stored optimal transition point.
-    // kPmgCentered (paper §5.2.1, "blending window centered at the optimal
-    // transition point") gates half a window early so the optimal point gets
-    // maximum blend weight; kKovarDirectional places the blend forward from the
-    // point. This is independent of the metric window convention
-    // (PmgBuilderConfig::transition_convention) -- PMG locates the transition
-    // with Kovar's directional metric, then centers the blend on it.
+
+    // Runtime blend placement around the stored optimal transition point.
+    // kPmgCentered gates half a window early so the optimal point receives
+    // maximum blend weight. kKovarDirectional places the blend forward from
+    // the stored point.
     TransitionWindowConvention convention =
         TransitionWindowConvention::kPmgCentered;
-    // What to do when a centered (or wide directional) pre-roll would start the
-    // target clip before its phase-0 frame, i.e. target_phase*duration < lead.
-    // kClampAtClipStart (default, behavior-preserving) clamps the start to 0:
-    // safe when the target's pre-start frames are meaningless (a true cross-node
-    // clip). kWrapCyclicClip lets the start go negative and folds it into the
-    // previous cycle's tail (FoldCompletedCycles backward branch): correct for a
-    // cyclic locomotion self-edge, where the tail is the same clip's end and the
-    // clamp otherwise drops the target's pre-roll velocity support.
+
+    // Default policy wraps only cyclic self-edges. Cross-node transitions remain
+    // clamped because their pre-start target frames may not be meaningful.
     TransitionPreRollPolicy preroll_policy =
-        TransitionPreRollPolicy::kClampAtClipStart;
+        TransitionPreRollPolicy::kWrapSelfEdges;
 };
 
 // Read-only snapshot of the transition currently being blended.
@@ -63,36 +56,39 @@ struct RuntimeTransitionDiagnostics {
     ParameterVector requested_target_parameter;
     ParameterVector actual_target_parameter;
     ParameterAabb reachable_target_box;
+
     float source_transition_phase = 0.0f;
     float target_transition_phase = 0.0f;
     TransitionWindowConvention transition_window_convention =
         TransitionWindowConvention::kKovarDirectional;
     TransitionFrameWindows runtime_windows;
     float metric_window_span_seconds = 0.0f;
+
     RigidTransform2D alignment;
+
     float blend_elapsed_seconds = 0.0f;
     float blend_duration_seconds = 0.0f;
     float blend_progress = 0.0f;
+
+    // Pre-roll diagnostics. These make the self-edge wrap policy observable in
+    // tests and CLI diagnostics.
+    bool target_preroll_wrapped = false;
+    float raw_target_start_seconds = 0.0f;
+    float scheduled_target_start_seconds = 0.0f;
 };
 
-// The runtime's clip-local -> world placement is a RigidTransform2D, accumulated
-// across transitions so the streamed motion is continuous (no root pop, no
-// facing jump).
-
-// Streams motion from a ParametricMotionGraph. On reaching a source transition
-// phase it aligns and blends into the requested target clip, accumulating the
-// world transform so the character keeps moving smoothly.
+// The runtime's clip-local -> world placement is a RigidTransform2D,
+// accumulated across transitions so the streamed motion is continuous.
 class RuntimeController {
 public:
     // The alignment strategy is the seam for how transitions align the target
-    // clip onto the current one (paper path: point-cloud; debug path: root-only). It must
-    // outlive the controller.
+    // clip onto the current one. It must outlive the controller.
     RuntimeController(const ParametricMotionGraph& graph,
                       const AlignmentStrategy& alignment,
                       RuntimeControllerConfig config = {});
 
     // Clip lengths derive from each space's BlendedDurationSeconds at the
-    // active parameter (paper timing); only the sampling rate is configured.
+    // active parameter. Only the sampling rate is configured.
     void Start(
         int node_index,
         const ParameterVector& initial_parameter,
@@ -107,17 +103,24 @@ public:
     bool IsTransitioning() const;
     int CompletedTransitions() const;
     const RigidTransform2D& WorldTransform() const;
-    std::optional<RuntimeTransitionDiagnostics> ActiveTransitionDiagnostics() const;
+    std::optional<RuntimeTransitionDiagnostics>
+    ActiveTransitionDiagnostics() const;
 
 private:
     float ClipPhase(const MotionClip& clip, float time_seconds) const;
     Pose SampleWorld(const MotionClip& clip, float time_seconds,
                      const RigidTransform2D& transform) const;
-    void TryScheduleTransition(const RuntimeControlRequest& request);
-    // Fold completed cycles into the placement: while `time_seconds` has
-    // passed the clip's end, subtract one duration and compose the clip's
-    // cycle delta into `transform`. Keeps looped playback continuous (the
-    // raw clip-local root returns to its start every cycle).
+
+    void TryScheduleTransition(const RuntimeControlRequest& request,
+                               float previous_phase,
+                               float phase_advance);
+
+    bool ShouldWrapTargetPreRoll(const PmgEdge& edge) const;
+
+    // Fold completed cycles into the placement. While time_seconds has passed
+    // the clip end, subtract one duration and compose the clip's cycle delta
+    // into transform. While time_seconds is negative, add one duration and
+    // compose the inverse cycle delta. This supports cyclic pre-roll.
     void FoldCompletedCycles(const MotionClip& clip, float& time_seconds,
                              RigidTransform2D& transform) const;
 
