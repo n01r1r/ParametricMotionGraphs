@@ -15,6 +15,11 @@ class OrbitCamera {
 public:
     void Orbit(float delta_yaw_radians, float delta_pitch_radians);
     void Zoom(float scroll_steps);
+    // Slide the orbit target across the ground plane in camera-relative
+    // directions (WASD): right_amount along the camera's right vector, forward
+    // amount along its ground-projected view direction. Both are fractions of
+    // the current orbit distance, so pan speed feels constant at any zoom.
+    void Pan(float right_amount, float forward_amount);
     void SetTarget(const glm::vec3& target_world);
     void SetAspectRatio(float aspect_ratio);
 

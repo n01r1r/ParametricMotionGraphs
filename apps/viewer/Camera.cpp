@@ -35,6 +35,21 @@ void OrbitCamera::Zoom(float scroll_steps) {
                            kMinDistance, kMaxDistance);
 }
 
+void OrbitCamera::Pan(float right_amount, float forward_amount) {
+    const glm::vec3 up(0.0f, 1.0f, 0.0f);
+    // View direction projected onto the ground (forward = into the scene).
+    glm::vec3 forward = target_world_ - Position();
+    forward.y = 0.0f;
+    const float forward_length = glm::length(forward);
+    if (forward_length < 1.0e-6f) {
+        return;  // looking straight down: no well-defined ground forward
+    }
+    forward /= forward_length;
+    const glm::vec3 right = glm::normalize(glm::cross(forward, up));
+    target_world_ +=
+        (right * right_amount + forward * forward_amount) * distance_;
+}
+
 void OrbitCamera::SetTarget(const glm::vec3& target_world) {
     target_world_ = target_world;
 }

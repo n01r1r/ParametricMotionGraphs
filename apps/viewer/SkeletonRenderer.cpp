@@ -88,10 +88,23 @@ void main() {
     vec3 lightDir = normalize(uLightToDir);
     vec3 baseColor = uColor;
     if (uIsFloor == 1) {
-        vec2 cell = vWorldPos.xz * 0.1;
-        vec2 grid = abs(fract(cell - 0.5) - 0.5) / fwidth(cell);
-        float line = 1.0 - min(min(grid.x, grid.y), 1.0);
-        baseColor = mix(uColor, uColor * 0.55, line * 0.85);
+        // Checkerboard tiles give an unambiguous scale/depth cue the flat-grey
+        // floor lacked. Fade to a flat mid-grey in the distance so far tiles
+        // (sub-pixel) do not shimmer, and add crisp seam lines for readability
+        // up close.
+        float cellSize = 50.0;
+        vec2 cellUv = vWorldPos.xz / cellSize;
+        vec2 cellId = floor(cellUv);
+        float checker = mod(cellId.x + cellId.y, 2.0);
+        vec3 darkTile = uColor * 0.60;
+        vec3 lightTile = uColor;
+        vec3 flatTile = mix(darkTile, lightTile, 0.5);
+        vec2 fw = fwidth(cellUv);
+        float blur = clamp(max(fw.x, fw.y), 0.0, 1.0);
+        baseColor = mix(mix(darkTile, lightTile, checker), flatTile, blur);
+        vec2 seam = abs(fract(cellUv - 0.5) - 0.5) / max(fw, vec2(1.0e-5));
+        float line = 1.0 - min(min(seam.x, seam.y), 1.0);
+        baseColor = mix(baseColor, baseColor * 0.70, line * 0.6);
     }
     float diffuse = max(dot(normal, lightDir), 0.0);
     float shadow = ShadowFactor(normal, lightDir);
