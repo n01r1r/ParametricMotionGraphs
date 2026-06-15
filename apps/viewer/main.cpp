@@ -77,9 +77,10 @@ void CursorPositionCallback(GLFWwindow* window, double x, double y) {
     input->last_cursor_x = x;
     input->last_cursor_y = y;
     if (input->dragging && !ImGui::GetIO().WantCaptureMouse) {
-        // Drag right -> yaw right, drag up -> pitch up.
+        // Drag right -> yaw right (normal); drag down -> pitch up (vertical
+        // inverted per preference).
         input->camera->Orbit(static_cast<float>(delta_x) * kOrbitRadiansPerPixel,
-                             -static_cast<float>(delta_y) * kOrbitRadiansPerPixel);
+                             static_cast<float>(delta_y) * kOrbitRadiansPerPixel);
     }
 }
 
