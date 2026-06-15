@@ -24,6 +24,7 @@ Deviation ids (`D1`–`D8`) are stable and referenced from `README.md` and
 | Paper element | Status | Implementation | Source |
 |---|---|---|---|
 | Motion space = blend of registered example motions | ✓ | `ParametricMotionSpace` | `include/pmg/ParametricMotionSpace.h:62` |
+| Blend space holds one motion family (structurally similar examples only) | ✓ | `RequireBlendableMotionFamily` rejects acyclic / contact-structure-mismatched multi-example spaces | `src/MotionRegistration.cpp`; `tests/test_motion_registration` |
 | Scattered-data blend weights, `k = dim + 1` nearest, k-th-neighbor cutoff (Eq. 2) | ✓ | `ComputeLocalBlendWeights` | `src/ParametricMotionSpace.cpp:556`; `docs/adr/0002-pmg-knn-cutoff.md` |
 | Parameter-accurate inverse (authored coordinate → weights that achieve it) | ✓ (D1) | `CalibrateParameterMetrics` / `ParameterCalibration` | `include/pmg/ParametricMotionSpace.h:50` |
 | Blend inherits example timing (cycle length varies with the parameter) | ✓ (D2) | `BlendedDurationSeconds` → `GenerateClip` | `include/pmg/ParametricMotionSpace.h:99` |
@@ -36,7 +37,13 @@ B-spline, plus per-frame rigid frame alignment and constraint matching. The
 timewarp `s(u)` now matches that: the dense slope-constrained DTW correspondence
 is denoised by a cubic smoothing spline (penalized second-difference form, the
 natural-cubic-smoothing-spline equivalent of KG04's B-spline) before it is
-sampled into warp knots — see `RefineRegistrationByDtw`. Under the superseded
+sampled into warp knots — see `RefineRegistrationByDtw`. The spline denoises the
+*placement* of the warp knots; `TimeWarp::Evaluate` still interpolates
+piecewise-linearly between them, so the stored `s(u)` is C0 (position-continuous)
+but **not C1** — its slope jumps at every knot, which under blending surfaces as
+a phase-velocity discontinuity. Denser knots shrink those jumps but do not
+remove them; delivering C1 at evaluation time would need a monotone-spline
+`Evaluate`, not only a spline *fit* over the knots. Under the superseded
 centered mean-distance diagnostic, this lowered production best self-transition
 distance from `0.8878` (prior piecewise-linear refine) to `0.8816` against a
 `0.8604` no-registration baseline, with runtime pop ratio flat. D6 replaced
@@ -52,6 +59,23 @@ What remains ◐ is the rest of the KG04 registration *curve*: per-frame rigid
 pose alignment and constraint matching, here approximated by root-delta
 integration. The corpus has no skin mesh, so this is accepted as a local
 extension that holds on the included clips.
+
+**Motion-family premise (enforced).** A parametric blend space is only defined
+over structurally similar, registered example motions — one *motion family*
+(Heck-Gleicher §3; KG04 extracts families before blending). Two different
+families (for example a walk loop and a vault) are joined by a *transition edge*
+between separate graph nodes, never by interpolating them as two examples of one
+space: blending across families produces a raw-phase average whose family-unique
+events (a high arm swing the other family lacks) read as a jolt, and contact
+registration aligns feet, not such events. `RequireBlendableMotionFamily`
+enforces this for any space with two or more examples — each must be a single
+looping cycle sharing one contact structure — so a cross-family or non-looping
+example fails the build (and the interactive authoring path) with guidance to
+use an edge instead, rather than silently blending. Single-example nodes are
+exempt because they never blend. This is the structural counterpart to the
+runtime-seam analysis in [`WALK_JOG_CONTINUITY.md`](WALK_JOG_CONTINUITY.md): that
+document's jolt is a same-family periodicity limit; this guard prevents the
+distinct cross-family case from being authored at all.
 
 ## §4 — Parametric motion graph construction
 
@@ -123,10 +147,13 @@ not the PMG layer this project implements.
 
 ## What's left, in priority order
 
-1. **◐ Registration depth** — the timewarp `s(u)` is now a cubic smoothing
-   spline over the dense DTW correspondence (KG04-faithful, measured to beat the
-   prior linear warp; see §3 above), so the *timing* curve is closed. What is
-   still approximated is the rest of KG04's registration curve — per-frame rigid
+1. **◐ Registration depth** — the timewarp `s(u)` knot *fit* is now a cubic
+   smoothing spline over the dense DTW correspondence (KG04-faithful, measured to
+   beat the prior linear warp; see §3 above). The evaluated warp is still
+   piecewise-linear between knots, so `s(u)` is C0 but not C1 — slope jumps at
+   knots persist (shrinking with knot density); a monotone-spline `Evaluate`
+   would be needed to close C1 at sampling time. What is still approximated
+   beyond timing is the rest of KG04's registration curve — per-frame rigid
    pose alignment and constraint matching — which root-delta integration stands
    in for. Closing it fully needs skinned/constraint data the corpus lacks.
    Note: an earlier attempt to cubic-*interpolate* the sparse contact anchors
