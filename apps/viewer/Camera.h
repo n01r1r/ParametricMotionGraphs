@@ -15,6 +15,12 @@ class OrbitCamera {
 public:
     void Orbit(float delta_yaw_radians, float delta_pitch_radians);
     void Zoom(float scroll_steps);
+    // FPS fly translation (WASD): move the camera through the world along its
+    // view direction (forward) and horizontal strafe axis (right) by translating
+    // the orbit target; the eye follows and the view direction is unchanged.
+    // Amounts are fractions of the orbit distance, so the feel is constant at
+    // any zoom.
+    void Pan(float right_amount, float forward_amount);
     void SetTarget(const glm::vec3& target_world);
     void SetAspectRatio(float aspect_ratio);
 

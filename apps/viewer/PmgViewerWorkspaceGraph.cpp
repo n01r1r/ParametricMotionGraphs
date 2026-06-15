@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -42,6 +43,19 @@ void DrawPhaseMarker(ImDrawList* draw_list, float phase, float left, float top,
 std::string ShortClipLabel(const std::string& name) {
     const std::size_t cut = name.find_last_of("/\\");
     return cut == std::string::npos ? name : name.substr(cut + 1);
+}
+
+std::string FrameList(const std::vector<int>& frames) {
+    std::ostringstream output;
+    output << '[';
+    for (std::size_t index = 0; index < frames.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << frames[index];
+    }
+    output << ']';
+    return output.str();
 }
 
 std::string MotionSpaceClipSummary(
@@ -227,6 +241,7 @@ void PmgViewerWorkspace::AdoptArtifact(
         graph_, *graph_alignment_, graph_runtime_config_);
     graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
     graph_ready_ = true;
+    ResetRuntimeTrace();
     graph_origin_ = origin;
     graph_open_runtime_tab_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
@@ -400,6 +415,7 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
 
     graph_ready_ = true;
+    ResetRuntimeTrace();
     graph_origin_ = origin;
     graph_open_runtime_tab_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
@@ -1016,6 +1032,204 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
         "cyan active | gold target | orange transition | white selected | drag node");
 }
 
+void PmgViewerWorkspace::DrawParameterCoverage() {
+    ImGui::TextUnformatted("Parameter-space coverage");
+    ImGui::TextDisabled(
+        "Example samples and the axis-extreme corners of the parameter box. A "
+        "red ring marks a corner no example reaches (that quadrant is "
+        "extrapolation, not interpolation).");
+    if (!graph_ready_ || graph_.NumNodes() == 0) {
+        ImGui::TextDisabled("Load or build a graph to inspect coverage.");
+        return;
+    }
+
+    selected_graph_node_ =
+        std::clamp(selected_graph_node_, 0, graph_.NumNodes() - 1);
+    if (ImGui::BeginCombo("Node##coverage_node",
+                          graph_.Node(selected_graph_node_).name.c_str())) {
+        for (int index = 0; index < graph_.NumNodes(); ++index) {
+            const bool selected = index == selected_graph_node_;
+            if (ImGui::Selectable(graph_.Node(index).name.c_str(), selected)) {
+                selected_graph_node_ = index;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    const pmg::ParametricMotionSpace& space =
+        graph_.Node(selected_graph_node_).motion_space;
+    const std::vector<pmg::ExampleMotion>& examples = space.Examples();
+    const int dimension = space.ParameterDimension();
+    if (examples.empty() || dimension <= 0) {
+        ImGui::TextDisabled("Node has no examples.");
+        return;
+    }
+    const pmg::ParameterVector min_parameter = space.MinParameter();
+    const pmg::ParameterVector max_parameter = space.MaxParameter();
+
+    // Spanned axes and full-dimension corner coverage, the same quantities the
+    // spec `expect` validator checks offline.
+    int spanned_axes = 0;
+    for (int axis = 0; axis < dimension; ++axis) {
+        const float first = examples.front().parameter[axis];
+        for (const pmg::ExampleMotion& example : examples) {
+            if (example.parameter[axis] != first) {
+                ++spanned_axes;
+                break;
+            }
+        }
+    }
+    constexpr int kMaxCornerDimension = 8;
+    int sampled_corners = 0;
+    int total_corners = 0;
+    if (dimension <= kMaxCornerDimension) {
+        total_corners = 1 << dimension;
+        for (int mask = 0; mask < total_corners; ++mask) {
+            bool found = false;
+            for (const pmg::ExampleMotion& example : examples) {
+                bool matches = true;
+                for (int axis = 0; axis < dimension; ++axis) {
+                    const float want = (mask & (1 << axis)) ? max_parameter[axis]
+                                                            : min_parameter[axis];
+                    if (example.parameter[axis] != want) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                ++sampled_corners;
+            }
+        }
+    }
+    if (total_corners > 0) {
+        ImGui::Text("%d samples \xc2\xb7 spans %d of %d axes \xc2\xb7 "
+                    "%d/%d box corners sampled",
+                    static_cast<int>(examples.size()), spanned_axes, dimension,
+                    sampled_corners, total_corners);
+    } else {
+        ImGui::Text("%d samples \xc2\xb7 spans %d of %d axes",
+                    static_cast<int>(examples.size()), spanned_axes, dimension);
+    }
+
+    const int x_axis = 0;
+    const int y_axis = dimension >= 2 ? 1 : -1;
+    if (dimension > 2) {
+        ImGui::TextDisabled("%d-D space; plotting axes 0 and 1.", dimension);
+    } else if (dimension == 1) {
+        ImGui::TextDisabled("1-D space; samples shown along the axis.");
+    }
+
+    const ImVec2 canvas_origin = ImGui::GetCursorScreenPos();
+    const float canvas_width =
+        std::max(ImGui::GetContentRegionAvail().x, 160.0f);
+    const float canvas_height = 240.0f;
+    ImGui::Dummy(ImVec2(canvas_width, canvas_height));
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddRectFilled(
+        canvas_origin,
+        ImVec2(canvas_origin.x + canvas_width, canvas_origin.y + canvas_height),
+        IM_COL32(18, 22, 30, 255));
+
+    const float pad = 40.0f;
+    const float left = canvas_origin.x + pad;
+    const float right = canvas_origin.x + canvas_width - pad;
+    const float top = canvas_origin.y + 24.0f;
+    const float bottom = canvas_origin.y + canvas_height - pad;
+
+    auto axis_bounds = [&](int axis, float& lo, float& hi) {
+        lo = (axis >= 0 && axis < static_cast<int>(min_parameter.size()))
+                 ? min_parameter[axis]
+                 : 0.0f;
+        hi = (axis >= 0 && axis < static_cast<int>(max_parameter.size()))
+                 ? max_parameter[axis]
+                 : 1.0f;
+    };
+    float x_lo = 0.0f;
+    float x_hi = 1.0f;
+    float y_lo = 0.0f;
+    float y_hi = 1.0f;
+    axis_bounds(x_axis, x_lo, x_hi);
+    if (y_axis >= 0) {
+        axis_bounds(y_axis, y_lo, y_hi);
+    }
+    // Display ranges pad zero-width axes so a single value still renders.
+    float x_view_lo = x_lo;
+    float x_view_hi = x_hi;
+    if (x_view_hi - x_view_lo < kEpsilon) {
+        x_view_lo -= 0.5f;
+        x_view_hi += 0.5f;
+    }
+    float y_view_lo = y_lo;
+    float y_view_hi = y_hi;
+    if (y_view_hi - y_view_lo < kEpsilon) {
+        y_view_lo -= 0.5f;
+        y_view_hi += 0.5f;
+    }
+    auto to_screen = [&](float value_x, float value_y) {
+        const float tx = (value_x - x_view_lo) / (x_view_hi - x_view_lo);
+        const float ty = (y_axis >= 0)
+                             ? (value_y - y_view_lo) / (y_view_hi - y_view_lo)
+                             : 0.5f;
+        return ImVec2(left + tx * (right - left), bottom - ty * (bottom - top));
+    };
+
+    // Parameter box (the example AABB).
+    draw_list->AddRect(to_screen(x_lo, y_lo), to_screen(x_hi, y_hi),
+                       IM_COL32(70, 110, 160, 200));
+
+    // Mark every box corner of the displayed axes; red ring where unsampled.
+    if (dimension >= 1) {
+        const float corner_x[2] = {x_lo, x_hi};
+        const float corner_y[2] = {y_lo, y_hi};
+        const int y_count = (y_axis >= 0) ? 2 : 1;
+        for (int ix = 0; ix < 2; ++ix) {
+            for (int iy = 0; iy < y_count; ++iy) {
+                bool sampled = false;
+                for (const pmg::ExampleMotion& example : examples) {
+                    const bool x_ok = example.parameter[x_axis] == corner_x[ix];
+                    const bool y_ok =
+                        (y_axis < 0) || example.parameter[y_axis] == corner_y[iy];
+                    if (x_ok && y_ok) {
+                        sampled = true;
+                        break;
+                    }
+                }
+                if (!sampled) {
+                    const ImVec2 p = to_screen(corner_x[ix], corner_y[iy]);
+                    draw_list->AddCircle(p, 9.0f, IM_COL32(235, 90, 110, 255),
+                                         0, 2.0f);
+                    draw_list->AddText(ImVec2(p.x + 8.0f, p.y - 16.0f),
+                                       IM_COL32(235, 90, 110, 255), "no sample");
+                }
+            }
+        }
+    }
+
+    // Example samples.
+    for (const pmg::ExampleMotion& example : examples) {
+        const float vx = example.parameter[x_axis];
+        const float vy = (y_axis >= 0) ? example.parameter[y_axis] : 0.0f;
+        const ImVec2 p = to_screen(vx, vy);
+        draw_list->AddCircleFilled(p, 5.0f, IM_COL32(120, 200, 255, 255));
+        draw_list->AddText(ImVec2(p.x + 7.0f, p.y - 6.0f),
+                           IM_COL32(200, 220, 240, 255),
+                           ShortClipLabel(example.clip.name).c_str());
+    }
+
+    // Axis labels.
+    draw_list->AddText(ImVec2(right - 36.0f, bottom + 6.0f),
+                       IM_COL32(150, 160, 175, 255), "axis 0");
+    if (y_axis >= 0) {
+        draw_list->AddText(ImVec2(canvas_origin.x + 4.0f, top - 18.0f),
+                           IM_COL32(150, 160, 175, 255), "axis 1");
+    }
+}
+
 void PmgViewerWorkspace::BuildGraphSection() {
     ImGui::Text("Current graph: %s", GraphOriginLabel());
     ImGui::SameLine();
@@ -1042,6 +1256,10 @@ void PmgViewerWorkspace::BuildGraphSection() {
     }
     if (ImGui::BeginTabItem("Quick self-edge")) {
         BuildGraphQuickTab();
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Coverage")) {
+        DrawParameterCoverage();
         ImGui::EndTabItem();
     }
 
@@ -1395,6 +1613,17 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
         current_pose.root_position.z,
         root_heading_radians_ * 180.0f / pmg::kPi,
         actual_turn_rate_radians_per_second_);
+    ImGui::Checkbox("Path trail", &show_graph_path_trail_);
+    ImGui::SameLine();
+    ImGui::Checkbox(
+        "Transition markers", &show_graph_transition_markers_);
+    ImGui::SameLine();
+    if (ImGui::Button("Clear trace")) {
+        ResetRuntimeTrace();
+    }
+    ImGui::TextDisabled(
+        "%zu trail points | %zu transitions",
+        graph_path_points_.size(), graph_transition_markers_.size());
     DrawTransitionPipeline();
 
     ImGui::Separator();
@@ -1462,12 +1691,16 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     constexpr const char* kSourceParameterLabel = "SOURCE";
     constexpr const char* kReachableTargetLabel = "TARGET RANGE";
     constexpr const char* kTransitionPhasesLabel = "PHASES";
+    constexpr const char* kMetricSupportLabel = "METRIC SUPPORT";
+    constexpr const char* kRuntimeSupportLabel = "RUNTIME SUPPORT";
     constexpr const char* kAlignmentTransformLabel = "ALIGNMENT";
     constexpr const char* kRuntimeBlendWindowLabel = "BLEND";
     const float widest_label_width = std::max({
         ImGui::CalcTextSize(kSourceParameterLabel).x,
         ImGui::CalcTextSize(kReachableTargetLabel).x,
         ImGui::CalcTextSize(kTransitionPhasesLabel).x,
+        ImGui::CalcTextSize(kMetricSupportLabel).x,
+        ImGui::CalcTextSize(kRuntimeSupportLabel).x,
         ImGui::CalcTextSize(kAlignmentTransformLabel).x,
         ImGui::CalcTextSize(kRuntimeBlendWindowLabel).x,
     });
@@ -1552,6 +1785,81 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
             draw_list, target_phase, origin.x, origin.y + 2.0f,
             width, 12.0f, IM_COL32(245, 180, 65, 255));
         ImGui::InvisibleButton("##transition_phases", ImVec2(width, 20.0f));
+    }
+
+    ImGui::TextColored(
+        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
+        kMetricSupportLabel);
+    ImGui::SameLine(value_column_x);
+    if (active.has_value()) {
+        pmg::TransitionWindowConvention metric_convention =
+            pmg::TransitionWindowConvention::kKovarDirectional;
+        int metric_window_size =
+            graph_runtime_config_.transition_blend_frames;
+        if (source_artifact_.has_value()) {
+            const std::string& source_name =
+                graph_.Node(active->source_node).name;
+            const std::string& target_name =
+                graph_.Node(active->target_node).name;
+            for (const pmg::EdgeBuildMetadata& edge_build :
+                 source_artifact_->metadata.edge_builds) {
+                if (edge_build.source_node == source_name &&
+                    edge_build.target_node == target_name) {
+                    metric_convention =
+                        edge_build.config.transition_convention;
+                    metric_window_size =
+                        edge_build.config.distance_grid.window_size;
+                    break;
+                }
+            }
+        }
+        const pmg::MotionClip source_clip =
+            graph_.Node(active->source_node).motion_space.GenerateClip(
+                active->source_parameter, graph_fps_);
+        const pmg::MotionClip target_clip =
+            graph_.Node(active->target_node).motion_space.GenerateClip(
+                active->actual_target_parameter, graph_fps_);
+        const int source_reference_frame = static_cast<int>(std::lround(
+            active->source_transition_phase *
+            static_cast<float>(
+                std::max(1, source_clip.NumFrames() - 1))));
+        const int target_reference_frame = static_cast<int>(std::lround(
+            active->target_transition_phase *
+            static_cast<float>(
+                std::max(1, target_clip.NumFrames() - 1))));
+        const pmg::TransitionFrameWindows metric_windows =
+            pmg::ResolveTransitionFrameWindows(
+                source_clip.NumFrames(), target_clip.NumFrames(),
+                source_reference_frame, target_reference_frame,
+                metric_window_size, metric_convention);
+        const std::string source_frames =
+            FrameList(metric_windows.source.sampled_frames);
+        const std::string target_frames =
+            FrameList(metric_windows.target.sampled_frames);
+        ImGui::Text(
+            "%s  src %s  tgt %s",
+            pmg::TransitionWindowConventionName(metric_convention),
+            source_frames.c_str(), target_frames.c_str());
+    } else {
+        ImGui::TextDisabled("available during active transition");
+    }
+
+    ImGui::TextColored(
+        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
+        kRuntimeSupportLabel);
+    ImGui::SameLine(value_column_x);
+    if (active.has_value()) {
+        const std::string source_frames =
+            FrameList(active->runtime_windows.source.sampled_frames);
+        const std::string target_frames =
+            FrameList(active->runtime_windows.target.sampled_frames);
+        ImGui::Text(
+            "%s  src %s  tgt %s",
+            pmg::TransitionWindowConventionName(
+                active->transition_window_convention),
+            source_frames.c_str(), target_frames.c_str());
+    } else {
+        ImGui::TextDisabled("available during active transition");
     }
 
     ImGui::TextColored(

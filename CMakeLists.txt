@@ -245,7 +245,8 @@ if(PMG_BUILD_TESTS)
     add_test(NAME cli_random_walk_artifact_walk_jog
         COMMAND pmg_cli --random-walk
             ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/artifact.pmg
-            --seconds 20 --min-transitions 5 --max-pop-ratio 5.0)
+            --seconds 20 --min-transitions 5 --max-pop-ratio 5.0
+            --dump-motion-csv ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/motion.csv)
     set_tests_properties(cli_random_walk_artifact_walk_jog PROPERTIES
         FIXTURES_REQUIRED pmg_artifact_walk_jog)
 

@@ -79,6 +79,20 @@ private:
     pmg::Pose CurrentPose() const;
     const pmg::Skeleton& ActiveSkeleton() const;
     void RebuildScene(const pmg::Pose& pose);
+    // Transform a pose's joints into render/world space (ground lift, then the
+    // display + skeleton scaling RebuildScene applies). Shared by the rendered
+    // skeleton and the path-preview ghosts so they sit in the same frame.
+    std::vector<glm::vec3> PoseWorldPositions(
+        const pmg::Pose& pose, const pmg::Skeleton& skeleton,
+        float ground_offset) const;
+    // Onion-skin path preview: sample the active clip at evenly spaced phases
+    // (start .. middle(s) .. end) and append faded ghost skeletons so the whole
+    // motion is visible at once. No-op unless path_preview_enabled_.
+    void AppendPathPreview();
+    void ResetRuntimeTrace();
+    void RecordRuntimeTracePoint(const pmg::Pose& pose);
+    void RecordTransitionMarker(
+        const pmg::RuntimeTransitionDiagnostics& transition);
 
     void AddCurrentClipToSpace(const pmg::ParameterVector& parameter);
     void RebuildPmgSpace();
@@ -108,6 +122,12 @@ private:
     void BuildGraphQuickTab();
     void BuildGraphRuntimeTab();
     void DrawParameterSpace(int axis);
+    // 2-D scatter of a node's example parameters with the parameter-box corners,
+    // marking corners no example reaches. Makes a declared N-D space that is
+    // really a lower-dimensional simplex (e.g. the missing tight-jog corner)
+    // visible instead of implied. Mirrors the spec `expect corner_coverage`
+    // check in the viewer.
+    void DrawParameterCoverage();
     void DrawPhaseTimeline(float canonical_phase);
     void DrawGraphCanvas();
     void DrawTransitionPipeline();
@@ -178,7 +198,13 @@ private:
 
     bool playing_ = true;
     float playback_speed_ = 1.0f;
-    float current_time_seconds_ = 0.0f;
+    // Canonical playback clock = phase in [0,1), NOT seconds. The blended cycle's
+    // real-time duration is parameter-dependent (BlendedDurationSeconds), so
+    // storing seconds and deriving phase = seconds/duration made phase JUMP the
+    // instant the blend parameter changed. Phase is the structural coordinate
+    // (where in the stride) and must be conserved across a parameter change;
+    // only the advance rate (phase per second = 1/duration) changes.
+    float current_phase_ = 0.0f;
     float skeleton_scale_ = 1.0f;
     // Render-only display scale: BVH is loaded in native units (small), so the
     // viewer scales geometry up for display. The metric/core stay native; this
@@ -213,6 +239,12 @@ private:
     // character cycles in place (inspect the pose) instead of tracing its
     // integrated trajectory across the floor.
     bool pmg_preview_in_place_ = false;
+    // Onion-skin path preview (clip & blend modes): draw faded ghost skeletons
+    // sampled across the active clip so the start, middle(s), and end of the
+    // motion are all visible at once. Ghosts always use the full root path so
+    // they spread along the trajectory, independent of the in-place toggle.
+    bool path_preview_enabled_ = false;
+    int path_preview_count_ = 5;
     // Measured turn rate (rad/s) of GenerateClip across the blend-parameter
     // axis. A smooth steering response is monotone and spike-free; this is the
     // in-GUI counterpart to the dev/core steering-smoothness diagnostic.
@@ -249,6 +281,15 @@ private:
     std::optional<pmg::PointCloudAlignment> graph_alignment_;
     std::optional<pmg::RuntimeController> graph_controller_;
     bool graph_ready_ = false;
+    struct TransitionTraceMarker {
+        glm::vec2 root_position{0.0f};
+        int source_node = -1;
+        int target_node = -1;
+    };
+    std::vector<glm::vec2> graph_path_points_;
+    std::vector<TransitionTraceMarker> graph_transition_markers_;
+    bool show_graph_path_trail_ = true;
+    bool show_graph_transition_markers_ = true;
     GraphOrigin graph_origin_ = GraphOrigin::None;
     bool graph_open_runtime_tab_ = false;
     float graph_desired_parameter_ = 0.0f;
