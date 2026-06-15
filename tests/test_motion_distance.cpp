@@ -150,5 +150,32 @@ int main() {
         assert(std::abs(result.distance - kExpectedWeightedSquaredSum) < 1.0e-5f);
     }
 
+    // DistanceGridConfig::cyclic_wrap actually engages at a cycle boundary: a
+    // window past the clip end repeats the last frame when clamped but pulls in
+    // the wrapped start frames when cyclic, so the metric distance differs. This
+    // backs the self-edge cyclic-metric ablation (a null effect on the corpus
+    // would otherwise be indistinguishable from the flag never running).
+    {
+        pmg::DistanceGridConfig clamp_config;
+        clamp_config.window_size = 4;
+        clamp_config.source_phase_start = 1.0f;  // last source frame only
+        clamp_config.source_phase_end = 1.0f;
+        clamp_config.target_phase_start = 0.0f;  // first target frame only
+        clamp_config.target_phase_end = 0.0f;
+        pmg::DistanceGridConfig wrap_config = clamp_config;
+        wrap_config.cyclic_wrap = true;
+
+        const pmg::DistanceGrid clamped =
+            pmg::MotionDistance::BuildDistanceGridForConvention(
+                skeleton, base, base, clamp_config,
+                pmg::TransitionWindowConvention::kKovarDirectional);
+        const pmg::DistanceGrid wrapped =
+            pmg::MotionDistance::BuildDistanceGridForConvention(
+                skeleton, base, base, wrap_config,
+                pmg::TransitionWindowConvention::kKovarDirectional);
+        assert(clamped.SourceCount() == 1 && clamped.TargetCount() == 1);
+        assert(std::abs(clamped.At(0, 0) - wrapped.At(0, 0)) > 1.0e-3f);
+    }
+
     return 0;
 }

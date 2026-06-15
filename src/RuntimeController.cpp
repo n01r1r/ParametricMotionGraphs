@@ -122,6 +122,14 @@ void RuntimeController::FoldCompletedCycles(const MotionClip& clip,
         time_seconds -= duration;
         transform = RigidTransform2D::Compose(transform, CycleDelta(clip));
     }
+    // Backward fold: a cyclic clip asked to play before its phase-0 frame
+    // (negative pre-roll) wraps into the previous cycle's tail, undoing one cycle
+    // delta so the root keeps marching instead of snapping to the clip start.
+    while (time_seconds < 0.0f) {
+        time_seconds += duration;
+        transform =
+            RigidTransform2D::Compose(transform, CycleDelta(clip).Inverse());
+    }
 }
 
 float RuntimeController::ClipPhase(const MotionClip& clip, float time_seconds) const {
@@ -287,9 +295,18 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
             config_.convention == TransitionWindowConvention::kPmgCentered
                 ? static_cast<float>(half_window) / frames_per_second_
                 : blend_seconds;
-        next_time_seconds_ = std::max(
-            0.0f, transition->target_transition_phase * target_duration -
-                      target_lead_seconds);
+        // Raw pre-roll start: the target's optimal phase, led by the blend so
+        // its first blend frame lands at onset. For a cyclic self-edge with a
+        // small target phase this goes negative; the policy decides whether to
+        // clamp at phase 0 or wrap into the previous cycle tail (folded below,
+        // once next_world_transform_ exists).
+        const float raw_target_start =
+            transition->target_transition_phase * target_duration -
+            target_lead_seconds;
+        next_time_seconds_ =
+            config_.preroll_policy == TransitionPreRollPolicy::kWrapCyclicClip
+                ? raw_target_start
+                : std::max(0.0f, raw_target_start);
 
         const int source_reference_frame = static_cast<int>(std::lround(
             transition->source_transition_phase *
@@ -314,6 +331,12 @@ void RuntimeController::TryScheduleTransition(const RuntimeControlRequest& reque
             config_.convention};
         const RigidTransform2D alignment = alignment_.Resolve(alignment_context);
         next_world_transform_ = RigidTransform2D::Compose(world_transform_, alignment);
+
+        // Normalize a wrapped (negative) pre-roll back into [0, duration) and
+        // fold the matching cycle delta into the target placement, so a cyclic
+        // self-edge plays its previous-cycle tail in the right world spot. A
+        // clamped start is already non-negative, so this is a no-op there.
+        FoldCompletedCycles(next_clip_, next_time_seconds_, next_world_transform_);
 
         transition_active_ = true;
         transition_elapsed_seconds_ = 0.0f;

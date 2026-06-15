@@ -9,12 +9,24 @@ namespace pmg {
 
 namespace {
 
+// Map a (possibly out-of-range) window frame into the clip. Default clamps at
+// the endpoints; cyclic_wrap takes it modulo the clip length so a self-edge
+// metric sees the real previous/next cycle frame instead of a repeated endpoint.
+int ResolveWindowFrame(int frame, int frame_count, bool cyclic_wrap) {
+    if (!cyclic_wrap) {
+        return std::clamp(frame, 0, frame_count - 1);
+    }
+    const int wrapped = frame % frame_count;
+    return wrapped < 0 ? wrapped + frame_count : wrapped;
+}
+
 PointCloud BuildPointCloudFromFirstFrameImpl(
     const Skeleton& skeleton,
     const MotionClip& clip,
     int first_frame,
     int window_size,
-    const PointCloudWeighting& weighting) {
+    const PointCloudWeighting& weighting,
+    bool cyclic_wrap = false) {
     clip.RequireNotEmpty("BuildPointCloudFromFirstFrame");
     if (window_size <= 0) {
         throw std::runtime_error(
@@ -38,7 +50,7 @@ PointCloud BuildPointCloudFromFirstFrameImpl(
     windowed_positions.reserve(static_cast<std::size_t>(window_size));
     for (int offset = 0; offset < window_size; ++offset) {
         const int frame =
-            std::clamp(first_frame + offset, 0, frame_count - 1);
+            ResolveWindowFrame(first_frame + offset, frame_count, cyclic_wrap);
         windowed_positions.push_back(ComputeJointWorldPositions(skeleton, clip.frames[frame]));
     }
 
@@ -262,7 +274,8 @@ DistanceGrid MotionDistance::BuildDistanceGridForConvention(
                 skeleton, source_clip,
                 windows.source.first_unclamped_frame,
                 config.window_size,
-                config.weighting));
+                config.weighting,
+                config.cyclic_wrap));
     }
     std::vector<PointCloud> target_clouds;
     target_clouds.reserve(grid.target_frames.size());
@@ -275,7 +288,8 @@ DistanceGrid MotionDistance::BuildDistanceGridForConvention(
             BuildPointCloudFromFirstFrameImpl(
                 skeleton, target_clip,
                 windows.target.first_unclamped_frame,
-                config.window_size, config.weighting));
+                config.window_size, config.weighting,
+                config.cyclic_wrap));
     }
 
     const std::size_t cell_count = source_clouds.size() * target_clouds.size();

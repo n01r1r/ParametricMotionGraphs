@@ -85,5 +85,27 @@ int main() {
         assert(Near(right.yaw, t.yaw) && Near(right.dx, t.dx) && Near(right.dz, t.dz));
     }
 
+    // Inverse undoes Apply and composes to Identity on both sides. This backs
+    // the backward cycle fold (negative pre-roll) in RuntimeController.
+    {
+        pmg::RigidTransform2D t;
+        t.yaw = -0.8f; t.dx = 4.0f; t.dz = -2.5f;
+        const pmg::RigidTransform2D inv = t.Inverse();
+
+        // inv(t(p)) == p for a sample floor point.
+        const float px = 1.3f, pz = 0.4f;
+        float fx = 0.0f, fz = 0.0f;
+        t.ApplyFloor(px, pz, fx, fz);
+        float bx = 0.0f, bz = 0.0f;
+        inv.ApplyFloor(fx, fz, bx, bz);
+        assert(Near(bx, px) && Near(bz, pz));
+
+        // Compose(inv, t) and Compose(t, inv) are both Identity.
+        const pmg::RigidTransform2D left = pmg::RigidTransform2D::Compose(inv, t);
+        const pmg::RigidTransform2D right = pmg::RigidTransform2D::Compose(t, inv);
+        assert(Near(left.yaw, 0.0f) && Near(left.dx, 0.0f) && Near(left.dz, 0.0f));
+        assert(Near(right.yaw, 0.0f) && Near(right.dx, 0.0f) && Near(right.dz, 0.0f));
+    }
+
     return 0;
 }
