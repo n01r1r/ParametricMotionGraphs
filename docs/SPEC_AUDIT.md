@@ -1,12 +1,12 @@
 # PMG Spec Audit
 
-Last updated: 2026-06-14.
+Last updated: 2026-06-15.
 
 ## Purpose
 
 Audit whether `specs/*.pmg_spec` describe semantically meaningful Parametric
-Motion Graph nodes and edges, rather than files that merely parse, build, and
-produce motion.
+Motion Graph nodes and edges, and classify each file as curated demo,
+validation fixture, or retained legacy regression asset.
 
 Claim boundary:
 
@@ -26,12 +26,12 @@ cross-gait limitation case.
 
 | Classification | Specs |
 |---|---|
-| Canonical minimal PMG demo candidate | `walk_minimal.pmg_spec` |
-| Valid sparse PMG node, but misleading control-axis description | `walk_curvature.pmg_spec` |
-| Legitimate edge-classification fixture | `walk_curvature_selective.pmg_spec` |
-| Legitimate minimal calibrated 2-D fixture, not a robust 2-D family | `walk_curvature_speed.pmg_spec` |
-| Cross-node stress/limitation case | `walk_jog.pmg_spec` |
-| Builder stress test, not a meaningful motion graph | `transition_box_shrink.pmg_spec` |
+| Canonical minimal PMG demo | `demo_walk_self_edge_minimal.pmg_spec` |
+| Canonical 2-D machinery demo, not a robust 2-D family | `demo_walk_2d_triangle.pmg_spec` |
+| Canonical topology demo and cross-gait limitation case | `demo_walk_jog_topology.pmg_spec` |
+| Legitimate edge-classification fixture | `fixture_edge_selective_good_bad.pmg_spec` |
+| Builder stress fixture, not a meaningful motion graph | `fixture_transition_box_shrink.pmg_spec` |
+| Valid sparse PMG node retained for regression, but misleading as a demo | `legacy_walk_curvature.pmg_spec` |
 
 Main conclusions:
 
@@ -41,15 +41,16 @@ Main conclusions:
 2. Parser validity is weaker than PMG semantic validity. It does not test
    logical motion similarity, sample-rank sufficiency, parameter monotonicity,
    independent axes, or perceptual transition quality.
-3. `walk_minimal` is the clearest current 1-D self-edge fixture. Its two anchors
+3. `demo_walk_self_edge_minimal` is the canonical 1-D self-edge demo. Its two anchors
    produce a monotone achieved turn trend in runtime diagnostics.
-4. `walk_curvature` is a valid sparse walk motion space, but its documented
+4. `legacy_walk_curvature` is a valid sparse walk motion space, but its
    "wide to tight" scalar is not monotone in measured signed turn rate. Anchors
    measured approximately `-0.148`, `+0.522`, and `-2.236 rad/s`.
-5. `walk_jog` is not a full walk/jog PMG controller. Walk is parameterized; jog
+5. `demo_walk_jog_topology` is not a full walk/jog PMG controller. Walk is
+   parameterized; jog
    is a single-example non-controllable node. Cross-gait edges require much
    higher corpus-specific thresholds than same-gait edges.
-6. `walk_curvature_speed` has enough non-collinear samples to exercise 2-D
+6. `demo_walk_2d_triangle` has enough non-collinear samples to exercise 2-D
    machinery and control. It does not establish a robust rectangular
    turn-speed family: three samples define a minimal triangle, the tight-jog
    corner is missing, and the jog anchor changes both turn rate and speed.
@@ -91,12 +92,12 @@ edges. This supports advancing intent. It does not prove smooth advancement.
 
 | Spec file | Intended role | Nodes and samples | Edge types | Validity classification | Visualization expectation | Main risk |
 |---|---|---|---|---|---|---|
-| `walk_minimal.pmg_spec` | Minimal repeated-walk demo | `walk`, 1-D, 2 walks | self-edge | Valid PMG node; legitimate minimal fixture | Advancing curved path, repeated markers, reduced jolt vs raw wrap | Sparse interpolation; not robust path following |
-| `walk_curvature.pmg_spec` | Three-anchor runtime/control demo | `walk`, 1-D, 3 walks | self-edge | Valid sparse node; parameter description misleading | Continuous stream; turn response plot exposes sign reversal | Scalar is not monotone turn tightness; permissive edge |
-| `walk_curvature_selective.pmg_spec` | GOOD/NEUTRAL/BAD fixture | `walk`, 1-D, same 3 walks | self-edge | Legitimate edge-validation fixture | Reachable interval narrows for weak source regions | Not a controller-quality claim; no calibration |
-| `walk_curvature_speed.pmg_spec` | Minimal 2-D fixture | `walk_2d`, 2-D, 3 walk/walk/jog anchors | self-edge | Minimal calibrated 2-D fixture; not robust full family | Held-axis turn/speed trends; triangle visible | Missing tight-jog corner, coupled axes, no registration |
-| `walk_jog.pmg_spec` | Cross-node gait stress | parameterized walk; singleton jog | self and cross edges | Walk valid; jog degenerate; graph useful as stress case | Gait changes marked; larger cross-gait seam expected | Threshold-forced connectivity may look stronger than it is |
-| `transition_box_shrink.pmg_spec` | Conservative AABB shrink test | singleton source; walk/jog/walk target | cross-edge | Stress-test nodes; target is not a meaningful family | Pre/post box and BAD exclusion | Playback cannot validate node semantics |
+| `demo_walk_self_edge_minimal.pmg_spec` | Minimal PMG core demo | `walk`, 1-D, 2 walks | self-edge | Valid PMG node; canonical minimal demo | Advancing curved path, repeated markers, reduced jolt vs raw wrap | Sparse interpolation; not robust path following |
+| `demo_walk_2d_triangle.pmg_spec` | 2-D machinery demo | `walk_2d`, 2-D, 3 walk/walk/jog anchors | self-edge | Minimal calibrated 2-D demo; not robust full family | Held-axis turn/speed trends; triangle visible | Missing tight-jog corner, coupled axes, no registration |
+| `demo_walk_jog_topology.pmg_spec` | Multi-node topology demo | parameterized walk; singleton jog | self and cross edges | Walk valid; jog fixed; graph exposes topology and corpus limit | Gait changes marked; larger cross-gait seam expected | Threshold-forced connectivity may look stronger than it is |
+| `fixture_edge_selective_good_bad.pmg_spec` | GOOD/NEUTRAL/BAD fixture | `walk`, 1-D, same 3 walks | self-edge | Legitimate edge-validation fixture | Reachable interval narrows for weak source regions | Not a controller-quality claim; no calibration |
+| `fixture_transition_box_shrink.pmg_spec` | Conservative AABB shrink fixture | singleton source; walk/jog/walk target | cross-edge | Stress-test nodes; target is not a meaningful family | Pre/post box and BAD exclusion | Playback cannot validate node semantics |
+| `legacy_walk_curvature.pmg_spec` | Three-anchor regression/audit asset | `walk`, 1-D, 3 walks | self-edge | Valid sparse node; parameter description misleading | Continuous stream; turn response plot exposes sign reversal | Scalar is not monotone turn tightness; permissive edge |
 
 ## Spec Configuration Catalog
 
@@ -106,12 +107,12 @@ centered runtime blend placement.
 
 | Spec | Node configuration | Edge configuration |
 |---|---|---|
-| `walk_minimal` | `walk`: 1-D; `(0) walkCurve`, `(1) walkTightCurve`; cycle `LeftAnkle`; contacts both ankles; min contact `3`; DTW on; no parameter metric | `walk->walk`: `TGOOD/TBAD=225/250`, random source/target samples `12/60`, seed `7` |
-| `walk_curvature` | `walk`: 1-D; `(0) walkCurve`, `(0.5) walkMoreCurve`, `(1) walkTightCurve`; same registration; `turn_rate`; default calibration density `9` | `walk->walk`: `225/250`, `12/60`, seed `7` |
-| `walk_curvature_selective` | Same three-example 1-D walk and registration; no parameter metric | `walk->walk`: `203/210`, `12/60`, seed `7` |
-| `walk_curvature_speed` | `walk_2d`: 2-D; `(0,0) walkCurve`, `(1,0) walkTightCurve`, `(0,1) jogCurve`; no cycle/contact registration or DTW; metrics `turn_rate, travel_speed`; calibration density `5` | `walk_2d->walk_2d`: `300/400`, `3/6`, seed `41` |
-| `walk_jog` | `walk`: same three-example calibrated walk; `jog`: 1-D singleton `(0) jogCurve`; both cycle-normalized/contact-registered; walk DTW on, jog DTW off | `walk->walk`: `225/250`, `8/40`, seed `17`; `walk->jog`: `450/500`, `8/20`, seed `19`; `jog->walk`: `300/350`, `4/40`, seed `23`; `jog->jog`: `80/100`, `4/20`, seed `29` |
-| `transition_box_shrink` | `source_walk`: 1-D singleton `(0) walkMoreCurve`; `nonconvex_target`: `(0) walkCurve`, `(0.5) jogCurve`, `(1) walkTightCurve`; no cycle/contact registration, DTW, metrics, or calibration | `source_walk->nonconvex_target`: `10/100`, `4/100`, seed `31` |
+| `demo_walk_self_edge_minimal` | `walk`: 1-D; `(0) walkCurve`, `(1) walkTightCurve`; cycle `LeftAnkle`; contacts both ankles; min contact `3`; DTW on; no parameter metric | `walk->walk`: `TGOOD/TBAD=225/250`, random source/target samples `12/60`, seed `7` |
+| `demo_walk_2d_triangle` | `walk_2d`: 2-D; `(0,0) walkCurve`, `(1,0) walkTightCurve`, `(0,1) jogCurve`; no cycle/contact registration or DTW; metrics `turn_rate, travel_speed`; calibration density `5` | `walk_2d->walk_2d`: `300/400`, `3/6`, seed `41` |
+| `demo_walk_jog_topology` | `walk`: same three-example calibrated walk; `jog`: 1-D singleton `(0) jogCurve`; both cycle-normalized/contact-registered; walk DTW on, jog DTW off | `walk->walk`: `225/250`, `8/40`, seed `17`; `walk->jog`: `450/500`, `8/20`, seed `19`; `jog->walk`: `300/350`, `4/40`, seed `23`; `jog->jog`: `80/100`, `4/20`, seed `29` |
+| `fixture_edge_selective_good_bad` | Same three-example 1-D walk and registration; no parameter metric | `walk->walk`: `203/210`, `12/60`, seed `7` |
+| `fixture_transition_box_shrink` | `source_walk`: 1-D singleton `(0) walkMoreCurve`; `nonconvex_target`: `(0) walkCurve`, `(0.5) jogCurve`, `(1) walkTightCurve`; no cycle/contact registration, DTW, metrics, or calibration | `source_walk->nonconvex_target`: `10/100`, `4/100`, seed `31` |
+| `legacy_walk_curvature` | `walk`: 1-D; `(0) walkCurve`, `(0.5) walkMoreCurve`, `(1) walkTightCurve`; same registration; `turn_rate`; default calibration density `9` | `walk->walk`: `225/250`, `12/60`, seed `7` |
 
 Builder sample sets also include authored example parameters. Actual source and
 target sample totals can therefore exceed the random counts above, while
@@ -119,7 +120,7 @@ duplicate samples collapse in zero-volume domains.
 
 ## Per-Spec Findings
 
-### `walk_minimal.pmg_spec`
+### `demo_walk_self_edge_minimal.pmg_spec`
 
 #### What it claims
 
@@ -182,7 +183,7 @@ Failure interpretation:
 - root/facing discontinuity: runtime alignment or placement issue;
 - non-monotone endpoint trend: parameter/spec issue.
 
-### `walk_curvature.pmg_spec`
+### `legacy_walk_curvature.pmg_spec`
 
 #### What it claims
 
@@ -249,7 +250,7 @@ Failure interpretation:
 - poor wide-turn loop seam: corpus periodicity;
 - full-domain boxes: threshold behavior, not universal compatibility.
 
-### `walk_curvature_selective.pmg_spec`
+### `fixture_edge_selective_good_bad.pmg_spec`
 
 #### What it claims
 
@@ -261,7 +262,8 @@ Failure interpretation:
 #### Node validity
 
 The node is a valid sparse PMG node for edge testing. Its parameter has the same
-non-monotone physical-turn caveat as `walk_curvature`; lack of calibration makes
+non-monotone physical-turn caveat as `legacy_walk_curvature`; lack of
+calibration makes
 it unsuitable as a strong physical-control demo.
 
 #### Edge validity
@@ -277,7 +279,8 @@ tighter sources often retain `[0,1]`. No AABB shrink is needed because sampled
 BAD points already fall outside the GOOD enclosure.
 
 It validates classification and source-dependent reachability. It does not
-validate `ShrinkToExclude`; that role belongs to `transition_box_shrink`.
+validate `ShrinkToExclude`; that role belongs to
+`fixture_transition_box_shrink`.
 
 #### Correct visualization
 
@@ -290,11 +293,11 @@ Should show:
 
 Should not be expected:
 
-- better runtime motion than `walk_curvature`;
+- better runtime motion than `legacy_walk_curvature`;
 - calibrated turn-rate control;
 - AABB shrink events in this build.
 
-### `walk_curvature_speed.pmg_spec`
+### `demo_walk_2d_triangle.pmg_spec`
 
 #### What it claims
 
@@ -380,7 +383,7 @@ Failure interpretation:
 - calibration matching sparse generated behavior but not user intent:
   parameterization issue.
 
-### `walk_jog.pmg_spec`
+### `demo_walk_jog_topology.pmg_spec`
 
 #### What it claims
 
@@ -390,7 +393,7 @@ Failure interpretation:
 
 #### Node validity
 
-`walk` is the same valid sparse node as `walk_curvature`, with the same
+`walk` is the same valid sparse node as `legacy_walk_curvature`, with the same
 non-monotone turn-axis caveat.
 
 `jog` is a single-example non-controllable node:
@@ -449,7 +452,7 @@ Failure interpretation:
 - acceptance only after high thresholds: threshold/corpus issue, not proof of
   semantic compatibility.
 
-### `transition_box_shrink.pmg_spec`
+### `fixture_transition_box_shrink.pmg_spec`
 
 #### What it claims
 
@@ -520,13 +523,14 @@ semantic warnings.
 
 ### Degenerate single-example nodes
 
-`walk_jog:jog` and `transition_box_shrink:source_walk` are zero-volume
+`demo_walk_jog_topology:jog` and
+`fixture_transition_box_shrink:source_walk` are zero-volume
 parameter spaces despite positive declared dimension. They are fixed nodes, not
 controllable parametric families.
 
 ### Sparse 2-D domain
 
-`walk_curvature_speed` uses a triangular sample set but exposes its rectangular
+`demo_walk_2d_triangle` uses a triangular sample set but exposes its rectangular
 AABB. Positive local weights make every request executable; executable is not
 equivalent to supported by nearby examples.
 
@@ -601,16 +605,12 @@ weighting, BVH scale, registration, generated timing, and phase range.
 
 ### P0 - Documentation and classification
 
-1. Make `walk_minimal.pmg_spec` the canonical minimal 1-D self-edge demo.
-2. Describe `walk_curvature.pmg_spec` as a three-anchor sparse walk fixture with
-   non-monotone signed turn behavior, not a simple wide-to-tight slider.
-3. Describe `walk_jog.pmg_spec` as cross-gait stress and `jog` as fixed.
-4. Describe `walk_curvature_speed.pmg_spec` as a triangular minimal 2-D
-   calibration fixture. Remove robust full-domain independence claims.
-5. Keep selective and box-shrink specs under validation/stress fixtures.
-6. Add one intended-role comment to every spec using controlled vocabulary:
-   `canonical minimal demo`, `selective edge fixture`, `cross-node stress`,
-   `AABB shrink stress`.
+1. Expose only the three `demo_*` specs as the curated showcase set.
+2. Keep `fixture_*` specs for edge classification and BAD-exclusion validation.
+3. Keep `legacy_walk_curvature.pmg_spec` for regression/audit commands, not as
+   a presentation demo.
+4. Preserve explicit "Demonstrates" and "Does not demonstrate" boundaries in
+   every curated demo.
 
 ### P1 - Small diagnostics
 
@@ -633,7 +633,8 @@ Remaining:
 
 ### P2 - Optional spec redesign
 
-1. Curate a monotone 1-D turn family. `walk_minimal` currently has the cleanest
+1. Curate a monotone 1-D turn family. `demo_walk_self_edge_minimal` currently
+   has the cleanest
    measured trend; add a third anchor only after verifying measured ordering.
 2. Add missing tight-jog example before presenting a rectangular 2-D family.
 3. If no clip exists, expose triangular support or shade unsupported corner.
@@ -660,13 +661,14 @@ phase lookup, alignment, and repeated streaming.
 
 Only some specs are meaningful motion-graph demonstrations:
 
-- `walk_minimal` is strongest honest canonical minimal demo.
-- `walk_curvature` is a valid node with a misleading scalar-control story.
-- `walk_curvature_speed` is valid as minimal 2-D machinery, not robust 2-D
+- `demo_walk_self_edge_minimal` is the canonical minimal PMG core demo.
+- `legacy_walk_curvature` is a valid node with a misleading scalar-control
+  story and remains regression-only.
+- `demo_walk_2d_triangle` is valid as minimal 2-D machinery, not robust 2-D
   locomotion family.
-- `walk_jog` is valid as limitation/stress graph, not parameterized walk/jog
-  controller.
-- selective and box-shrink specs are algorithm validation fixtures.
+- `demo_walk_jog_topology` is valid as a topology and limitation demo, not a
+  parameterized walk/jog controller.
+- `fixture_*` specs are algorithm validation assets, not showcase graphs.
 
 Immediate problem is taxonomy and diagnostic visibility, not need for large
 parser/runtime rewrites.

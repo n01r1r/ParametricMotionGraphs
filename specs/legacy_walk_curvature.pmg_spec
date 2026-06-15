@@ -1,8 +1,8 @@
-# Walk(curvature) parametric motion space from the multi-cycle walk family
-# (the BVH walk clips sharing one skeleton: walkCurve / walkMoreCurve /
-# walkTightCurve). Parameter = turn tightness (0 = widest authored curve,
-# 1 = tightest). Clips are multi-cycle; consumers should normalize them to
-# one gait cycle (--cycle-joint LeftAnkle) so contact structures match.
+# Legacy three-anchor walk fixture retained for regression and audit commands.
+# This is not a canonical demo: the measured signed turn response is
+# non-monotone because the middle anchor reverses turn direction.
+# Parameter 0..1 is therefore an authored path through three compatible walk
+# clips, not a globally ordered physical "turn tightness" axis.
 node walk 1
 registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
 parameter_metric walk turn_rate

@@ -158,7 +158,7 @@ if(PMG_BUILD_TESTS)
     # carry ~40% headroom over measured values so they catch regressions, not
     # corpus noise.
     add_test(NAME cli_space_sweep_walk
-        COMMAND pmg_cli --space-sweep ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec walk
+        COMMAND pmg_cli --space-sweep ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec walk
             --cycle-joint LeftAnkle
             --min-contacts 2
             --max-foot-slide 0.25
@@ -173,7 +173,7 @@ if(PMG_BUILD_TESTS)
     # expose a measured 1.0775 production/authored best-distance ratio on this
     # corpus; cap it at 1.10 so further registration regressions still fail.
     add_test(NAME cli_validate_graph_walk
-        COMMAND pmg_cli --validate-graph ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
+        COMMAND pmg_cli --validate-graph ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec
             --cycle-joint LeftAnkle
             --source-samples 12 --target-samples 60 --seed 7
             --tgood 225 --tbad 250
@@ -186,7 +186,7 @@ if(PMG_BUILD_TESTS)
     # step (popping shows up as 5-20x spikes), and transitions must actually
     # happen so the metric is not vacuous.
     add_test(NAME cli_random_walk_walk
-        COMMAND pmg_cli --random-walk ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
+        COMMAND pmg_cli --random-walk ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec
             --cycle-joint LeftAnkle
             --source-samples 6 --target-samples 30
             --tgood 225 --tbad 250
@@ -199,14 +199,14 @@ if(PMG_BUILD_TESTS)
     # (the behind case exercises the swing-through steering branch). Measured
     # reach times are 3-10 s; 60 s leaves headroom.
     add_test(NAME cli_goto_walk_ahead
-        COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec 10 10
+        COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec 10 10
             --cycle-joint LeftAnkle
             --source-samples 6 --target-samples 30
             --tgood 225 --tbad 250
             --seconds 60 --tolerance 3
             --max-pop-ratio 3.0)
     add_test(NAME cli_goto_walk_behind
-        COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec 0 -20
+        COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec 0 -20
             --cycle-joint LeftAnkle
             --source-samples 6 --target-samples 30
             --tgood 225 --tbad 250
@@ -216,7 +216,7 @@ if(PMG_BUILD_TESTS)
     set(PMG_TEST_ARTIFACT_ROOT ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts)
     add_test(NAME cli_build_artifact_walk
         COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature.pmg_spec
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg)
     set_tests_properties(cli_build_artifact_walk PROPERTIES
         FIXTURES_SETUP pmg_artifact_walk)
@@ -237,7 +237,7 @@ if(PMG_BUILD_TESTS)
 
     add_test(NAME cli_build_artifact_walk_jog
         COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_jog.pmg_spec
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_jog_topology.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/artifact.pmg)
     set_tests_properties(cli_build_artifact_walk_jog PROPERTIES
         FIXTURES_SETUP pmg_artifact_walk_jog)
@@ -252,12 +252,12 @@ if(PMG_BUILD_TESTS)
 
     add_test(NAME cli_build_artifact_selective
         COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature_selective.pmg_spec
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixture_edge_selective_good_bad.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/selective/artifact.pmg)
 
     add_test(NAME cli_build_artifact_box_shrink
         COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/transition_box_shrink.pmg_spec
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixture_transition_box_shrink.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
 
     # Real-BVH multidimensional parameter calibration: straight/turning and
@@ -265,7 +265,7 @@ if(PMG_BUILD_TESTS)
     # travel speed. No graph edge is required for this motion-space test.
     add_test(NAME cli_build_artifact_walk_2d
         COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature_speed.pmg_spec
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg)
 
     # Multidimensional goal-directed control: the 2-D (turn_rate, travel_speed)
@@ -274,14 +274,14 @@ if(PMG_BUILD_TESTS)
     # arrival gait; this guards the N-D control path against regressions/crashes.
     add_test(NAME cli_goto_walk_2d
         COMMAND pmg_cli --goto
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_curvature_speed.pmg_spec 10 10
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec 10 10
             --seconds 20 --max-pop-ratio 8.0)
 
     # Diagnose must honor the spec's per-edge edge_config: walk->jog needs
     # TGOOD=450, so the generic default would falsely report a reject (exit 1).
     add_test(NAME cli_diagnose_walk_jog_edge
         COMMAND pmg_cli --diagnose-graph-edge
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/walk_jog.pmg_spec walk jog)
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_jog_topology.pmg_spec walk jog)
 endif()
 
 # ---------------------------------------------------------------------------

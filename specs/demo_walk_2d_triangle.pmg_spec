@@ -1,4 +1,13 @@
-# Two-dimensional real-BVH calibration fixture.
+# Canonical 2-D machinery demo.
+# Demonstrates:
+# - a 2-D ParametricMotionSpace with measured metric calibration;
+# - the minimum three non-collinear examples needed for local 2-D lookup;
+# - triangular authored support inside the implementation's rectangular AABB.
+# Does not demonstrate:
+# - full rectangular motion coverage or a tight-turn jog endpoint;
+# - independent turn and speed control across the whole AABB;
+# - a robust production locomotion family.
+#
 # Axis 0: authored turn class (0 = wide, 1 = tight).
 # Axis 1: authored gait class (0 = walk, 1 = jog).
 # The authored labels are categorical anchors; parameter_metrics calibrates

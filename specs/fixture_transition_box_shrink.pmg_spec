@@ -1,9 +1,11 @@
-# Section 3.2 AABB-shrink diagnostic. The target axis intentionally places a
-# dissimilar jog between two walk examples so GOOD endpoints can enclose BAD
-# interior samples. This is a validity stress case, not a smooth runtime space.
+# AABB-shrink stress fixture, not a presentation demo or semantic motion family.
+# The target axis intentionally places a dissimilar jog between two walk
+# examples so GOOD endpoints can enclose BAD interior samples. This validates
+# conservative BAD exclusion only; playback cannot validate node semantics.
 node source_walk 1
 registration source_walk - - 3 0
 example source_walk 0.0 ../BVH/walkMoreCurve.bvh
+expect source_walk spanned_axes 0
 
 node nonconvex_target 1
 registration nonconvex_target - - 3 0

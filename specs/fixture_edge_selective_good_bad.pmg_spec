@@ -1,6 +1,7 @@
-# Real-BVH edge with GOOD/NEUTRAL/BAD samples and a parameter-dependent target
-# subspace. This is the paper Section 3.2 validation case, not the permissive
-# runtime demo configuration.
+# Selective edge-classification fixture, not a presentation demo.
+# Demonstrates GOOD/NEUTRAL/BAD samples and a parameter-dependent reachable
+# target interval for the paper Section 3.2 construction.
+# Does not claim calibrated physical control or controller-quality playback.
 node walk 1
 registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
 example walk 0.0 ../BVH/walkCurve.bvh

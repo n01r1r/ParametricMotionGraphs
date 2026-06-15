@@ -106,7 +106,7 @@ Build a complete V8 artifact:
 
 ```powershell
 .\build\Debug\pmg_cli.exe --build-graph `
-  .\specs\walk_curvature.pmg_spec `
+  .\specs\demo_walk_self_edge_minimal.pmg_spec `
   .\outputs\paper_core_walk\artifact.pmg
 ```
 
@@ -151,20 +151,23 @@ Random walk selects only actual outgoing edges from the current node.
 Goal-directed locomotion is shared by the CLI and viewer and calibrates
 parameter-to-achieved-turn-rate behavior through the runtime graph.
 
-## Validation Specs
+## Curated Demo Specs
 
-- `specs/walk_minimal.pmg_spec`: canonical minimal 1-D self-edge stream.
-- `specs/walk_curvature.pmg_spec`: permissive three-anchor walk graph; its
-  signed turn response is non-monotone, so it is not a simple wide-to-tight
-  control axis.
-- `specs/walk_jog.pmg_spec`: cross-gait stress graph; the jog node has one fixed
-  example and is not a controllable jog family.
-- `specs/walk_curvature_speed.pmg_spec`: minimal triangular 2-D
-  turn-rate/travel-speed calibration fixture, not robust rectangular coverage.
-- `specs/walk_curvature_selective.pmg_spec`: real-BVH
-  GOOD/NEUTRAL/BAD classification.
-- `specs/transition_box_shrink.pmg_spec`: real-BVH non-convex target stress
-  case that triggers conservative AABB shrink.
+- `specs/demo_walk_self_edge_minimal.pmg_spec`: PMG core through one 1-D walk
+  node and repeated self-edge streaming.
+- `specs/demo_walk_2d_triangle.pmg_spec`: 2-D parameter-space machinery over a
+  triangular sample set; it does not claim full rectangular coverage.
+- `specs/demo_walk_jog_topology.pmg_spec`: multi-node graph topology and
+  cross-gait transitions; jog remains a fixed single-example node.
+
+Validation-only assets stay visible but are not showcase graphs:
+
+- `specs/fixture_edge_selective_good_bad.pmg_spec`: GOOD/NEUTRAL/BAD
+  classification.
+- `specs/fixture_transition_box_shrink.pmg_spec`: non-convex target stress case
+  for conservative AABB shrink.
+- `specs/legacy_walk_curvature.pmg_spec`: three-anchor regression/audit fixture
+  with non-monotone signed turn response.
 
 Foot locking remains an optional generated-clip diagnostic/post-process. It is
 not part of the stored PMG runtime contract.

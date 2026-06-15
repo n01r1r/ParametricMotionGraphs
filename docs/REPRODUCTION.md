@@ -39,7 +39,7 @@ Do not treat passing tests as proof of paper-level animation quality.
 
 ```powershell
 .\build\Debug\pmg_cli.exe --validate-graph-spec `
-  .\specs\walk_curvature.pmg_spec
+  .\specs\demo_walk_self_edge_minimal.pmg_spec
 ```
 
 This checks syntax and named node relationships. Full BVH and edge validation
@@ -49,7 +49,7 @@ occurs during artifact construction.
 
 ```powershell
 .\build\Debug\pmg_cli.exe --build-graph `
-  .\specs\walk_curvature.pmg_spec `
+  .\specs\demo_walk_self_edge_minimal.pmg_spec `
   .\outputs\paper_core_walk\artifact.pmg
 ```
 
@@ -119,7 +119,7 @@ reject_reason
   .\outputs\paper_core_walk\artifact.pmg
 ```
 
-The runtime requires a V4+ artifact with a skeleton. Current writes use V8.
+The runtime requires a V4+ artifact with a skeleton. Current writes use V9.
 Multidimensional calibration grid density is declared per node with
 `parameter_calibration <node> <samples_per_axis>`; omitted declarations use 9.
 
@@ -208,7 +208,7 @@ preparation assumptions.
 
 ```powershell
 .\build\Debug\pmg_cli.exe --space-sweep `
-  .\specs\walk_curvature.pmg_spec `
+  .\specs\legacy_walk_curvature.pmg_spec `
   walk `
   --cycle-joint LeftAnkle `
   --min-contacts 2 `
@@ -223,7 +223,7 @@ preparation assumptions.
 
 ```powershell
 .\build\Debug\pmg_cli.exe --validate-graph `
-  .\specs\walk_curvature.pmg_spec `
+  .\specs\legacy_walk_curvature.pmg_spec `
   --cycle-joint LeftAnkle `
   --source-samples 12 `
   --target-samples 60 `
@@ -240,19 +240,19 @@ Thresholds depend on point count, window length, configured weights, and native
 BVH units. The `1.10` preparation ratio is a corpus-specific regression cap;
 the measured value for this command is `1.0775`.
 
-## Validation Specs
+## Spec Catalog
 
 | Spec | Purpose |
 |---|---|
-| `walk_minimal.pmg_spec` | canonical minimal 1-D walk self-transition runtime |
-| `walk_curvature.pmg_spec` | permissive three-anchor walk runtime with non-monotone signed turn response |
-| `walk_curvature_speed.pmg_spec` | minimal triangular 2-D turn-rate/travel-speed calibration |
-| `walk_jog.pmg_spec` | cross-gait stress graph with a fixed single-example jog node |
-| `walk_curvature_selective.pmg_spec` | selective GOOD/NEUTRAL/BAD classification |
-| `transition_box_shrink.pmg_spec` | non-convex target stress case for BAD exclusion |
+| `demo_walk_self_edge_minimal.pmg_spec` | canonical minimal 1-D PMG core demo |
+| `demo_walk_2d_triangle.pmg_spec` | triangular 2-D parameter-space machinery demo |
+| `demo_walk_jog_topology.pmg_spec` | multi-node topology demo and cross-gait limitation case |
+| `fixture_edge_selective_good_bad.pmg_spec` | selective GOOD/NEUTRAL/BAD classification |
+| `fixture_transition_box_shrink.pmg_spec` | non-convex target stress case for BAD exclusion |
+| `legacy_walk_curvature.pmg_spec` | three-anchor regression fixture with non-monotone signed turn response |
 
-`transition_box_shrink.pmg_spec` deliberately violates smooth-space assumptions.
-Use it only to test conservative AABB shrink behavior.
+`fixture_transition_box_shrink.pmg_spec` deliberately violates smooth-space
+assumptions. Use it only to test conservative AABB shrink behavior.
 See [SPEC_AUDIT.md](SPEC_AUDIT.md) for semantic classifications and expected
 visual evidence.
 

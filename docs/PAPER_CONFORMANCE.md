@@ -48,10 +48,11 @@ centered mean-distance diagnostic, this lowered production best self-transition
 distance from `0.8878` (prior piecewise-linear refine) to `0.8816` against a
 `0.8604` no-registration baseline, with runtime pop ratio flat. D6 replaced
 that diagnostic scale and window placement. Under the exact asymmetric raw-sum
-metric (`specs/walk_curvature`, `--validate-graph`, seed 7), current
+metric (`specs/legacy_walk_curvature`, `--validate-graph`, seed 7), current
 production/authored mean-min distances are `156.654 / 145.385 = 1.0775`; the
 regression gate records that corpus-specific penalty explicitly and caps it at
-`1.10`. All 38 core tests pass. The payoff is corpus-density-coupled: with only
+`1.10`. All 40 configured CTest checks pass as of 2026-06-15. The payoff is
+corpus-density-coupled: with only
 three clean walk clips the within-segment correspondence is already near-linear,
 so headroom is small.
 
@@ -111,9 +112,13 @@ same-phase transitions; see `docs/WALK_JOG_CONTINUITY.md`.
 | Clamp the requested target into the reachable box | ✓ | `RuntimeController::TryScheduleTransition` | `include/pmg/RuntimeController.h:86` |
 | Blend window equals the metric window | ✓ (D4) | `RuntimeControllerConfig::transition_blend_frames` | `include/pmg/RuntimeController.h:17` |
 | Recompute alignment at runtime from the live clips | ✓ | `PointCloudAlignment` strategy | `include/pmg/RuntimeController.h:60` |
-| Source plays through cycle-crossing blends | ✓ (D3) | `FoldCompletedCycles` | `include/pmg/RuntimeController.h:91` |
-| Repeated unchanged self-edge streaming (align next clip, blend end→start) | ✓ | viewer request policy | `apps/viewer/PmgViewerWorkspace.cpp:417`; `docs/WALK_JOG_CONTINUITY.md` |
+| Source plays through cycle-crossing blends | ✓ (D3) | `FoldCompletedCycles` (now bidirectional: forward fold + negative pre-roll wrap) | `include/pmg/RuntimeController.h` |
+| Repeated unchanged self-edge streaming (align next clip, blend end→start) | ✓ | viewer request policy | `apps/viewer/PmgViewerWorkspace.cpp`; `docs/WALK_JOG_CONTINUITY.md` |
+| Schedule a transition when its source phase is crossed | ✓ | `CrossedPhase` (wrap-aware; replaces ~1-frame point-in-window) | `src/RuntimeController.cpp` |
+| Cyclic self-edge target pre-roll keeps the previous-cycle tail | ✓ | `TransitionPreRollPolicy::kWrapCyclicSelfEdges` (default); cyclicity from `RuntimeControllerConfig::cyclic_nodes` (registration `cycle_joint`) | `include/pmg/RuntimeController.h` |
+| n-way pose blend is order-independent | ✓ | `BlendPoseN` hemisphere-aligned weighted quaternion mean | `src/PoseBlend.cpp` |
 | Random graph walk | ✓ | `ChooseRandomOutgoingTransition` | `include/pmg/GoalDirectedLocomotion.h:87` |
+| Per-transition diagnostics (chosen edge, reachable box, clamped target, phases, interpolated distance D, local pop) | ✓ | `RuntimeTransitionDiagnostics`; `pmg_cli --random-walk --dump-transitions-csv` | `include/pmg/RuntimeController.h`; `apps/PmgRuntimeCommands.cpp` |
 | Goal-directed locomotion (thesis Ch. 6) | ◐ | `GoalDirectedLocomotion` (per-axis greedy steering; not branch-and-bound) | `include/pmg/GoalDirectedLocomotion.h:48` |
 | Multidimensional runtime control | ✓ | per-axis calibration + inversion drives all axes (turn_rate heading, travel_speed pace) | `src/GoalDirectedLocomotion.cpp` |
 
@@ -128,7 +133,7 @@ config override); a one-dimensional `turn_rate` node reduces to the prior
 single-axis behavior exactly. The CLI `--goto` and the viewer goto both drive
 the full vector. Verified by `test_goal_directed_locomotion` (a 2-D node with
 both axes driven) and the `cli_goto_walk_2d` end-to-end smoke test on the real
-`walk_curvature_speed` artifact. The remaining `◐` on goal-directed control is
+`demo_walk_2d_triangle` artifact. The remaining `◐` on goal-directed control is
 the local-greedy vs. branch-and-bound search adaptation, not dimensionality.
 
 ## Out-of-scope boundaries (○)
@@ -168,9 +173,21 @@ Spec-exposing the distance-grid phase ranges (formerly item 2) landed via the
 The D6 equation/window gap also landed: transition grids use source-start and
 target-end windows plus Kovar's unnormalized weighted squared sum. Thresholds
 were recalibrated because raw sums scale with point count and weights.
-The wide-turn walk-loop jolt was diagnosed as a corpus periodicity limit
-(data-bound), not a code/registration/config gap — see
-`docs/WALK_JOG_CONTINUITY.md`.
+The wide-turn walk-loop jolt was diagnosed as **mostly** a corpus periodicity
+limit, but a 2026-06-15 continuity audit isolated a deterministic slice: the
+self-edge target pre-roll was clamped at clip start, dropping the previous-cycle
+tail. The default now wraps that pre-roll for cyclic nodes
+(`TransitionPreRollPolicy::kWrapCyclicSelfEdges`, bidirectional
+`FoldCompletedCycles`), cutting wide/mid self-edge `pop_ratio` ~19% / ~16%; the
+tight residual stays D4-window + corpus. Cyclicity is metadata
+(`RuntimeControllerConfig::cyclic_nodes`, derived from each node's registration
+`cycle_joint`), so a non-cyclic self-edge (e.g. a punch or duck space) clamps
+instead of wrapping into undefined pre-start frames. Two further runtime-continuity
+gaps closed in the same pass: transition scheduling moved from a ~1-frame
+point-in-window test to a wrap-aware `CrossedPhase` (no skipped self-edge on a
+variable-dt or fast-forward frame), and `BlendPoseN` replaced order-dependent
+sequential SLERP with a hemisphere-aligned weighted quaternion mean
+(permutation-invariant for ≥3-example blends). See `docs/WALK_JOG_CONTINUITY.md`.
 
 Multidimensional runtime control (formerly item 1) landed: the control layer
 now drives every node axis. The core algorithm is faithful and verified (38/38
@@ -234,11 +251,19 @@ Stable ids for the adaptations and gaps above.
   `kKovarDirectional`. A/B via `pmg_cli --random-walk --transition-convention
   <metric> --blend-placement <runtime>`; `test_transition_window_contract`
   regresses the resolver.
+- **D7 — Transition distance D carried to runtime.**
+  Each `TransitionSample` stores `transition_distance`, the mean Kovar metric
+  distance over the GOOD targets retained inside its reachable box.
+  `LookupInterpolated` carries it through the same kNN source weighting into
+  `InterpolatedTransition::distance` and `RuntimeTransitionDiagnostics`, so a
+  streamed transition is tagged with the offline edge quality it was scheduled
+  from (observable against runtime pop via `--dump-transitions-csv`). Serialized
+  as `PMG_GRAPH_V9`; V2–V8 read back zero.
 - **D5 — Transition phases remain target-dependent.**
   Each source sample stores the phase pair measured at every retained GOOD
   target sample inside its shrunk box. Runtime clamps the requested target,
   interpolates phases in target-parameter space, then across source samples.
-  Introduced in `PMG_GRAPH_V6`, retained in V7–V8; V2–V5 scalar phases remain
+  Introduced in `PMG_GRAPH_V6`, retained in V7–V9; V2–V5 scalar phases remain
   readable as fallback.
 
 ### Known adaptations and gaps
@@ -264,7 +289,7 @@ Stable ids for the adaptations and gaps above.
 - Contact registration and DTW refinement instantiate the smooth registered
   motion-space assumption the paper relies on (see the §3 registration note).
 - Root-delta blending and optional foot locking address observed BVH artifacts.
-- Complete (V8) artifacts and structured build reports add reproducibility not
+- Complete (V9) artifacts and structured build reports add reproducibility not
   specified by the original paper.
 
 ## Claim limit

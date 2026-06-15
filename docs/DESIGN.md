@@ -17,7 +17,7 @@ GraphSpec
       -> optional DTW refinement
       -> PmgBuilder edge sampling
   -> BuiltPmgArtifact            (offline/online seam)
-      -> GraphIo V8
+      -> GraphIo V9
       -> RuntimeController
       -> GoalDirectedLocomotion
 ```
@@ -43,7 +43,7 @@ flowchart TD
     K --> L["Classify GOOD / NEUTRAL / BAD"]
     L --> M["Build and shrink reachable target AABBs"]
     M --> N["Store transition phases"]
-    N --> O["Serialize PMG_GRAPH_V8 artifact"]
+    N --> O["Serialize PMG_GRAPH_V9 artifact"]
     O --> P["Write JSON, CSV, and Markdown reports"]
 ```
 
@@ -130,10 +130,11 @@ BuiltPmgArtifact
     edge build reports
 ```
 
-V8 is the current writer format (adds the edge transition-window metric
-convention). V2–V7 remain readable with documented fallbacks and pin the
-legacy `kKovarDirectional` metric. Graph runtime requires a V4+ artifact with a
-non-empty Skeleton.
+V9 is the current writer format (adds the per-sample build-time transition
+distance D; V8 added the edge transition-window metric convention). V2–V8 remain
+readable with documented fallbacks: pre-V8 pin the legacy `kKovarDirectional`
+metric and pre-V9 read distance D back as zero. Graph runtime requires a V4+
+artifact with a non-empty Skeleton.
 
 ## Online pipeline
 

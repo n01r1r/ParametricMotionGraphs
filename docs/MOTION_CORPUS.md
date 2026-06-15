@@ -53,7 +53,7 @@ done | sort
   They are only usable as a self-consistent standalone corpus, and only after the
   loader, contact-joint heuristics, and units are verified for that skeleton.
 
-## Minimal 2-D fixture: `specs/walk_curvature_speed.pmg_spec`
+## Minimal 2-D demo: `specs/demo_walk_2d_triangle.pmg_spec`
 
 A calibrated, reproducible 2-D Group-B fixture:
 
@@ -73,7 +73,7 @@ See [`SPEC_AUDIT.md`](SPEC_AUDIT.md).
 Build and inspect:
 
 ```bash
-pmg_cli --build-graph specs/walk_curvature_speed.pmg_spec outputs/walk_2d.pmg
+pmg_cli --build-graph specs/demo_walk_2d_triangle.pmg_spec outputs/walk_2d.pmg
 pmg_cli --inspect-graph outputs/walk_2d.pmg
 ```
 

@@ -1,0 +1,32 @@
+# Canonical multi-node topology demo and cross-gait limitation case.
+# Demonstrates:
+# - walk and jog graph nodes with self-edges and directed cross-node edges;
+# - node-local parameter domains and explicit gait-change transitions.
+# Does not demonstrate:
+# - a fully parameterized walk/jog controller;
+# - jog interpolation or jog steering: jog is a fixed single-example node;
+# - equal transition quality across same-gait and cross-gait edges.
+#
+# Walk parameters are normalized authored controls calibrated against measured
+# turn rate. The jog parameter domain is the singleton [0, 0].
+node walk 1
+registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
+parameter_metric walk turn_rate
+example walk 0.0 ../BVH/walkCurve.bvh
+example walk 0.5 ../BVH/walkMoreCurve.bvh
+example walk 1.0 ../BVH/walkTightCurve.bvh
+
+node jog 1
+registration jog LeftAnkle LeftAnkle,RightAnkle 3 0
+example jog 0.0 ../BVH/jogCurve.bvh
+expect jog spanned_axes 0
+
+# D6 raw-sum thresholds, calibrated per directed edge.
+edge walk walk
+edge_config walk walk 225 250 8 40 17
+edge walk jog
+edge_config walk jog 450 500 8 20 19
+edge jog walk
+edge_config jog walk 300 350 4 40 23
+edge jog jog
+edge_config jog jog 80 100 4 20 29

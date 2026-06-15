@@ -4,7 +4,8 @@ Last updated: 2026-06-15.
 
 ## Purpose
 
-Explain the visible walk loop interruption in `specs/walk_jog.pmg_spec`,
+Explain the visible walk loop interruption in
+`specs/demo_walk_jog_topology.pmg_spec`,
 quantify it, define the `jog` and desired-parameter contracts, and separate
 paper-faithful behavior from useful but non-equivalent reference code.
 
@@ -28,7 +29,7 @@ phase reset is intentional clip concatenation; the blend is what hides it.
 
 Setup:
 
-- graph: `specs/walk_jog.pmg_spec`;
+- graph: `specs/demo_walk_jog_topology.pmg_spec`;
 - runtime rate: 30 frames/s;
 - sample duration: 20 seconds;
 - transition blend: 5 frames, cubic smoothstep;
@@ -92,7 +93,8 @@ frames until that full edge-quality sweep exists.
 
 A second pass grounded the jolt in the point-cloud transition distance `D` at
 the chosen optimal cell, measured with `--diagnose-graph-edge` over every
-`walk_jog` edge (proper end->start sub-range `[0.70,0.95]->[0.05,0.30]`):
+`demo_walk_jog_topology` edge (proper end->start sub-range
+`[0.70,0.95]->[0.05,0.30]`):
 
 | Edge | T_GOOD | D (min, over source samples) | Reading |
 |---|---:|---|---|
@@ -140,26 +142,33 @@ turn-rate re-calibration. Left as a corpus-curation decision, not applied.
 ### Runtime confounder audit (2026-06-15)
 
 The "data-bound" verdict above was re-tested against three runtime/metric edge
-cases flagged in an external continuity review, each added as an opt-in,
-default-off ablation toggle (dev/core PR #44) so the default pipeline is
-unchanged. Measured on the `walk_jog` self-edge, centered runtime blend, 20 s,
-reported as `pop_ratio` (max step / median step):
+cases flagged in an external continuity review. Each began as an opt-in ablation
+toggle (PR #44); the self-edge pre-roll wrap then **landed as the default**
+(`TransitionPreRollPolicy::kWrapCyclicSelfEdges`, commit `f3576c3`; the policy was
+later gated on per-node cyclic metadata so only cyclic self-edges wrap), so the
+improved column below is now the shipped behavior, not an opt-in. The
+`demo_walk_jog_topology`
+node is cyclic (registration `cycle_joint`), so its self-edge wraps. Measured on the
+`demo_walk_jog_topology` self-edge, centered runtime blend, 20 s, reported as
+`pop_ratio`
+(max step / median step):
 
-| ablation | wide anchor 0.0 | tight anchor 1.0 |
-|---|---:|---:|
-| baseline (pre-roll clamp, clamp metric) | 1.63 | 2.16 |
-| pre-roll wrap (`--preroll-policy wrap`) | **1.32 (-19%)** | 2.16 |
-| cyclic self-edge metric (`--self-edge-cyclic-metric`) | 1.63 (null) | 2.16 (null) |
+| configuration | wide 0.0 | mid 0.5 | tight 1.0 |
+|---|---:|---:|---:|
+| pre-roll clamp (`--preroll-policy clamp`) | 1.63 | 1.59 | 2.16 |
+| **pre-roll wrap (default, self-edges)** | **1.32 (-19%)** | **1.34 (-16%)** | 2.16 |
+| cyclic self-edge metric (`--self-edge-cyclic-metric`) | null | null | null |
 
 Two corrections to the data-bound claim:
 
-- **The wide-turn jolt is partly a runtime confounder, not purely corpus.** The
+- **The wide-turn jolt was partly a runtime confounder, not purely corpus.** The
   target pre-roll was clamped at clip start (`std::max(0, target_phase*duration -
   lead)`); for a centered self-edge with a small target phase (walk
-  `target_phase ~= 0.07`) this drops the previous-cycle tail that supplies the
-  target's blend velocity. Wrapping the pre-roll into that tail removes ~19% of
-  the wide-anchor pop deterministically. So `D = 1.23` overstates the wide
-  anchor's *intrinsic* periodicity cost.
+  `target_phase ~= 0.07`) this dropped the previous-cycle tail that supplies the
+  target's blend velocity. The default now wraps the pre-roll into that tail
+  (bidirectional `FoldCompletedCycles`), removing ~19% (wide) / ~16% (mid) of the
+  pop deterministically. So `D = 1.23` overstated the wide anchor's *intrinsic*
+  periodicity cost; the cyclic clamp, not the corpus, owned that slice.
 - **The boundary-clamp metric is inert here** (downgraded, not removed). The
   wrap-aware self-edge metric chose the identical transition (byte-identical
   `pop_ratio`): the calibrated sub-range `[0.70,0.95] -> [0.05,0.30]` keeps the
@@ -172,21 +181,25 @@ support than the centered runtime blends; for the tight anchor centered is
 *worse* than directional, 2.16 vs 1.92) plus genuine corpus periodicity -- not a
 clamp defect.
 
-Not yet ablated: the transition gate is a ~1-frame point-in-window test, so a
-variable-frame-time or fast-forward live viewer can skip a self-edge schedule.
-This is a live-viewer robustness issue only; the fixed-dt CLI that produced every
-number here cannot reproduce it, so it does not affect these measurements. A
-wrap-aware `CrossedPhase` schedule is the follow-up.
+Gate-skip (closed): the transition gate was a ~1-frame point-in-window test, so a
+variable-frame-time or fast-forward live viewer could skip a self-edge schedule.
+The fixed-dt CLI that produced every number here never reproduced it, so it did
+not affect these measurements -- but it was a real live-viewer robustness gap.
+Commit `f3576c3` replaced the point-in-window test with a wrap-aware
+`CrossedPhase(previous_phase, phase_advance, gate)` so a gate crossed within an
+update (or a full-cycle jump) still schedules.
 
 ### Conclusion
 
 The residual walk-loop jolt is **mostly** a corpus periodicity limit (wide-turn
-anchor and single-example jog), but not purely: ~19% of the wide-turn self-edge
-pop was a deterministic pre-roll-clamp confounder, now isolated and runtime-
-fixable (PR #44, opt-in). The boundary-clamp metric is inert on this corpus and
-the tight-turn residual is the D4 window mismatch plus corpus, not a defect. The
-`edge_phase_range` plumbing is retained as a real conformance/tunability feature
-(§6.3) but is documented here as ineffective against this particular jolt.
+anchor and single-example jog), but not purely: ~19% (wide) / ~16% (mid) of the
+self-edge pop was a deterministic pre-roll-clamp confounder, now removed -- the
+self-edge pre-roll wrap is the shipped default for cyclic nodes
+(`kWrapCyclicSelfEdges`, `f3576c3`). The
+boundary-clamp metric is inert on this corpus, and the tight-turn residual is the
+D4 window mismatch plus corpus, not a defect. The `edge_phase_range` plumbing is
+retained as a real conformance/tunability feature (§6.3) but is documented here
+as ineffective against this particular jolt.
 
 ## Paper Comparison
 
@@ -244,7 +257,7 @@ graph or distance code would reduce paper fidelity.
 
 ## Why Jog Cannot Be Adjusted
 
-`walk_jog.pmg_spec` declares:
+`demo_walk_jog_topology.pmg_spec` declares:
 
 ```text
 node jog 1
@@ -273,12 +286,12 @@ parametric motion space:
 4. target node generates the next short clip at the clamped coordinate;
 5. runtime aligns and blends into it at the stored transition phases.
 
-For `walk_jog`:
+For `demo_walk_jog_topology`:
 
 - `walk`: authored scalar 0..1, calibrated against measured `turn_rate`;
 - `jog`: singleton scalar fixed at 0.
 
-For `walk_curvature_speed.pmg_spec`:
+For `demo_walk_2d_triangle.pmg_spec`:
 
 - axis 0: turn/curvature;
 - axis 1: gait/speed, calibrated with `travel_speed`;
@@ -286,6 +299,7 @@ For `walk_curvature_speed.pmg_spec`:
   pace); the manual blend slider still exposes axis 0 and holds axis 1 at its
   midpoint.
 
-`walk_curvature.pmg_spec` remains the clean one-slider steering demo.
-`walk_curvature_speed.pmg_spec` is the 2-D data contract and is now fully
+`legacy_walk_curvature.pmg_spec` remains available for one-slider steering
+regression, but its non-monotone signed response excludes it from the curated
+demo set. `demo_walk_2d_triangle.pmg_spec` is the 2-D data contract and is
 steerable under goto; only the manual per-axis slider UI is still 1-D.

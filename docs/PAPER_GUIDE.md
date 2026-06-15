@@ -208,7 +208,7 @@ when all weights sum to one.
 - Parameter-dependent generated clip duration.
 - Point-cloud transition distance and floor alignment.
 - Sampled PMG edge construction and lookup.
-- Complete V8 offline artifact.
+- Complete V9 offline artifact.
 - Runtime alignment, blend, random walk, and goal-directed locomotion.
 
 ### Local extensions
