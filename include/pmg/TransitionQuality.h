@@ -36,6 +36,9 @@ struct TransitionQualityConfig {
     float pose_pop_ratio_threshold = 2.0f;
     float root_speed_ratio_threshold = 1.3f;
     float yaw_rate_ratio_threshold = 1.3f;
+    // Signed yaw rates with magnitude at or below this rad/s value are treated
+    // as stationary noise when computing yaw_rate_ratio.
+    float yaw_rate_deadband = 0.05f;
     float contact_drift_threshold = 1.0f;
 };
 
@@ -57,6 +60,8 @@ struct TransitionQualityContext {
     std::optional<ContactDetectionSettings> contact_settings;
 
     // True only when the measured window straddles a raw cyclic clip seam.
+    // Reserved for future CyclicContinuity wiring; current runtime CSV
+    // generation leaves this false.
     bool cyclic_seam = false;
 };
 
@@ -107,5 +112,7 @@ TransitionQualityRecord MeasureTransitionQuality(
 
 const char* TransitionQualityClassificationName(
     TransitionQualityClassification classification);
+
+const char* TransitionContactStateName(TransitionContactState state);
 
 }  // namespace pmg

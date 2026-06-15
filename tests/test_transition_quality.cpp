@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <string>
 #include <vector>
 
 namespace {
@@ -142,6 +143,34 @@ void TestYawRateReversalClassification() {
         pmg::TransitionQualityClassification::kYawRateDiscontinuity);
 }
 
+void TestNearZeroYawRateNoiseIsSmooth() {
+    const pmg::Skeleton skeleton = MakeSkeleton();
+    const std::vector<float> yaw{
+        0.0000f, 0.0001f, -0.0001f, 0.0002f,
+        -0.0002f, 0.0001f, 0.0000f};
+    std::vector<pmg::Pose> poses;
+    for (int frame = 0; frame < 7; ++frame) {
+        poses.push_back(MakePose(
+            0.1f * static_cast<float>(frame), yaw[frame], 0.0f));
+    }
+
+    pmg::TransitionQualityConfig config;
+    config.pose_pop_ratio_threshold = 10.0f;
+    config.contact_drift_threshold = 100.0f;
+    const pmg::TransitionQualityRecord quality =
+        pmg::MeasureTransitionQuality(
+            skeleton, poses, kTransitionPose, Context(0.1f), config);
+
+    assert(std::abs(quality.pre_yaw_rate) < config.yaw_rate_deadband);
+    assert(std::abs(quality.post_yaw_rate) < config.yaw_rate_deadband);
+    assert(quality.yaw_rate_ratio == 1.0f);
+    assert(
+        quality.classification ==
+        pmg::TransitionQualityClassification::kSmooth);
+    assert(std::string(pmg::TransitionContactStateName(
+               quality.left_contact_before)) == "unknown");
+}
+
 }  // namespace
 
 int main() {
@@ -149,5 +178,6 @@ int main() {
     TestRootSpeedJumpClassification();
     TestYawRateJumpClassification();
     TestYawRateReversalClassification();
+    TestNearZeroYawRateNoiseIsSmooth();
     return 0;
 }

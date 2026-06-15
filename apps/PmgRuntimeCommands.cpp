@@ -426,6 +426,8 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
                "pre_root_speed,post_root_speed,root_speed_ratio,"
                "pre_yaw_rate,post_yaw_rate,yaw_rate_ratio,"
                "left_foot_drift,right_foot_drift,max_contact_drift,"
+               "left_contact_before,left_contact_after,"
+               "right_contact_before,right_contact_after,"
                "quality_classification\n";
 
         pmg::MotionClip runtime_trace;
@@ -480,10 +482,15 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
             quality_context.contact_settings =
                 contact_settings_by_node.at(d.source_node);
 
+            pmg::TransitionQualityConfig quality_config;
+            quality_config.frames_before = std::max(
+                3, runtime_config.transition_blend_frames);
+            quality_config.frames_after = std::max(
+                3, runtime_config.transition_blend_frames);
             const pmg::TransitionQualityRecord quality =
                 pmg::MeasureTransitionQuality(
                     artifact.skeleton, poses, row.pose_index,
-                    quality_context);
+                    quality_context, quality_config);
 
             csv << i << ',' << row.pose_index << ','
                 << static_cast<float>(row.pose_index) * dt << ','
@@ -511,6 +518,18 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
                 << quality.left_foot_drift << ','
                 << quality.right_foot_drift << ','
                 << quality.max_contact_drift << ','
+                << pmg::TransitionContactStateName(
+                       quality.left_contact_before)
+                << ','
+                << pmg::TransitionContactStateName(
+                       quality.left_contact_after)
+                << ','
+                << pmg::TransitionContactStateName(
+                       quality.right_contact_before)
+                << ','
+                << pmg::TransitionContactStateName(
+                       quality.right_contact_after)
+                << ','
                 << pmg::TransitionQualityClassificationName(
                        quality.classification)
                 << '\n';

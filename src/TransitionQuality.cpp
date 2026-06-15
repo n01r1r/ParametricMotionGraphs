@@ -51,14 +51,23 @@ float SymmetricMagnitudeRatio(float first, float second) {
     return maximum / std::max(minimum, kRatioEpsilon);
 }
 
-float SignedRateDiscontinuityRatio(float first, float second) {
+float SignedRateDiscontinuityRatio(
+    float first,
+    float second,
+    float deadband) {
+    const float first_magnitude = std::abs(first);
+    const float second_magnitude = std::abs(second);
+    if (first_magnitude <= deadband && second_magnitude <= deadband) {
+        return 1.0f;
+    }
+
     const float minimum_magnitude =
-        std::min(std::abs(first), std::abs(second));
+        std::min(first_magnitude, second_magnitude);
     if (std::abs(first - second) <= kRatioEpsilon) {
         return 1.0f;
     }
     return 1.0f + std::abs(first - second) /
-                      std::max(minimum_magnitude, kRatioEpsilon);
+                      std::max(minimum_magnitude, deadband);
 }
 
 float MeanJointDistance(
@@ -235,6 +244,10 @@ void RequireInputs(
         throw std::runtime_error(
             "MeasureTransitionQuality: before/after frame counts must be positive");
     }
+    if (config.yaw_rate_deadband < 0.0f) {
+        throw std::runtime_error(
+            "MeasureTransitionQuality: yaw_rate_deadband must be non-negative");
+    }
     for (const Pose& pose : poses) {
         pose.RequireJointCount(
             skeleton.NumJoints(), "MeasureTransitionQuality");
@@ -297,7 +310,8 @@ TransitionQualityRecord MeasureTransitionQuality(
         world_poses, transition_pose_index, last_pose,
         context.frames_per_second);
     record.yaw_rate_ratio = SignedRateDiscontinuityRatio(
-        record.pre_yaw_rate, record.post_yaw_rate);
+        record.pre_yaw_rate, record.post_yaw_rate,
+        config.yaw_rate_deadband);
 
     record.left_foot_drift = JointFloorDrift(
         skeleton, world_poses, first_pose, last_pose,
@@ -373,6 +387,19 @@ const char* TransitionQualityClassificationName(
     }
     throw std::runtime_error(
         "TransitionQualityClassificationName: unsupported classification");
+}
+
+const char* TransitionContactStateName(TransitionContactState state) {
+    switch (state) {
+        case TransitionContactState::kUnknown:
+            return "unknown";
+        case TransitionContactState::kNotInContact:
+            return "not_in_contact";
+        case TransitionContactState::kInContact:
+            return "in_contact";
+    }
+    throw std::runtime_error(
+        "TransitionContactStateName: unsupported contact state");
 }
 
 }  // namespace pmg
