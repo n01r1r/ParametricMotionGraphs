@@ -1,6 +1,6 @@
 # Walk/Jog Continuity and Control Audit
 
-Last updated: 2026-06-14.
+Last updated: 2026-06-15.
 
 ## Purpose
 
@@ -137,10 +137,54 @@ Group-B curvature candidate) lowers the proper-range `D` from 1.23 to 0.42, but
 transition score alone; it changes the locomotion semantics and needs full
 turn-rate re-calibration. Left as a corpus-curation decision, not applied.
 
+### Runtime confounder audit (2026-06-15)
+
+The "data-bound" verdict above was re-tested against three runtime/metric edge
+cases flagged in an external continuity review, each added as an opt-in,
+default-off ablation toggle (dev/core PR #44) so the default pipeline is
+unchanged. Measured on the `walk_jog` self-edge, centered runtime blend, 20 s,
+reported as `pop_ratio` (max step / median step):
+
+| ablation | wide anchor 0.0 | tight anchor 1.0 |
+|---|---:|---:|
+| baseline (pre-roll clamp, clamp metric) | 1.63 | 2.16 |
+| pre-roll wrap (`--preroll-policy wrap`) | **1.32 (-19%)** | 2.16 |
+| cyclic self-edge metric (`--self-edge-cyclic-metric`) | 1.63 (null) | 2.16 (null) |
+
+Two corrections to the data-bound claim:
+
+- **The wide-turn jolt is partly a runtime confounder, not purely corpus.** The
+  target pre-roll was clamped at clip start (`std::max(0, target_phase*duration -
+  lead)`); for a centered self-edge with a small target phase (walk
+  `target_phase ~= 0.07`) this drops the previous-cycle tail that supplies the
+  target's blend velocity. Wrapping the pre-roll into that tail removes ~19% of
+  the wide-anchor pop deterministically. So `D = 1.23` overstates the wide
+  anchor's *intrinsic* periodicity cost.
+- **The boundary-clamp metric is inert here** (downgraded, not removed). The
+  wrap-aware self-edge metric chose the identical transition (byte-identical
+  `pop_ratio`): the calibrated sub-range `[0.70,0.95] -> [0.05,0.30]` keeps the
+  optimum off the cycle boundary. The flag's engagement is unit-tested, so the
+  null is "same transition chosen", not "flag never ran".
+
+The **tight-turn residual** is untouched by both ablations. It is the D4
+metric/runtime window mismatch (the directional metric scores a different frame
+support than the centered runtime blends; for the tight anchor centered is
+*worse* than directional, 2.16 vs 1.92) plus genuine corpus periodicity -- not a
+clamp defect.
+
+Not yet ablated: the transition gate is a ~1-frame point-in-window test, so a
+variable-frame-time or fast-forward live viewer can skip a self-edge schedule.
+This is a live-viewer robustness issue only; the fixed-dt CLI that produced every
+number here cannot reproduce it, so it does not affect these measurements. A
+wrap-aware `CrossedPhase` schedule is the follow-up.
+
 ### Conclusion
 
-The residual walk-loop jolt is a corpus periodicity limit (wide-turn anchor and
-single-example jog), not a runtime, registration, or config defect. The
+The residual walk-loop jolt is **mostly** a corpus periodicity limit (wide-turn
+anchor and single-example jog), but not purely: ~19% of the wide-turn self-edge
+pop was a deterministic pre-roll-clamp confounder, now isolated and runtime-
+fixable (PR #44, opt-in). The boundary-clamp metric is inert on this corpus and
+the tight-turn residual is the D4 window mismatch plus corpus, not a defect. The
 `edge_phase_range` plumbing is retained as a real conformance/tunability feature
 (§6.3) but is documented here as ineffective against this particular jolt.
 
