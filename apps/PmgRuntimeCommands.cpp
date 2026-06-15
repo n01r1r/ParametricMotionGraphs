@@ -162,6 +162,39 @@ struct RandomWalkOptions {
     // box, clamped target, phases, pre-roll policy, alignment, build-time D, and
     // local pop around the transition). Empty = no dump.
     std::string dump_transitions_csv;
+    // Optional CLI-only ablation. A prospective controller copy measures the
+    // candidate before the live controller schedules it.
+    pmg::TransitionQualityGateConfig quality_gate;
+};
+
+struct TransitionQualityGateCounts {
+    int root_speed = 0;
+    int yaw_rate = 0;
+    int contact_drift = 0;
+    int contact_mismatch = 0;
+    int insufficient_data = 0;
+
+    void Add(pmg::TransitionQualityGateReason reason) {
+        switch (reason) {
+            case pmg::TransitionQualityGateReason::kNone:
+                return;
+            case pmg::TransitionQualityGateReason::kRootSpeed:
+                ++root_speed;
+                return;
+            case pmg::TransitionQualityGateReason::kYawRate:
+                ++yaw_rate;
+                return;
+            case pmg::TransitionQualityGateReason::kContactDrift:
+                ++contact_drift;
+                return;
+            case pmg::TransitionQualityGateReason::kContactMismatch:
+                ++contact_mismatch;
+                return;
+            case pmg::TransitionQualityGateReason::kInsufficientData:
+                ++insufficient_data;
+                return;
+        }
+    }
 };
 
 const char* PreRollPolicyName(pmg::TransitionPreRollPolicy policy) {
@@ -239,6 +272,82 @@ RuntimeContactJoints ResolveRuntimeContactJoints(
     return joints;
 }
 
+std::optional<pmg::TransitionQualityGateDecision>
+EvaluateProspectiveTransitionGate(
+    const pmg::BuiltPmgArtifact& artifact,
+    const pmg::RuntimeController& controller,
+    const pmg::RuntimeControlRequest& request,
+    const std::vector<pmg::Pose>& completed_poses,
+    float delta_seconds,
+    int quality_window_intervals,
+    const pmg::TransitionQualityGateConfig& gate_config) {
+    pmg::RuntimeController trial = controller;
+    trial.Update(delta_seconds, request);
+    const std::optional<pmg::RuntimeTransitionDiagnostics> diagnostics =
+        trial.ActiveTransitionDiagnostics();
+    if (!diagnostics.has_value()) {
+        return std::nullopt;
+    }
+
+    std::vector<pmg::Pose> quality_poses;
+    const std::size_t available_before = std::min(
+        completed_poses.size(),
+        static_cast<std::size_t>(quality_window_intervals));
+    quality_poses.insert(
+        quality_poses.end(),
+        completed_poses.end() -
+            static_cast<std::ptrdiff_t>(available_before),
+        completed_poses.end());
+    const int transition_pose_index =
+        static_cast<int>(quality_poses.size());
+    quality_poses.push_back(trial.CurrentPose());
+
+    for (int frame = 0; frame < quality_window_intervals; ++frame) {
+        trial.Update(delta_seconds, request);
+        quality_poses.push_back(trial.CurrentPose());
+    }
+
+    const RuntimeContactJoints contact_joints =
+        ResolveRuntimeContactJoints(artifact, diagnostics->source_node);
+    std::vector<int> contact_indices;
+    if (contact_joints.left >= 0) {
+        contact_indices.push_back(contact_joints.left);
+    }
+    if (contact_joints.right >= 0 &&
+        contact_joints.right != contact_joints.left) {
+        contact_indices.push_back(contact_joints.right);
+    }
+
+    pmg::TransitionQualityContext quality_context;
+    quality_context.frames_per_second =
+        artifact.metadata.frames_per_second;
+    quality_context.transition_distance =
+        diagnostics->interpolated_transition_distance;
+    quality_context.left_foot_joint = contact_joints.left;
+    quality_context.right_foot_joint = contact_joints.right;
+
+    if (!contact_indices.empty()) {
+        pmg::MotionClip quality_clip;
+        quality_clip.frames_per_second =
+            artifact.metadata.frames_per_second;
+        quality_clip.frames = quality_poses;
+        quality_context.contact_settings =
+            pmg::EstimateContactSettings(
+                artifact.skeleton, quality_clip, contact_indices);
+        quality_context.contact_settings->min_contact_frames =
+            contact_joints.min_contact_frames;
+    }
+
+    pmg::TransitionQualityConfig quality_config;
+    quality_config.frames_before = quality_window_intervals;
+    quality_config.frames_after = quality_window_intervals;
+    const pmg::TransitionQualityRecord quality =
+        pmg::MeasureTransitionQuality(
+            artifact.skeleton, quality_poses, transition_pose_index,
+            quality_context, quality_config);
+    return pmg::EvaluateTransitionQualityGate(quality, gate_config);
+}
+
 // Paper application A: stream random transitions through the graph and verify
 // no frame-to-frame popping (worst step vs the median walking step).
 int RandomWalkCommand(const RandomWalkOptions& options) {
@@ -266,6 +375,17 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
                                .config.transition_convention)
               << " blend_placement="
               << pmg::TransitionWindowConventionName(runtime_config.convention)
+              << "\n";
+    std::cout << "quality_gate="
+              << (options.quality_gate.enabled ? 1 : 0)
+              << " max_root_speed_ratio="
+              << options.quality_gate.max_root_speed_ratio
+              << " max_yaw_rate_ratio="
+              << options.quality_gate.max_yaw_rate_ratio
+              << " max_contact_drift="
+              << options.quality_gate.max_contact_drift
+              << " reject_contact_mismatch="
+              << (options.quality_gate.reject_contact_mismatch ? 1 : 0)
               << "\n";
     pmg::PointCloudAlignment alignment(
         artifact.skeleton, runtime_config.transition_blend_frames);
@@ -296,6 +416,9 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
     const int total_frames = static_cast<int>(
         options.seconds * artifact.metadata.frames_per_second);
     int last_transition_count = 0;
+    TransitionQualityGateCounts quality_gate_counts;
+    const int quality_window_intervals = std::max(
+        3, runtime_config.transition_blend_frames);
 
     std::vector<pmg::Pose> poses;
     poses.reserve(static_cast<std::size_t>(total_frames));
@@ -334,7 +457,27 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
     bool was_transitioning = controller.IsTransitioning();
 
     for (int frame = 0; frame < total_frames; ++frame) {
-        controller.Update(dt, request);
+        bool rejected_candidate = false;
+        if (options.quality_gate.enabled &&
+            !controller.IsTransitioning()) {
+            const auto gate_decision = EvaluateProspectiveTransitionGate(
+                artifact, controller, request, poses, dt,
+                quality_window_intervals, options.quality_gate);
+            if (gate_decision.has_value() &&
+                !gate_decision->accepted) {
+                quality_gate_counts.Add(gate_decision->reason);
+                rejected_candidate = true;
+            }
+        }
+
+        if (rejected_candidate) {
+            controller.Update(dt, pmg::RuntimeControlRequest{});
+            request = pmg::ChooseRandomOutgoingTransition(
+                          artifact.graph, controller.CurrentNode(), rng)
+                          .request;
+        } else {
+            controller.Update(dt, request);
+        }
         poses.push_back(controller.CurrentPose());
 
         if (dump_transitions) {
@@ -409,6 +552,16 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
     std::cout << "median_step=" << stats.median_step << "\n";
     std::cout << "max_step=" << stats.max_step << "\n";
     std::cout << "pop_ratio=" << stats.Ratio() << "\n";
+    std::cout << "quality_gate_skipped_root_speed="
+              << quality_gate_counts.root_speed << "\n";
+    std::cout << "quality_gate_skipped_yaw_rate="
+              << quality_gate_counts.yaw_rate << "\n";
+    std::cout << "quality_gate_skipped_contact_drift="
+              << quality_gate_counts.contact_drift << "\n";
+    std::cout << "quality_gate_skipped_contact_mismatch="
+              << quality_gate_counts.contact_mismatch << "\n";
+    std::cout << "quality_gate_skipped_insufficient_data="
+              << quality_gate_counts.insufficient_data << "\n";
 
     if (dump_transitions) {
         std::ofstream csv(options.dump_transitions_csv);
@@ -810,6 +963,19 @@ RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
         } else if (option == "--dump-transitions-csv") {
             options.dump_transitions_csv =
                 require_value("--dump-transitions-csv");
+        } else if (option == "--quality-gate") {
+            options.quality_gate.enabled = true;
+        } else if (option == "--max-root-speed-ratio") {
+            options.quality_gate.max_root_speed_ratio =
+                std::stof(require_value("--max-root-speed-ratio"));
+        } else if (option == "--max-yaw-rate-ratio") {
+            options.quality_gate.max_yaw_rate_ratio =
+                std::stof(require_value("--max-yaw-rate-ratio"));
+        } else if (option == "--max-contact-drift") {
+            options.quality_gate.max_contact_drift =
+                std::stof(require_value("--max-contact-drift"));
+        } else if (option == "--reject-contact-mismatch") {
+            options.quality_gate.reject_contact_mismatch = true;
         } else {
             throw std::runtime_error("unknown random-walk option '" + option + "'");
         }

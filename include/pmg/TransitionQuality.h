@@ -25,6 +25,15 @@ enum class TransitionContactState {
     kInContact,
 };
 
+enum class TransitionQualityGateReason {
+    kNone,
+    kRootSpeed,
+    kYawRate,
+    kContactDrift,
+    kContactMismatch,
+    kInsufficientData,
+};
+
 struct TransitionQualityConfig {
     // Number of frame intervals sampled on each side of transition_pose_index.
     int frames_before = 3;
@@ -40,6 +49,24 @@ struct TransitionQualityConfig {
     // as stationary noise when computing yaw_rate_ratio.
     float yaw_rate_deadband = 0.05f;
     float contact_drift_threshold = 1.0f;
+};
+
+// Optional ablation gate over one measured transition-quality record.
+// Disabled by default, so it cannot change runtime behavior unless explicitly
+// enabled by a caller. Ratios are dimensionless; contact drift uses motion
+// corpus distance units.
+struct TransitionQualityGateConfig {
+    bool enabled = false;
+    float max_root_speed_ratio = 1.4f;
+    float max_yaw_rate_ratio = 2.5f;
+    float max_contact_drift = 5.0f;
+    bool reject_contact_mismatch = false;
+};
+
+struct TransitionQualityGateDecision {
+    bool accepted = true;
+    TransitionQualityGateReason reason =
+        TransitionQualityGateReason::kNone;
 };
 
 struct TransitionQualityContext {
@@ -114,5 +141,12 @@ const char* TransitionQualityClassificationName(
     TransitionQualityClassification classification);
 
 const char* TransitionContactStateName(TransitionContactState state);
+
+TransitionQualityGateDecision EvaluateTransitionQualityGate(
+    const TransitionQualityRecord& record,
+    const TransitionQualityGateConfig& config = {});
+
+const char* TransitionQualityGateReasonName(
+    TransitionQualityGateReason reason);
 
 }  // namespace pmg

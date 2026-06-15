@@ -165,6 +165,14 @@ bool IsInContact(TransitionContactState state) {
     return state == TransitionContactState::kInContact;
 }
 
+bool HasKnownContactMismatch(
+    TransitionContactState before,
+    TransitionContactState after) {
+    return before != TransitionContactState::kUnknown &&
+           after != TransitionContactState::kUnknown &&
+           before != after;
+}
+
 TransitionQualityClassification Classify(
     const TransitionQualityRecord& record,
     const TransitionQualityContext& context,
@@ -400,6 +408,64 @@ const char* TransitionContactStateName(TransitionContactState state) {
     }
     throw std::runtime_error(
         "TransitionContactStateName: unsupported contact state");
+}
+
+TransitionQualityGateDecision EvaluateTransitionQualityGate(
+    const TransitionQualityRecord& record,
+    const TransitionQualityGateConfig& config) {
+    if (!config.enabled) {
+        return {};
+    }
+    if (config.max_root_speed_ratio <= 0.0f ||
+        config.max_yaw_rate_ratio <= 0.0f ||
+        config.max_contact_drift < 0.0f) {
+        throw std::runtime_error(
+            "EvaluateTransitionQualityGate: limits must be positive "
+            "(contact drift may be zero)");
+    }
+    if (record.classification ==
+        TransitionQualityClassification::kInsufficientData) {
+        return {false, TransitionQualityGateReason::kInsufficientData};
+    }
+    if (record.root_speed_ratio > config.max_root_speed_ratio) {
+        return {false, TransitionQualityGateReason::kRootSpeed};
+    }
+    if (record.yaw_rate_ratio > config.max_yaw_rate_ratio) {
+        return {false, TransitionQualityGateReason::kYawRate};
+    }
+    if (record.max_contact_drift > config.max_contact_drift) {
+        return {false, TransitionQualityGateReason::kContactDrift};
+    }
+
+    const bool left_contact_mismatch = HasKnownContactMismatch(
+        record.left_contact_before, record.left_contact_after);
+    const bool right_contact_mismatch = HasKnownContactMismatch(
+        record.right_contact_before, record.right_contact_after);
+    if (config.reject_contact_mismatch &&
+        (left_contact_mismatch || right_contact_mismatch)) {
+        return {false, TransitionQualityGateReason::kContactMismatch};
+    }
+    return {};
+}
+
+const char* TransitionQualityGateReasonName(
+    TransitionQualityGateReason reason) {
+    switch (reason) {
+        case TransitionQualityGateReason::kNone:
+            return "none";
+        case TransitionQualityGateReason::kRootSpeed:
+            return "root_speed";
+        case TransitionQualityGateReason::kYawRate:
+            return "yaw_rate";
+        case TransitionQualityGateReason::kContactDrift:
+            return "contact_drift";
+        case TransitionQualityGateReason::kContactMismatch:
+            return "contact_mismatch";
+        case TransitionQualityGateReason::kInsufficientData:
+            return "insufficient_data";
+    }
+    throw std::runtime_error(
+        "TransitionQualityGateReasonName: unsupported reason");
 }
 
 }  // namespace pmg

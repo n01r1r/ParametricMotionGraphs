@@ -171,6 +171,77 @@ void TestNearZeroYawRateNoiseIsSmooth() {
                quality.left_contact_before)) == "unknown");
 }
 
+pmg::TransitionQualityRecord GateRecord() {
+    pmg::TransitionQualityRecord record;
+    record.root_speed_ratio = 1.0f;
+    record.yaw_rate_ratio = 1.0f;
+    record.max_contact_drift = 0.0f;
+    record.classification =
+        pmg::TransitionQualityClassification::kSmooth;
+    return record;
+}
+
+void TestDisabledGatePreservesTransition() {
+    pmg::TransitionQualityRecord record = GateRecord();
+    record.root_speed_ratio = 100.0f;
+
+    const pmg::TransitionQualityGateDecision decision =
+        pmg::EvaluateTransitionQualityGate(record);
+
+    assert(decision.accepted);
+    assert(decision.reason == pmg::TransitionQualityGateReason::kNone);
+}
+
+void TestRootSpeedGateRejectsBadRecord() {
+    pmg::TransitionQualityRecord record = GateRecord();
+    record.root_speed_ratio = 1.5f;
+    pmg::TransitionQualityGateConfig config;
+    config.enabled = true;
+    config.max_root_speed_ratio = 1.4f;
+
+    const pmg::TransitionQualityGateDecision decision =
+        pmg::EvaluateTransitionQualityGate(record, config);
+
+    assert(!decision.accepted);
+    assert(
+        decision.reason ==
+        pmg::TransitionQualityGateReason::kRootSpeed);
+}
+
+void TestYawRateGateRejectsBadRecord() {
+    pmg::TransitionQualityRecord record = GateRecord();
+    record.yaw_rate_ratio = 3.0f;
+    pmg::TransitionQualityGateConfig config;
+    config.enabled = true;
+    config.max_yaw_rate_ratio = 2.5f;
+
+    const pmg::TransitionQualityGateDecision decision =
+        pmg::EvaluateTransitionQualityGate(record, config);
+
+    assert(!decision.accepted);
+    assert(
+        decision.reason ==
+        pmg::TransitionQualityGateReason::kYawRate);
+}
+
+void TestInsufficientDataIsCountable() {
+    pmg::TransitionQualityRecord record = GateRecord();
+    record.classification =
+        pmg::TransitionQualityClassification::kInsufficientData;
+    pmg::TransitionQualityGateConfig config;
+    config.enabled = true;
+
+    const pmg::TransitionQualityGateDecision decision =
+        pmg::EvaluateTransitionQualityGate(record, config);
+
+    assert(!decision.accepted);
+    assert(
+        decision.reason ==
+        pmg::TransitionQualityGateReason::kInsufficientData);
+    assert(std::string(pmg::TransitionQualityGateReasonName(
+               decision.reason)) == "insufficient_data");
+}
+
 }  // namespace
 
 int main() {
@@ -179,5 +250,9 @@ int main() {
     TestYawRateJumpClassification();
     TestYawRateReversalClassification();
     TestNearZeroYawRateNoiseIsSmooth();
+    TestDisabledGatePreservesTransition();
+    TestRootSpeedGateRejectsBadRecord();
+    TestYawRateGateRejectsBadRecord();
+    TestInsufficientDataIsCountable();
     return 0;
 }
