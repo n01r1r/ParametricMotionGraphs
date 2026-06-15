@@ -53,15 +53,22 @@ done | sort
   They are only usable as a self-consistent standalone corpus, and only after the
   loader, contact-joint heuristics, and units are verified for that skeleton.
 
-## Canonical 2-D demo: `specs/walk_curvature_speed.pmg_spec`
+## Minimal 2-D fixture: `specs/walk_curvature_speed.pmg_spec`
 
-A calibrated, reproducible 2-D Group-B space:
+A calibrated, reproducible 2-D Group-B fixture:
 
 - axis 0 = turn (wide → tight), axis 1 = gait (walk → jog);
 - examples `walkCurve` @ (0,0), `walkTightCurve` @ (1,0), `jogCurve` @ (0,1) —
-  three non-collinear samples, so both axes are genuinely independent;
+  three non-collinear samples, enough to exercise 2-D interpolation and
+  calibration;
 - `parameter_metrics turn_rate travel_speed` + `parameter_calibration` give the
   axes measured physical meaning (unlike an uncalibrated viewer-authored space).
+
+This is a triangular minimal sample set, not a robust rectangular motion
+family. The jog anchor changes both turn rate and speed, and no `(1,1)`
+tight-jog example exists. Calibration measures and inverts the generated sparse
+blend; it does not create missing motion support or prove axis independence.
+See [`SPEC_AUDIT.md`](SPEC_AUDIT.md).
 
 Build and inspect:
 

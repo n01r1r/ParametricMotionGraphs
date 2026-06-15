@@ -17,7 +17,7 @@ GraphSpec
       -> optional DTW refinement
       -> PmgBuilder edge sampling
   -> BuiltPmgArtifact            (offline/online seam)
-      -> GraphIo V7
+      -> GraphIo V8
       -> RuntimeController
       -> GoalDirectedLocomotion
 ```
@@ -228,6 +228,15 @@ goto steers multidimensional first nodes through the full per-axis steering
 vector; manual slider streaming drives axis 0 and holds the remaining axes at
 their midpoint. Incompatible artifacts fail explicitly.
 
+The PMG Runtime view retains a bounded world-root trail and transition-event
+markers keyed by source/target edge. These are viewer-owned diagnostic history;
+they do not alter controller state or artifact semantics. During an active
+transition, the pipeline view reconstructs the exact metric support from the
+artifact's per-edge build convention and displays it beside the exact runtime
+blend support already reported by `RuntimeController`. This makes the
+directional-metric/centered-blend policy explicit without duplicating transition
+selection or alignment logic.
+
 ## Failure boundaries
 
 The implementation throws close to the invalid input for: missing or malformed
@@ -265,8 +274,9 @@ The full prioritized deviation list lives in
 - The included corpus validates walking/jogging behavior, not the original
   boxing/platform experiments.
 - Transition regions are axis-aligned boxes and clips transition near their end;
-  mid-clip transitions and paper Section 6.3 restricted source-domain nodes
-  remain future work.
-- Goal-directed control currently steers one parameter axis; multidimensional
-  control is the primary open feature (see PAPER_CONFORMANCE §5).
+  per-edge phase ranges are configurable, but general mid-clip graph
+  transitions are not a runtime authoring feature.
+- Goal-directed control steers declared `turn_rate` and `travel_speed` axes.
+  Sparse/coupled corpus support remains a spec-level limitation; see
+  [SPEC_AUDIT.md](SPEC_AUDIT.md).
 - Foot locking is optional and not serialized as runtime behavior.
