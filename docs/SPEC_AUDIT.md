@@ -71,6 +71,31 @@ pmg_cli --goto <spec> 10 10 --seconds 30 --tolerance 3
 pmg_cli --inspect-graph <artifact>
 ```
 
+### 2026-06-15 demo runtime validation
+
+A 30-second, seed-99 runtime evidence pass is recorded in
+`outputs/pmg_demo/PMG_SPEC_VALIDATION_REPORT.md`. The three demo artifacts all
+built and streamed:
+
+| Spec | Transitions | Cross-node | Mean D | Max local pop ratio | Clamp evidence |
+|---|---:|---:|---:|---:|---|
+| `demo_walk_self_edge_minimal` | 47 | 0 | 152.807 | 1.615 | 5 outside-box requests, all clamped |
+| `demo_walk_2d_triangle` | 14 | 0 | 49.405 | 1.503 | no clamp; 5 requests outside the authored triangle accepted unchanged |
+| `demo_walk_jog_topology` | 42 | 24 | 246.002 | 2.795 | topology exercised; singleton jog domain remained fixed |
+
+This strengthens the minimal self-edge and topology claims. It also narrows the
+2-D claim further: comments correctly describe triangular authored samples, but
+the current transition boxes are rectangular AABBs. Five requests with
+`axis0 + axis1 > 1` were accepted unchanged because every observed box was
+`[0,0]..[1,1]`. The spec therefore demonstrates sparse 2-D AABB
+interpolation/calibration, not projection to triangular support.
+
+`--validate-graph-spec` passed for all three files. `--validate-graph` is not a
+spec-configured validation path: it used global defaults (`TGOOD=80`,
+`TBAD=110`, 50/1000 samples) instead of each edge's `edge_config`, causing false
+edge failures and a 2-D timeout. Runtime judgments above use the actual
+spec-configured artifact path.
+
 Distances are raw weighted squared sums in native BVH units. They are only
 comparable under this skeleton, window, weighting, registration, and sampling
 configuration.

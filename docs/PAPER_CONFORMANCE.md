@@ -303,3 +303,8 @@ Spec-level conformance is narrower still: a spec that parses and builds may be
 a minimal fixture or deliberate stress case rather than a meaningful motion
 family. [`SPEC_AUDIT.md`](SPEC_AUDIT.md) classifies every current spec and
 records single-example, sparse-domain, threshold, and parameter-semantic limits.
+In particular, runtime clamps to the interpolated transition **AABB**, not the
+convex hull of authored examples. The triangular sample layout in
+`demo_walk_2d_triangle.pmg_spec` therefore does not imply triangular reachable
+support; the 2026-06-15 CSV evidence is recorded in
+`outputs/pmg_demo/PMG_SPEC_VALIDATION_REPORT.md`.
