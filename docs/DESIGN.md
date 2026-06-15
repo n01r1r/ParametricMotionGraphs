@@ -228,6 +228,25 @@ goto steers multidimensional first nodes through the full per-axis steering
 vector; manual slider streaming drives axis 0 and holds the remaining axes at
 their midpoint. Incompatible artifacts fail explicitly.
 
+The parametric-blend playback clock is stored as **canonical phase in `[0,1)`**,
+not seconds. A blended cycle's real-time duration is parameter-dependent
+(`BlendedDurationSeconds` is the weighted sum of the examples' durations), so a
+seconds clock with `phase = seconds / duration` would re-map the phase the
+instant the blend parameter moved and teleport the pose mid-stride. Phase is the
+structural coordinate (where in the stride) and is conserved across a parameter
+change; only its advance rate (`phase per second = 1 / duration`) changes. The
+preview clip is refreshed before the phase is advanced so the pacing matches the
+parameter being rendered.
+
+Two inspection aids sit on top of this. A **path preview** samples the active
+clip at evenly spaced phases (start, middles, end) and draws faded ghost
+skeletons along the trajectory, coloured cyan to amber so the time direction
+reads at a glance; the same `PoseWorldPositions` transform places the live
+skeleton and the ghosts. The floor is a **checkerboard** with distance-based
+anti-aliasing as a scale/depth cue. The camera adds **WASD fly** (forward/back
+along the view direction, strafe left/right) alongside mouse-drag orbit and
+scroll zoom.
+
 The PMG Runtime view retains a bounded world-root trail and transition-event
 markers keyed by source/target edge. These are viewer-owned diagnostic history;
 they do not alter controller state or artifact semantics. During an active
