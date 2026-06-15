@@ -142,8 +142,10 @@ turn-rate re-calibration. Left as a corpus-curation decision, not applied.
 The "data-bound" verdict above was re-tested against three runtime/metric edge
 cases flagged in an external continuity review. Each began as an opt-in ablation
 toggle (PR #44); the self-edge pre-roll wrap then **landed as the default**
-(`TransitionPreRollPolicy::kWrapSelfEdges`, commit `f3576c3`), so the improved
-column below is now the shipped behavior, not an opt-in. Measured on the
+(`TransitionPreRollPolicy::kWrapCyclicSelfEdges`, commit `f3576c3`; the policy was
+later gated on per-node cyclic metadata so only cyclic self-edges wrap), so the
+improved column below is now the shipped behavior, not an opt-in. The `walk_jog`
+node is cyclic (registration `cycle_joint`), so its self-edge wraps. Measured on the
 `walk_jog` self-edge, centered runtime blend, 20 s, reported as `pop_ratio`
 (max step / median step):
 
@@ -188,7 +190,8 @@ update (or a full-cycle jump) still schedules.
 The residual walk-loop jolt is **mostly** a corpus periodicity limit (wide-turn
 anchor and single-example jog), but not purely: ~19% (wide) / ~16% (mid) of the
 self-edge pop was a deterministic pre-roll-clamp confounder, now removed -- the
-self-edge pre-roll wrap is the shipped default (`kWrapSelfEdges`, `f3576c3`). The
+self-edge pre-roll wrap is the shipped default for cyclic nodes
+(`kWrapCyclicSelfEdges`, `f3576c3`). The
 boundary-clamp metric is inert on this corpus, and the tight-turn residual is the
 D4 window mismatch plus corpus, not a defect. The `edge_phase_range` plumbing is
 retained as a real conformance/tunability feature (§6.3) but is documented here
