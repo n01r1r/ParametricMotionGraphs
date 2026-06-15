@@ -222,13 +222,86 @@ demo completed 47 transitions with 47 CSV rows and maximum local pop ratio
 transitions wrapped pre-roll.
 
 Every transition in both runs classified as `yaw_rate_discontinuity`. The
-self-edge median yaw-rate ratio was `3.535`; the walk/jog median was `9.649`
+self-edge median yaw-rate ratio was `3.630`; the walk/jog median was `9.649`
 and maximum was `42.116`. Cross-node edges also had worse D, pose pop, and root
 speed ratios than the `0 -> 0` self-edge. This is evidence for future
 velocity/yaw/contact-aware rejection, not permission to tune thresholds or
 claim a production walk-jog controller. No transition classified as
 `contact_mismatch`; foot drift remains observational when the same foot is not
 in contact on both sides.
+
+## Yaw-rate diagnostic audit
+
+The yaw-rate metric averages wrapped root-facing deltas independently before
+and after the transition, in rad/s. The random-walk CSV uses
+`max(3, transition_blend_frames)` intervals on each side: five intervals for
+these runs. Its signed discontinuity ratio is:
+
+```text
+1 + |pre_yaw_rate - post_yaw_rate|
+    / max(min(|pre_yaw_rate|, |post_yaw_rate|), 0.05 rad/s)
+```
+
+Both rates inside the `0.05 rad/s` deadband produce ratio `1`. Otherwise, one
+small side makes the ratio large. Classification first handles cyclic-seam and
+contact cases, then chooses the largest threshold-normalized pose, root-speed,
+or yaw score. Ties prefer pose, then yaw, then root speed.
+
+| Evidence | count | median pre yaw (rad/s) | median post yaw (rad/s) | median yaw ratio | max yaw ratio | corr(yaw, D) | corr(yaw, pop) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| walk self-edge | 47 | -1.469 | 0.967 | 3.630 | 5.411 | -0.770 | -0.782 |
+| walk/jog topology | 42 | 0.259 | 0.798 | 9.649 | 42.116 | 0.133 | 0.148 |
+
+| Walk/jog edge | count | median yaw ratio | max yaw ratio |
+|---|---:|---:|---:|
+| walk -> walk | 10 | 4.198 | 10.125 |
+| walk -> jog | 12 | 5.338 | 28.800 |
+| jog -> walk | 12 | 37.693 | 42.116 |
+| jog -> jog | 8 | 12.976 | 12.976 |
+
+Yaw failure is global, not localized to cross-gait transitions. Every minimal
+walk self-edge transition also fails the current `1.3` threshold despite a
+maximum local-pop ratio of only `1.615`. Within that self-edge run, yaw ratio is
+negatively correlated with both `D` and local pop; in the walk/jog run its
+correlation with either is weak. Yaw ratio therefore does not track the existing
+pose-quality signals consistently.
+
+**Conclusion:** signed yaw-rate change is real in the sampled runtime motion,
+especially where direction reverses, but the current ratio and `1.3` threshold
+are too sensitive for hard rejection. A permissive `2.5` ablation still rejects
+every candidate and stalls the random walk. Keep yaw gating diagnostic-only
+until the metric, support, and threshold have independent validation.
+
+## Transition-quality gate ablation
+
+`pmg_cli --quality-gate` is opt-in experimental diagnostic tooling. It is
+disabled by default, so default random-walk scheduling and motion output remain
+unchanged. Gate-disabled transition and motion CSV SHA-256 hashes matched the
+previous baseline exactly.
+
+The 30-second walk/jog ablation used runtime seed `99`. The baseline completed
+42 transitions, including 24 cross-node transitions.
+
+| Gate | Completed transitions | Cross-node transitions | Result |
+|---|---:|---:|---|
+| disabled | 42 | 24 | baseline unchanged |
+| root-speed ratio `1.4` | 22 | 0 | removed all cross-node motion |
+| yaw-rate ratio `2.5` | 0 | 0 | rejected every encountered candidate |
+| contact drift `5.0` | 1 | 0 | nearly stalled; only one self-edge completed |
+| combined | 0 | 0 | stalled |
+
+All active gate configurations removed or effectively stalled cross-node
+walk/jog transitions. The current yaw-rate ratio and thresholds are not
+suitable for hard rejection: yaw failure is global, including low-pop
+self-edges, rather than a reliable discriminator for bad cross-node
+transitions. These results do not justify build-time candidate rejection,
+threshold changes, or production runtime control.
+
+**Status: PASS WITH LIMITATION.** The diagnostic is reproducible and default
+behavior is unchanged, but `demo_walk_jog_topology` remains a corpus-limitation
+case and not a production walk/jog controller. Keep the gate diagnostic-only.
+Before production control, collect cyclic-continuity evidence and improve clip
+cut points and corpus coverage.
 
 ### Conclusion
 

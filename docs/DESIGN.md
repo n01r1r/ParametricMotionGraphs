@@ -223,6 +223,14 @@ expands to the runtime blend-frame count when that is larger.
 the current CLI does not claim to detect raw cyclic seams. The Module does not
 alter edge lookup, scheduling, alignment, blending, thresholds, or graph specs.
 
+`TransitionQualityGateConfig` adds an opt-in ablation contract over one quality
+record. `pmg_cli --quality-gate` evaluates a prospective copy of the runtime
+controller over the same diagnostic support before scheduling the live
+transition. It can skip root-speed, yaw-rate, contact-drift, contact-mismatch,
+or insufficient-data candidates and reports per-reason counts. Defaults remain
+disabled; production runtime behavior and graph construction are unchanged.
+This CLI adapter is evidence tooling, not production transition control.
+
 ## Control layers
 
 - **Random walk.** `ChooseRandomOutgoingTransition` selects only actual outgoing
