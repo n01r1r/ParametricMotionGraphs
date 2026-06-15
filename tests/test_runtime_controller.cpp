@@ -97,6 +97,25 @@ pmg::ParametricMotionGraph MakeBoundaryCrossingGraph(int& node_out) {
     return graph;
 }
 
+// A self-edge whose target transition phase is at the clip start, so the
+// centered pre-roll lands before phase 0 (negative). Whether that pre-roll wraps
+// or clamps is decided purely by node cyclicity.
+pmg::ParametricMotionGraph MakePreRollWrapGraph(int& node_out) {
+    pmg::ParametricMotionSpace space("preroll_walk", 1);
+    space.AddExample({0.0f}, MakeWalkClip(0.0f));
+    space.AddExample({1.0f}, MakeWalkClip(1.0f));
+
+    pmg::ParametricMotionGraph graph;
+    node_out = graph.AddNode("preroll_walk", space);
+
+    pmg::PmgEdge edge;
+    edge.source_node = node_out;
+    edge.target_node = node_out;
+    edge.samples.push_back({{0.5f}, {{0.0f}, {1.0f}}, 0.5f, 0.0f});
+    graph.AddEdge(std::move(edge));
+    return graph;
+}
+
 float WorldFacingYaw(const pmg::Pose& world_pose) {
     const pmg::Vec3 forward = pmg::Rotate(world_pose.local_rotations[0], {0.0f, 0.0f, 1.0f});
     return std::atan2(forward.x, forward.z);
@@ -123,7 +142,11 @@ int main() {
     // Paper-core path: recompute the Kovar-derived joint point-cloud alignment
     // per transition instead of using the root-only debug adapter.
     pmg::PointCloudAlignment alignment(skeleton);
-    pmg::RuntimeController controller(graph, alignment);
+    // The walk node is a cyclic locomotion space, so its self-edge wraps the
+    // centered pre-roll into the previous cycle tail (kWrapCyclicSelfEdges).
+    pmg::RuntimeControllerConfig walk_config;
+    walk_config.cyclic_nodes.assign(graph.NumNodes(), true);
+    pmg::RuntimeController controller(graph, alignment, walk_config);
     controller.Start(node, {0.5f}, kFramesPerSecond);
 
     pmg::RuntimeControlRequest request;
@@ -246,7 +269,7 @@ int main() {
     // cycles fold into the world placement, so the clip-local wrap never
     // teleports the root back to the start and the character keeps advancing.
     {
-        pmg::RuntimeController free_runner(graph, alignment);
+        pmg::RuntimeController free_runner(graph, alignment, walk_config);
         free_runner.Start(node, {0.5f}, kFramesPerSecond);
         const pmg::RuntimeControlRequest no_request;  // desired_node = -1
 
@@ -284,6 +307,7 @@ int main() {
         pmg::RootOnlyAlignment boundary_alignment;
         pmg::RuntimeControllerConfig runtime_config;
         runtime_config.transition_blend_frames = 9;
+        runtime_config.cyclic_nodes.assign(boundary_graph.NumNodes(), true);
         pmg::RuntimeController boundary_controller(
             boundary_graph, boundary_alignment, runtime_config);
         boundary_controller.Start(
@@ -339,6 +363,50 @@ int main() {
             static_cast<float>(boundary_positions.size() - 1);
         assert(boundary_mean_step > 1.0e-4f);
         assert(boundary_max_step < 6.0f * boundary_mean_step);
+    }
+
+    // P2: cyclic metadata, not self-edge topology, decides pre-roll wrap. The
+    // same self-edge with a negative centered pre-roll wraps when the node is
+    // marked cyclic and clamps when it is not.
+    {
+        int wrap_node = -1;
+        const pmg::ParametricMotionGraph wrap_graph =
+            MakePreRollWrapGraph(wrap_node);
+        pmg::RootOnlyAlignment wrap_alignment;
+
+        auto first_transition_diagnostics =
+            [&](bool cyclic) -> pmg::RuntimeTransitionDiagnostics {
+            pmg::RuntimeControllerConfig cfg;  // default kWrapCyclicSelfEdges
+            if (cyclic) {
+                cfg.cyclic_nodes.assign(wrap_graph.NumNodes(), true);
+            }
+            pmg::RuntimeController c(wrap_graph, wrap_alignment, cfg);
+            c.Start(wrap_node, {0.5f}, kFramesPerSecond);
+            pmg::RuntimeControlRequest req;
+            req.desired_node = wrap_node;
+            req.desired_parameter = {0.5f};
+            for (int step = 0; step < 120; ++step) {
+                c.Update(delta_seconds, req);
+                if (c.IsTransitioning()) {
+                    return *c.ActiveTransitionDiagnostics();
+                }
+            }
+            assert(false && "expected a scheduled transition");
+            return {};
+        };
+
+        const pmg::RuntimeTransitionDiagnostics cyclic_diag =
+            first_transition_diagnostics(true);
+        const pmg::RuntimeTransitionDiagnostics acyclic_diag =
+            first_transition_diagnostics(false);
+
+        // The centered pre-roll is negative for both; only cyclicity differs.
+        assert(cyclic_diag.raw_target_start_seconds < 0.0f);
+        assert(acyclic_diag.raw_target_start_seconds < 0.0f);
+        assert(cyclic_diag.target_preroll_wrapped);
+        assert(!acyclic_diag.target_preroll_wrapped);
+        // The non-cyclic self-edge clamps its scheduled start at phase 0.
+        assert(acyclic_diag.scheduled_target_start_seconds >= 0.0f);
     }
 
     return 0;

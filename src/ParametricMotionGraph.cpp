@@ -138,6 +138,9 @@ InterpolatedTransition AverageSamples(
             weights[sample_index] * phases.source;
         result.target_transition_phase +=
             weights[sample_index] * phases.target;
+        result.transition_distance +=
+            weights[sample_index] *
+            selected_samples[sample_index]->transition_distance;
     }
     return result;
 }
@@ -151,6 +154,7 @@ InterpolatedTransition AsResult(
         ResolveTargetPhases(sample, desired_target_parameter);
     result.source_transition_phase = phases.source;
     result.target_transition_phase = phases.target;
+    result.transition_distance = sample.transition_distance;
     return result;
 }
 }  // namespace

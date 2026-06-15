@@ -23,6 +23,10 @@ struct InterpolatedTransition {
     ParameterAabb target_parameter_box;
     float source_transition_phase = 0.0f;
     float target_transition_phase = 0.0f;
+    // kNN-interpolated build-time transition distance D (proxy for the quality
+    // of the scheduled transition). Carries TransitionSample::transition_distance
+    // through the same source-parameter weighting used for the box and phases.
+    float transition_distance = 0.0f;
 };
 
 struct PmgEdge {

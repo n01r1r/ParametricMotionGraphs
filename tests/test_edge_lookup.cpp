@@ -30,8 +30,11 @@ int main() {
         {{1.0f}, 0.82f, 0.12f},
         {{2.0f}, 0.94f, 0.28f},
     };
+    edge.samples[0].transition_distance = 11.0f;
+    edge.samples[1].transition_distance = 22.0f;
+    edge.samples[2].transition_distance = 33.0f;
 
-    // Exact match recovers that sample's box and phases.
+    // Exact match recovers that sample's box, phases, and build-time distance.
     {
         const auto result = edge.LookupInterpolated({1.0f}, {1.0f});
         assert(result.has_value());
@@ -39,6 +42,7 @@ int main() {
         assert(std::abs(result->target_parameter_box.max_corner[0] - 2.0f) < 1.0e-6f);
         assert(std::abs(result->source_transition_phase - 0.82f) < 1.0e-6f);
         assert(std::abs(result->target_transition_phase - 0.12f) < 1.0e-6f);
+        assert(std::abs(result->transition_distance - 22.0f) < 1.0e-6f);
     }
 
     // D5: same source parameter, different target parameter -> phase pair
@@ -68,6 +72,7 @@ int main() {
         assert(std::abs(result->target_parameter_box.min_corner[0] - 0.0f) < 1.0e-5f);
         assert(std::abs(result->target_parameter_box.max_corner[0] - 1.0f) < 1.0e-5f);
         assert(std::abs(result->source_transition_phase - 0.80f) < 1.0e-5f);
+        assert(std::abs(result->transition_distance - 11.0f) < 1.0e-5f);
         assert(result->target_parameter_box.IsValid());
     }
 

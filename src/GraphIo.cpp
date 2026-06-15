@@ -25,17 +25,19 @@ struct GraphPayloadFormat {
     bool has_target_phase_samples;   // V6+ store per-target transition phases
     bool quoted_names;               // V4+ quote node/clip/joint names
     bool has_transition_convention;  // V8+ store the edge transition-window convention
+    bool has_transition_distance;    // V9+ store per-sample build-time distance D
 };
 
 std::optional<GraphPayloadFormat> FormatForHeader(const std::string& header) {
-    //                                       meta+skel warp  calib vector target quoted conv
-    if (header == "PMG_GRAPH_V8") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true};
-    if (header == "PMG_GRAPH_V7") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false};
-    if (header == "PMG_GRAPH_V6") return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false};
-    if (header == "PMG_GRAPH_V5") return GraphPayloadFormat{true,  true,  true,  false, false, true,  false};
-    if (header == "PMG_GRAPH_V4") return GraphPayloadFormat{true,  true,  false, false, false, true,  false};
-    if (header == "PMG_GRAPH_V3") return GraphPayloadFormat{false, true,  false, false, false, false, false};
-    if (header == "PMG_GRAPH_V2") return GraphPayloadFormat{false, false, false, false, false, false, false};
+    //                                       meta+skel warp  calib vector target quoted conv   dist
+    if (header == "PMG_GRAPH_V9") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true};
+    if (header == "PMG_GRAPH_V8") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  false};
+    if (header == "PMG_GRAPH_V7") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false, false};
+    if (header == "PMG_GRAPH_V6") return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false, false};
+    if (header == "PMG_GRAPH_V5") return GraphPayloadFormat{true,  true,  true,  false, false, true,  false, false};
+    if (header == "PMG_GRAPH_V4") return GraphPayloadFormat{true,  true,  false, false, false, true,  false, false};
+    if (header == "PMG_GRAPH_V3") return GraphPayloadFormat{false, true,  false, false, false, false, false, false};
+    if (header == "PMG_GRAPH_V2") return GraphPayloadFormat{false, false, false, false, false, false, false, false};
     return std::nullopt;
 }
 
@@ -257,6 +259,7 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
             WriteAabb(output, sample.target_parameter_box);
             output << ' ' << sample.source_transition_phase << ' '
                    << sample.target_transition_phase << ' '
+                   << sample.transition_distance << ' '
                    << sample.target_phase_samples.size() << '\n';
             for (const TargetTransitionPhaseSample& phase_sample :
                  sample.target_phase_samples) {
@@ -544,6 +547,9 @@ ParametricMotionGraph ReadGraphPayload(
             sample.target_parameter_box = ReadAabb(input);
             input >> sample.source_transition_phase
                   >> sample.target_transition_phase;
+            if (format.has_transition_distance) {
+                input >> sample.transition_distance;
+            }
             std::size_t target_phase_sample_count = 0;
             if (format.has_target_phase_samples) {
                 input >> target_phase_sample_count;
@@ -774,7 +780,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V8\n";
+    output << "PMG_GRAPH_V9\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
@@ -792,7 +798,7 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     const std::optional<GraphPayloadFormat> format = FormatForHeader(header);
     if (!format) {
         throw std::runtime_error(
-            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V8");
+            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V9");
     }
 
     BuiltPmgArtifact artifact;

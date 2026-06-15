@@ -7,6 +7,7 @@
 #include "pmg/TransitionWindow.h"
 
 #include <optional>
+#include <vector>
 
 namespace pmg {
 
@@ -18,9 +19,13 @@ struct RuntimeControlRequest {
 // How the runtime starts the target clip when a centered pre-roll would land
 // before its phase-0 frame. See RuntimeControllerConfig::preroll_policy.
 enum class TransitionPreRollPolicy {
-    kClampAtClipStart,  // Clamp every target pre-roll at phase 0.
-    kWrapCyclicClip,    // Wrap every target pre-roll; diagnostic/ablation mode.
-    kWrapSelfEdges,     // Wrap only source==target cyclic self-edges.
+    kClampAtClipStart,    // Clamp every target pre-roll at phase 0.
+    kWrapCyclicClip,      // Wrap every target pre-roll; diagnostic/ablation mode.
+    // Wrap only a self-edge (source==target) whose node is marked cyclic in
+    // RuntimeControllerConfig::cyclic_nodes. A non-cyclic self-edge (e.g. a
+    // punch or duck space with no cyclic boundary) clamps like a cross-node
+    // transition, so cyclicity is metadata, not the self-edge topology.
+    kWrapCyclicSelfEdges,
 };
 
 struct RuntimeControllerConfig {
@@ -39,7 +44,14 @@ struct RuntimeControllerConfig {
     // Default policy wraps only cyclic self-edges. Cross-node transitions remain
     // clamped because their pre-start target frames may not be meaningful.
     TransitionPreRollPolicy preroll_policy =
-        TransitionPreRollPolicy::kWrapSelfEdges;
+        TransitionPreRollPolicy::kWrapCyclicSelfEdges;
+
+    // Per-node cyclicity, indexed by graph node index. A node is cyclic when its
+    // motion space loops (locomotion), i.e. its phase-0 and phase-1 poses join;
+    // this is derived from the node's registration cycle_joint in
+    // RuntimeControllerConfigFromArtifact. Empty or out-of-range = not cyclic, so
+    // kWrapCyclicSelfEdges only wraps nodes explicitly known to be cyclic.
+    std::vector<bool> cyclic_nodes;
 };
 
 // Read-only snapshot of the transition currently being blended.
@@ -59,6 +71,10 @@ struct RuntimeTransitionDiagnostics {
 
     float source_transition_phase = 0.0f;
     float target_transition_phase = 0.0f;
+    // kNN-interpolated build-time transition distance D for the scheduled edge
+    // (proxy). Lets a streamed transition be correlated with the offline edge
+    // quality it was chosen from. Zero for pre-V9 artifacts that stored no D.
+    float interpolated_transition_distance = 0.0f;
     TransitionWindowConvention transition_window_convention =
         TransitionWindowConvention::kKovarDirectional;
     TransitionFrameWindows runtime_windows;
@@ -116,6 +132,10 @@ private:
                                float phase_advance);
 
     bool ShouldWrapTargetPreRoll(const PmgEdge& edge) const;
+
+    // True when node_index is marked cyclic in config_.cyclic_nodes. Out-of-range
+    // or unset entries are treated as non-cyclic.
+    bool IsCyclicNode(int node_index) const;
 
     // Fold completed cycles into the placement. While time_seconds has passed
     // the clip end, subtract one duration and compose the clip's cycle delta

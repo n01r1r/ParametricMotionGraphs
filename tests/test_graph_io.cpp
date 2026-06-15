@@ -65,6 +65,7 @@ pmg::ParametricMotionGraph MakeGraph(bool registered) {
     edge.source_node = node;
     edge.target_node = node;
     edge.samples.push_back({{0.0f, 0.0f}, box, 0.8f, 0.1f});
+    edge.samples.back().transition_distance = 0.42f;
     edge.samples.back().target_phase_samples = {
         {{0.0f, 0.0f}, 0.75f, 0.05f},
         {{1.0f, 1.0f}, 0.85f, 0.15f},
@@ -253,7 +254,7 @@ int main() {
         std::ifstream input(path);
         std::string header;
         input >> header;
-        assert(header == "PMG_GRAPH_V8");
+        assert(header == "PMG_GRAPH_V9");
     }
     const pmg::BuiltPmgArtifact loaded =
         pmg::LoadPmgArtifactText(path.string());
@@ -267,6 +268,9 @@ int main() {
     assert(loaded.metadata.edge_builds[0].report.source_reports[0].bad_count == 1);
     assert(loaded.graph.Node(0).motion_space.HasExampleTimeWarps());
     assert(loaded.graph.Edge(0).samples[0].target_phase_samples.size() == 2);
+    assert(std::abs(
+               loaded.graph.Edge(0).samples[0].transition_distance - 0.42f) <
+           1.0e-6f);
     assert(std::abs(
                loaded.graph.Edge(0)
                        .samples[0]

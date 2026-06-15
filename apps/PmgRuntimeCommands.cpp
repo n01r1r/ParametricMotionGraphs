@@ -157,7 +157,35 @@ struct RandomWalkOptions {
     // Per-frame motion trace for offline plotting (path, pop-over-time,
     // before/after). Empty = no dump.
     std::string dump_motion_csv;
+    // Per-transition diagnostics trace (PMG runtime chain: chosen edge, reachable
+    // box, clamped target, phases, pre-roll policy, alignment, build-time D, and
+    // local pop around the transition). Empty = no dump.
+    std::string dump_transitions_csv;
 };
+
+const char* PreRollPolicyName(pmg::TransitionPreRollPolicy policy) {
+    switch (policy) {
+        case pmg::TransitionPreRollPolicy::kClampAtClipStart:
+            return "clamp";
+        case pmg::TransitionPreRollPolicy::kWrapCyclicClip:
+            return "wrap_all";
+        case pmg::TransitionPreRollPolicy::kWrapCyclicSelfEdges:
+            return "wrap_cyclic_self_edges";
+    }
+    return "unknown";
+}
+
+// Join a parameter vector into one CSV cell ('|'-separated, no commas).
+std::string JoinParameter(const pmg::ParameterVector& parameter) {
+    std::ostringstream cell;
+    for (std::size_t axis = 0; axis < parameter.size(); ++axis) {
+        if (axis != 0) {
+            cell << '|';
+        }
+        cell << parameter[axis];
+    }
+    return cell.str();
+}
 
 // Paper application A: stream random transitions through the graph and verify
 // no frame-to-frame popping (worst step vs the median walking step).
@@ -177,11 +205,7 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
         runtime_config.preroll_policy = *options.preroll_policy;
     }
     std::cout << "preroll_policy="
-              << (runtime_config.preroll_policy ==
-                          pmg::TransitionPreRollPolicy::kWrapCyclicClip
-                      ? "wrap"
-                      : "clamp")
-              << "\n";
+              << PreRollPolicyName(runtime_config.preroll_policy) << "\n";
     std::cout << "metric_convention="
               << pmg::TransitionWindowConventionName(
                      artifact.metadata.edge_builds.empty()
@@ -247,9 +271,31 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
                                controller.CurrentNode()});
     }
 
+    // Per-transition trace for --dump-transitions-csv. Captured on the frame a
+    // transition becomes active (when ActiveTransitionDiagnostics is valid).
+    struct TransitionRow {
+        int pose_index;  // index into `poses` at the transition start
+        pmg::RuntimeTransitionDiagnostics diag;
+    };
+    const bool dump_transitions = !options.dump_transitions_csv.empty();
+    std::vector<TransitionRow> transition_rows;
+    bool was_transitioning = controller.IsTransitioning();
+
     for (int frame = 0; frame < total_frames; ++frame) {
         controller.Update(dt, request);
         poses.push_back(controller.CurrentPose());
+
+        if (dump_transitions) {
+            const bool now_transitioning = controller.IsTransitioning();
+            if (now_transitioning && !was_transitioning) {
+                if (const auto diagnostics =
+                        controller.ActiveTransitionDiagnostics()) {
+                    transition_rows.push_back(
+                        {static_cast<int>(poses.size()) - 1, *diagnostics});
+                }
+            }
+            was_transitioning = now_transitioning;
+        }
 
         if (dump_motion) {
             const pmg::Pose& cur = poses.back();
@@ -311,6 +357,60 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
     std::cout << "median_step=" << stats.median_step << "\n";
     std::cout << "max_step=" << stats.max_step << "\n";
     std::cout << "pop_ratio=" << stats.Ratio() << "\n";
+
+    if (dump_transitions) {
+        std::ofstream csv(options.dump_transitions_csv);
+        if (!csv) {
+            throw std::runtime_error(
+                "--dump-transitions-csv: cannot open '" +
+                options.dump_transitions_csv + "'");
+        }
+        csv << "transition,pose_index,time_seconds,source_node,target_node,"
+               "source_param,requested_target_param,actual_target_param,"
+               "box_min,box_max,source_phase,target_phase,preroll_policy,"
+               "preroll_wrapped,raw_target_start,scheduled_target_start,"
+               "align_dx,align_dz,align_yaw_deg,transition_distance,"
+               "local_max_step,local_pop_ratio\n";
+        // Local pop window: the blend span plus one window-length margin on each
+        // side, so a transition pop shows up against the run-median step.
+        const int window = std::max(1, runtime_config.transition_blend_frames);
+        for (std::size_t i = 0; i < transition_rows.size(); ++i) {
+            const TransitionRow& row = transition_rows[i];
+            const pmg::RuntimeTransitionDiagnostics& d = row.diag;
+            const int lo = std::max(1, row.pose_index - window);
+            const int hi = std::min(static_cast<int>(poses.size()) - 1,
+                                    row.pose_index + 2 * window);
+            float local_max_step = 0.0f;
+            for (int f = lo; f <= hi; ++f) {
+                local_max_step = std::max(
+                    local_max_step,
+                    MeanJointDistance(artifact.skeleton, poses[f - 1],
+                                      poses[f]));
+            }
+            const float local_pop_ratio =
+                stats.median_step > 1.0e-6f
+                    ? local_max_step / stats.median_step
+                    : 0.0f;
+            csv << i << ',' << row.pose_index << ','
+                << static_cast<float>(row.pose_index) * dt << ','
+                << d.source_node << ',' << d.target_node << ','
+                << JoinParameter(d.source_parameter) << ','
+                << JoinParameter(d.requested_target_parameter) << ','
+                << JoinParameter(d.actual_target_parameter) << ','
+                << JoinParameter(d.reachable_target_box.min_corner) << ','
+                << JoinParameter(d.reachable_target_box.max_corner) << ','
+                << d.source_transition_phase << ',' << d.target_transition_phase
+                << ',' << PreRollPolicyName(runtime_config.preroll_policy) << ','
+                << (d.target_preroll_wrapped ? 1 : 0) << ','
+                << d.raw_target_start_seconds << ','
+                << d.scheduled_target_start_seconds << ',' << d.alignment.dx
+                << ',' << d.alignment.dz << ',' << d.alignment.yaw * kRadToDeg
+                << ',' << d.interpolated_transition_distance << ','
+                << local_max_step << ',' << local_pop_ratio << '\n';
+        }
+        std::cout << "transitions_csv=" << options.dump_transitions_csv
+                  << " rows=" << transition_rows.size() << "\n";
+    }
 
     bool failed = false;
     if (options.min_transitions >= 0 &&
@@ -581,6 +681,9 @@ RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
             }
         } else if (option == "--dump-motion-csv") {
             options.dump_motion_csv = require_value("--dump-motion-csv");
+        } else if (option == "--dump-transitions-csv") {
+            options.dump_transitions_csv =
+                require_value("--dump-transitions-csv");
         } else {
             throw std::runtime_error("unknown random-walk option '" + option + "'");
         }
