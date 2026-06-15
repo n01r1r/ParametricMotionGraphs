@@ -15,6 +15,11 @@ class OrbitCamera {
 public:
     void Orbit(float delta_yaw_radians, float delta_pitch_radians);
     void Zoom(float scroll_steps);
+    // Screen-aligned translation (WASD): move the camera along its own right and
+    // up axes by translating the orbit target (the eye is derived from it, so
+    // both move together and the view direction is unchanged). Amounts are
+    // fractions of the orbit distance, so the feel is constant at any zoom.
+    void Pan(float right_amount, float up_amount);
     void SetTarget(const glm::vec3& target_world);
     void SetAspectRatio(float aspect_ratio);
 

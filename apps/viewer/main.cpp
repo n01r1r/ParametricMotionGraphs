@@ -101,27 +101,28 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
     input->dragging = (action == GLFW_PRESS) && !ImGui::GetIO().WantCaptureMouse;
 }
 
-// Poll WASD each frame to orbit the view frame around the target: A/D yaw, W/S
-// pitch. This rotates the camera (same effect as a mouse drag), not a world
-// translation, so it composes with auto-follow. Held keys accumulate smoothly,
+// Poll WASD each frame to translate the camera in its own screen frame: A/D
+// move left/right, W/S move up/down (relative to the viewing direction). The
+// camera moves; the view direction is unchanged. Held keys accumulate smoothly,
 // so this is polled rather than driven by key callbacks. Ignored while an ImGui
 // widget wants the keyboard.
-void PollCameraOrbit(GLFWwindow* window, pmgviewer::ViewerHost& app, float delta_seconds) {
+void PollCameraPan(GLFWwindow* window, pmgviewer::ViewerHost& app, float delta_seconds) {
     if (ImGui::GetIO().WantCaptureKeyboard) {
         return;
     }
-    float yaw = 0.0f;
-    float pitch = 0.0f;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) yaw += 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) yaw -= 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) pitch += 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) pitch -= 1.0f;
-    if (yaw == 0.0f && pitch == 0.0f) {
+    float right = 0.0f;
+    float up = 0.0f;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) right += 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) right -= 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) up += 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) up -= 1.0f;
+    if (right == 0.0f && up == 0.0f) {
         return;
     }
-    constexpr float kKeyOrbitRadiansPerSecond = 1.6f;
-    const float step = kKeyOrbitRadiansPerSecond * delta_seconds;
-    app.Camera().Orbit(yaw * step, pitch * step);
+    constexpr float kPanSpeedPerSecond = 1.2f;  // fraction of orbit distance / s
+    const float step = kPanSpeedPerSecond * delta_seconds;
+    app.SetFollowSceneFocus(false);  // manual control overrides auto-follow
+    app.Camera().Pan(right * step, up * step);
 }
 
 void ScrollCallback(GLFWwindow* window, double x_offset, double y_offset) {
@@ -228,7 +229,7 @@ int main(int argc, char** argv) {
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
 
-            PollCameraOrbit(window, app, delta_seconds);
+            PollCameraPan(window, app, delta_seconds);
             app.Update(delta_seconds);
             app.BuildUi();
 
