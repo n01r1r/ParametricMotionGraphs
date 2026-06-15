@@ -143,6 +143,65 @@ int main() {
     }
     assert(bad_range_threw);
 
+    // expect clauses are validated against the parsed examples at load time.
+    // A 2-D node sampling all four corners satisfies corner_coverage full.
+    const std::filesystem::path full_corner_spec_path =
+        directory / "full_corner.txt";
+    {
+        std::ofstream full_corner_spec(full_corner_spec_path);
+        full_corner_spec << "node g 2\n"
+                         << "example g 0 0 walk_a.bvh\n"
+                         << "example g 1 0 walk_a.bvh\n"
+                         << "example g 0 1 walk_a.bvh\n"
+                         << "example g 1 1 walk_a.bvh\n"
+                         << "expect g spanned_axes 2\n"
+                         << "expect g corner_coverage full\n";
+    }
+    const pmg::GraphSpec full_corner =
+        pmg::LoadGraphSpec(full_corner_spec_path.string());
+    assert(full_corner.nodes[0].expect_corner_coverage_full);
+    assert(full_corner.nodes[0].has_expect_spanned_axes);
+    assert(full_corner.nodes[0].expect_spanned_axes == 2);
+
+    // The same node missing the (1,1) corner is a degenerate simplex and fails
+    // the corner_coverage full claim.
+    const std::filesystem::path missing_corner_spec_path =
+        directory / "missing_corner.txt";
+    {
+        std::ofstream missing_corner_spec(missing_corner_spec_path);
+        missing_corner_spec << "node g 2\n"
+                            << "example g 0 0 walk_a.bvh\n"
+                            << "example g 1 0 walk_a.bvh\n"
+                            << "example g 0 1 walk_a.bvh\n"
+                            << "expect g corner_coverage full\n";
+    }
+    bool missing_corner_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(missing_corner_spec_path.string());
+    } catch (const std::runtime_error&) {
+        missing_corner_threw = true;
+    }
+    assert(missing_corner_threw);
+
+    // A node whose examples vary along only one axis cannot satisfy
+    // spanned_axes 2.
+    const std::filesystem::path collinear_spec_path =
+        directory / "collinear.txt";
+    {
+        std::ofstream collinear_spec(collinear_spec_path);
+        collinear_spec << "node g 2\n"
+                       << "example g 0 0 walk_a.bvh\n"
+                       << "example g 1 0 walk_a.bvh\n"
+                       << "expect g spanned_axes 2\n";
+    }
+    bool collinear_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(collinear_spec_path.string());
+    } catch (const std::runtime_error&) {
+        collinear_threw = true;
+    }
+    assert(collinear_threw);
+
     pmg::PmgBuilderConfig config;
     config.source_sample_count = 1;
     config.target_sample_count = 1;
@@ -150,12 +209,12 @@ int main() {
     config.good_transition_threshold = 1.0e9f;
     config.bad_transition_threshold = 2.0e9f;
 
-    const pmg::ParametricMotionGraph graph = pmg::BuildGraphFromSpec(parsed, config);
-    assert(graph.NumNodes() == 1);
-    assert(graph.NumEdges() == 1);
-    assert(graph.Node(0).motion_space.NumExamples() == 2);
-    assert(!graph.Edge(0).samples.empty());
-
+    // One build path defines what a spec means: BuildPmgArtifactFromSpec honors
+    // each edge's parsed edge_config (seed 99 and the spec's sample counts) and
+    // the graph is read back from the artifact. The former graph-only
+    // BuildGraphFromSpec shim ignored per-edge config and built a divergent
+    // graph from the same spec; it was removed so tests validate the graph
+    // production actually ships.
     pmg::ArtifactBuildConfig artifact_config;
     artifact_config.default_edge_config = config;
     artifact_config.default_contact_joints.clear();
@@ -163,7 +222,10 @@ int main() {
     const pmg::BuiltPmgArtifact artifact =
         pmg::BuildPmgArtifactFromSpec(parsed, artifact_config);
     assert(artifact.skeleton.NumJoints() > 0);
+    assert(artifact.graph.NumNodes() == 1);
     assert(artifact.graph.NumEdges() == 1);
+    assert(artifact.graph.Node(0).motion_space.NumExamples() == 2);
+    assert(!artifact.graph.Edge(0).samples.empty());
     assert(artifact.metadata.edge_builds[0].config.seed == 99);
 
     const std::filesystem::path invalid_spec_path =

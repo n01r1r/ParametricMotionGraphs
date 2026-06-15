@@ -31,15 +31,6 @@ const GraphSpecNode& FindSpecNode(const GraphSpec& spec, const std::string& name
     throw std::runtime_error("GraphSpec: unknown node '" + name + "'");
 }
 
-int FindNodeIndex(const ParametricMotionGraph& graph, const std::string& name) {
-    for (int index = 0; index < graph.NumNodes(); ++index) {
-        if (graph.Node(index).name == name) {
-            return index;
-        }
-    }
-    throw std::runtime_error("BuildGraphFromSpec: unknown graph node '" + name + "'");
-}
-
 std::string ResolveRelativePath(const std::filesystem::path& base_directory,
                                 const std::string& path_text) {
     const std::filesystem::path path(path_text);
@@ -76,6 +67,93 @@ ParameterMetric ParseParameterMetric(
     throw std::runtime_error(
         "LoadGraphSpec line " + std::to_string(line_number) +
         ": unknown parameter metric '" + metric_name + "'");
+}
+
+// Checks each node's declared `expect` clauses against its parsed examples so a
+// degenerate space (e.g. a "2-D" node that only samples a triangle of corners)
+// fails at load instead of building a misleading artifact. Only nodes that
+// declare an expectation are inspected.
+void ValidateNodeExpectations(const GraphSpec& spec) {
+    constexpr int kMaxCornerDimension = 8;
+    for (const GraphSpecNode& node : spec.nodes) {
+        if (!node.expect_corner_coverage_full && !node.has_expect_spanned_axes) {
+            continue;
+        }
+        std::vector<const ParameterVector*> params;
+        for (const GraphSpecExample& example : spec.examples) {
+            if (example.node_name == node.name) {
+                params.push_back(&example.parameter);
+            }
+        }
+        if (params.empty()) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' declares an expect clause but has no examples");
+        }
+        const int dimension = node.parameter_dimension;
+
+        if (node.has_expect_spanned_axes) {
+            int spanned = 0;
+            for (int axis = 0; axis < dimension; ++axis) {
+                const float first = (*params.front())[axis];
+                for (const ParameterVector* p : params) {
+                    if ((*p)[axis] != first) {
+                        ++spanned;
+                        break;
+                    }
+                }
+            }
+            if (spanned != node.expect_spanned_axes) {
+                throw std::runtime_error(
+                    "LoadGraphSpec: node '" + node.name + "' expects spanned_axes " +
+                    std::to_string(node.expect_spanned_axes) +
+                    " but its examples span " + std::to_string(spanned));
+            }
+        }
+
+        if (node.expect_corner_coverage_full) {
+            if (dimension > kMaxCornerDimension) {
+                throw std::runtime_error(
+                    "LoadGraphSpec: node '" + node.name +
+                    "' corner_coverage check is unsupported for "
+                    "parameter_dimension > 8");
+            }
+            std::vector<float> low(static_cast<std::size_t>(dimension));
+            std::vector<float> high(static_cast<std::size_t>(dimension));
+            for (int axis = 0; axis < dimension; ++axis) {
+                low[axis] = high[axis] = (*params.front())[axis];
+                for (const ParameterVector* p : params) {
+                    low[axis] = std::min(low[axis], (*p)[axis]);
+                    high[axis] = std::max(high[axis], (*p)[axis]);
+                }
+            }
+            const int corner_count = 1 << dimension;
+            for (int mask = 0; mask < corner_count; ++mask) {
+                bool corner_sampled = false;
+                for (const ParameterVector* p : params) {
+                    bool matches = true;
+                    for (int axis = 0; axis < dimension; ++axis) {
+                        const float want =
+                            (mask & (1 << axis)) ? high[axis] : low[axis];
+                        if ((*p)[axis] != want) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if (matches) {
+                        corner_sampled = true;
+                        break;
+                    }
+                }
+                if (!corner_sampled) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec: node '" + node.name +
+                        "' expects corner_coverage full but a corner of its "
+                        "parameter box has no example");
+                }
+            }
+        }
+    }
 }
 
 }  // namespace
@@ -413,6 +491,66 @@ GraphSpec LoadGraphSpec(const std::string& path) {
             continue;
         }
 
+        if (keyword == "expect") {
+            std::string node_name;
+            std::string property;
+            if (!(line >> node_name >> property)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": expected expect <node> <property> <value>");
+            }
+            auto node_it = std::find_if(
+                spec.nodes.begin(), spec.nodes.end(),
+                [&](const GraphSpecNode& node) { return node.name == node_name; });
+            if (node_it == spec.nodes.end()) {
+                throw std::runtime_error("LoadGraphSpec line " +
+                                         std::to_string(line_number) +
+                                         ": expect references unknown node '" +
+                                         node_name + "'");
+            }
+            if (property == "corner_coverage") {
+                std::string value;
+                if (!(line >> value) || value != "full") {
+                    throw std::runtime_error(
+                        "LoadGraphSpec line " + std::to_string(line_number) +
+                        ": expect corner_coverage requires the value 'full'");
+                }
+                if (node_it->expect_corner_coverage_full) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec line " + std::to_string(line_number) +
+                        ": duplicate expect corner_coverage for node '" +
+                        node_name + "'");
+                }
+                node_it->expect_corner_coverage_full = true;
+            } else if (property == "spanned_axes") {
+                int count = -1;
+                if (!(line >> count)) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec line " + std::to_string(line_number) +
+                        ": expect spanned_axes requires an integer count");
+                }
+                if (count < 0 || count > node_it->parameter_dimension) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec line " + std::to_string(line_number) +
+                        ": expect spanned_axes count must be in "
+                        "[0, parameter_dimension]");
+                }
+                if (node_it->has_expect_spanned_axes) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec line " + std::to_string(line_number) +
+                        ": duplicate expect spanned_axes for node '" +
+                        node_name + "'");
+                }
+                node_it->has_expect_spanned_axes = true;
+                node_it->expect_spanned_axes = count;
+            } else {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": unknown expect property '" + property + "'");
+            }
+            continue;
+        }
+
         throw std::runtime_error("LoadGraphSpec line " + std::to_string(line_number) +
                                  ": unknown keyword '" + keyword + "'");
     }
@@ -428,50 +566,8 @@ GraphSpec LoadGraphSpec(const std::string& path) {
                 "' configures parameter_calibration without active metrics");
         }
     }
+    ValidateNodeExpectations(spec);
     return spec;
-}
-
-ParametricMotionGraph BuildGraphFromSpec(
-    const GraphSpec& spec,
-    const PmgBuilderConfig& builder_config,
-    float skeleton_offset_tolerance) {
-    MotionSpacePreparationConfig preparation_config;
-    preparation_config.calibration_frames_per_second =
-        builder_config.generated_frames_per_second;
-    preparation_config.skeleton_offset_tolerance =
-        skeleton_offset_tolerance;
-    const PreparedMotionSpaces prepared =
-        PrepareMotionSpaces(spec, preparation_config);
-
-    ParametricMotionGraph graph;
-    for (const GraphSpecNode& node : spec.nodes) {
-        graph.AddNode(node.name, prepared.Node(node.name).production);
-    }
-
-    for (const GraphSpecEdge& edge_spec : spec.edges) {
-        const int source_index = FindNodeIndex(graph, edge_spec.source_node);
-        const int target_index = FindNodeIndex(graph, edge_spec.target_node);
-        EdgeBuildResult edge_result = PmgBuilder::BuildEdgeWithReport(
-            prepared.skeleton,
-            source_index,
-            target_index,
-            graph.Node(source_index).motion_space,
-            graph.Node(target_index).motion_space,
-            builder_config);
-        // Paper: a graph is the set of edges that pass. A single
-        // transition-incompatible pair must not abort the whole build (this
-        // matches the viewer's tolerant build); rejected edges are skipped.
-        if (!edge_result.edge.samples.empty()) {
-            graph.AddEdge(std::move(edge_result.edge));
-        }
-    }
-
-    if (!spec.edges.empty() && graph.NumEdges() == 0) {
-        throw std::runtime_error(
-            "BuildGraphFromSpec: every declared edge was rejected; no "
-            "transitions built");
-    }
-    return graph;
 }
 
 BuiltPmgArtifact BuildPmgArtifactFromSpec(

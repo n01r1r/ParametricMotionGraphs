@@ -10,5 +10,10 @@ parameter_calibration walk_2d 5
 example walk_2d 0.0 0.0 ../BVH/walkCurve.bvh
 example walk_2d 1.0 0.0 ../BVH/walkTightCurve.bvh
 example walk_2d 0.0 1.0 ../BVH/jogCurve.bvh
+# Both axes vary, so this is a genuine 2-D space -- held to that claim at load.
+expect walk_2d spanned_axes 2
+# corner_coverage full is deliberately NOT claimed: the (1,1) tight-jog corner
+# is unsampled because the corpus has only one jog clip (jogCurve). A complete
+# 2-D demo would add a tight-turn jog BVH and then claim full coverage.
 edge walk_2d walk_2d
 edge_config walk_2d walk_2d 300 400 3 6 41

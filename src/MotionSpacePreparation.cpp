@@ -115,6 +115,20 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
             settings.min_contact_frames = stages.registration.min_contact_frames;
             stages.contact_settings = settings;
 
+            // Reject cross-family blend spaces before registration: every
+            // example must be one looping cycle sharing one contact structure.
+            std::vector<std::vector<ContactInterval>> example_intervals;
+            std::vector<int> example_frame_counts;
+            example_intervals.reserve(production.Examples().size());
+            example_frame_counts.reserve(production.Examples().size());
+            for (const ExampleMotion& example : production.Examples()) {
+                example_intervals.push_back(DetectContacts(
+                    *reference_skeleton, example.clip, stages.contact_joint_indices,
+                    settings));
+                example_frame_counts.push_back(example.clip.NumFrames());
+            }
+            RequireBlendableMotionFamily(example_intervals, example_frame_counts);
+
             RegisterSpaceByContacts(production, *reference_skeleton, stages.contact_joint_indices,
                                     settings);
             stages.contact_registered = production;
