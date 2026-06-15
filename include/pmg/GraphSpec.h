@@ -22,6 +22,12 @@ struct GraphSpecNode {
     std::vector<ParameterMetric> parameter_metrics;
     bool has_calibration_sampling_config = false;
     int calibration_samples_per_axis = 9;
+    // Declared structural expectations, checked against the parsed examples by
+    // LoadGraphSpec so a spec's claim ("this is a full 2-D space") fails loudly
+    // instead of building a silently degenerate space. Unset = no claim.
+    bool expect_corner_coverage_full = false;
+    bool has_expect_spanned_axes = false;
+    int expect_spanned_axes = 0;
 };
 
 struct GraphSpecExample {
@@ -61,19 +67,15 @@ struct GraphSpec {
 //               <tgt_start> <tgt_end>   # transition-search sub-range (§6.3),
 //               each in [0,1] with start < end; pairs with edge_config to also
 //               set thresholds (otherwise default thresholds apply)
+//   expect <node> corner_coverage full  # every axis-extreme corner of the
+//               node's parameter box must be sampled by an example (catches a
+//               declared N-D space that is really a lower-dimensional simplex)
+//   expect <node> spanned_axes <count>  # exactly <count> parameter axes must
+//               take two or more distinct values across the node's examples
 // Lines starting with '#' are ignored. Relative BVH paths are resolved against
 // the spec file's directory by LoadGraphSpec(). Names and paths may not contain
 // whitespace.
 GraphSpec LoadGraphSpec(const std::string& path);
-
-// Graph-only compatibility build. Motion spaces use the same production
-// preparation as BuiltPmgArtifact, but this result omits the Skeleton and
-// reproducibility metadata required by ADR-0001. Prefer
-// BuildPmgArtifactFromSpec for offline/online workflows.
-ParametricMotionGraph BuildGraphFromSpec(
-    const GraphSpec& spec,
-    const PmgBuilderConfig& builder_config,
-    float skeleton_offset_tolerance = 1.0e-4f);
 
 struct ArtifactBuildConfig {
     PmgBuilderConfig default_edge_config;
