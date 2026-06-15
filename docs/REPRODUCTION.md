@@ -245,7 +245,7 @@ the measured value for this command is `1.0775`.
 | Spec | Purpose |
 |---|---|
 | `demo_walk_self_edge_minimal.pmg_spec` | canonical minimal 1-D PMG core demo |
-| `demo_walk_2d_triangle.pmg_spec` | triangular 2-D parameter-space machinery demo |
+| `demo_walk_2d_triangle.pmg_spec` | sparse 2-D AABB interpolation machinery; no convex-hull support enforcement |
 | `demo_walk_jog_topology.pmg_spec` | multi-node topology demo and cross-gait limitation case |
 | `fixture_edge_selective_good_bad.pmg_spec` | selective GOOD/NEUTRAL/BAD classification |
 | `fixture_transition_box_shrink.pmg_spec` | non-convex target stress case for BAD exclusion |
@@ -253,6 +253,9 @@ the measured value for this command is `1.0775`.
 
 `fixture_transition_box_shrink.pmg_spec` deliberately violates smooth-space
 assumptions. Use it only to test conservative AABB shrink behavior.
+`demo_walk_2d_triangle.pmg_spec` uses triangular authored samples but exposes
+their rectangular parameter AABB. Requests outside the authored triangle are
+accepted because current reachable domains are AABBs.
 See [SPEC_AUDIT.md](SPEC_AUDIT.md) for semantic classifications and expected
 visual evidence.
 

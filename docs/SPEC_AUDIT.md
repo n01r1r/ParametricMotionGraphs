@@ -27,7 +27,7 @@ cross-gait limitation case.
 | Classification | Specs |
 |---|---|
 | Canonical minimal PMG demo | `demo_walk_self_edge_minimal.pmg_spec` |
-| Canonical 2-D machinery demo, not a robust 2-D family | `demo_walk_2d_triangle.pmg_spec` |
+| Canonical sparse 2-D AABB interpolation demo, not hull enforcement | `demo_walk_2d_triangle.pmg_spec` |
 | Canonical topology demo and cross-gait limitation case | `demo_walk_jog_topology.pmg_spec` |
 | Legitimate edge-classification fixture | `fixture_edge_selective_good_bad.pmg_spec` |
 | Builder stress fixture, not a meaningful motion graph | `fixture_transition_box_shrink.pmg_spec` |
@@ -50,10 +50,11 @@ Main conclusions:
    parameterized; jog
    is a single-example non-controllable node. Cross-gait edges require much
    higher corpus-specific thresholds than same-gait edges.
-6. `demo_walk_2d_triangle` has enough non-collinear samples to exercise 2-D
-   machinery and control. It does not establish a robust rectangular
-   turn-speed family: three samples define a minimal triangle, the tight-jog
-   corner is missing, and the jog anchor changes both turn rate and speed.
+6. `demo_walk_2d_triangle` has enough non-collinear samples to exercise sparse
+   2-D AABB interpolation and control. It does not enforce the authored
+   triangle as a reachable hull or establish a robust rectangular turn-speed
+   family: the tight-jog corner is missing, and the jog anchor changes both
+   turn rate and speed.
 7. The viewer now exposes persistent root travel, edge-colored transition
    events, and exact metric/runtime frame supports. This makes advancing versus
    stuttering behavior inspectable, but does not prove perceptual smoothness.
@@ -90,11 +91,12 @@ the current transition boxes are rectangular AABBs. Five requests with
 `[0,0]..[1,1]`. The spec therefore demonstrates sparse 2-D AABB
 interpolation/calibration, not projection to triangular support.
 
-`--validate-graph-spec` passed for all three files. `--validate-graph` is not a
-spec-configured validation path: it used global defaults (`TGOOD=80`,
-`TBAD=110`, 50/1000 samples) instead of each edge's `edge_config`, causing false
-edge failures and a 2-D timeout. Runtime judgments above use the actual
-spec-configured artifact path.
+`--validate-graph-spec` passed for all three files. The former
+`--validate-graph` fallback to global defaults was fixed in core commit
+`333853f`: validation now starts from each edge's authored `edge_config`, prints
+the effective thresholds/sample counts/window/convention, and applies only
+explicit CLI overrides. Revalidation passed for all demos and matched artifact
+edge sample counts: self-edge `14`, 2-D `6`, topology `11/11/1/1`.
 
 Distances are raw weighted squared sums in native BVH units. They are only
 comparable under this skeleton, window, weighting, registration, and sampling
@@ -335,8 +337,13 @@ Should not be expected:
 
 #### Node validity
 
-This is a legitimate minimal 2-D calibration fixture. Three non-collinear
-examples are minimum support for a 2-D local stencil and vector calibration.
+This is a legitimate sparse 2-D AABB interpolation fixture. Three
+non-collinear examples are minimum support for a 2-D local stencil and vector
+calibration.
+
+This demonstrates sparse 2-D AABB interpolation machinery, not convex-hull
+support enforcement. Requests outside the authored triangle are accepted
+because current reachable domains are AABBs.
 
 It is not a robust rectangular 2-D family.
 
@@ -362,8 +369,8 @@ axis 0 turn_rate: +0.397 -> -0.485 rad/s
 axis 1 travel_speed: 12.385 -> 16.466 units/s
 ```
 
-That supports calling it a minimal 2-D controller fixture. It does not support
-uniform quality or independent control over the full rectangle.
+That supports calling it a sparse 2-D AABB interpolation/controller fixture. It
+does not support uniform quality or independent control over the full rectangle.
 
 Registration is disabled and clips are not cycle-normalized. Acceptable for a
 calibration/runtime fixture, but weaker than the registered walk nodes.
@@ -662,7 +669,9 @@ Remaining:
    has the cleanest
    measured trend; add a third anchor only after verifying measured ordering.
 2. Add missing tight-jog example before presenting a rectangular 2-D family.
-3. If no clip exists, expose triangular support or shade unsupported corner.
+3. If no clip exists, keep unsupported AABB regions explicit. Hull-aware
+   projection is tracked in
+   [GitHub issue #48](https://github.com/n01r1r/ParametricMotionGraphs/issues/48).
 4. Add multiple jog curvature examples before claiming jog controllability.
 
 ### P3 - Optional code changes

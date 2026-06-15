@@ -155,8 +155,9 @@ parameter-to-achieved-turn-rate behavior through the runtime graph.
 
 - `specs/demo_walk_self_edge_minimal.pmg_spec`: PMG core through one 1-D walk
   node and repeated self-edge streaming.
-- `specs/demo_walk_2d_triangle.pmg_spec`: 2-D parameter-space machinery over a
-  triangular sample set; it does not claim full rectangular coverage.
+- `specs/demo_walk_2d_triangle.pmg_spec`: sparse 2-D AABB interpolation over
+  three non-collinear samples. This demonstrates sparse 2-D AABB interpolation machinery, not convex-hull support enforcement.
+  Requests outside the authored triangle remain valid AABB requests.
 - `specs/demo_walk_jog_topology.pmg_spec`: multi-node graph topology and
   cross-gait transitions; jog remains a fixed single-example node.
 

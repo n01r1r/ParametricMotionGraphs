@@ -53,7 +53,7 @@ done | sort
   They are only usable as a self-consistent standalone corpus, and only after the
   loader, contact-joint heuristics, and units are verified for that skeleton.
 
-## Minimal 2-D demo: `specs/demo_walk_2d_triangle.pmg_spec`
+## Sparse 2-D AABB demo: `specs/demo_walk_2d_triangle.pmg_spec`
 
 A calibrated, reproducible 2-D Group-B fixture:
 
@@ -64,10 +64,15 @@ A calibrated, reproducible 2-D Group-B fixture:
 - `parameter_metrics turn_rate travel_speed` + `parameter_calibration` give the
   axes measured physical meaning (unlike an uncalibrated viewer-authored space).
 
-This is a triangular minimal sample set, not a robust rectangular motion
-family. The jog anchor changes both turn rate and speed, and no `(1,1)`
-tight-jog example exists. Calibration measures and inverts the generated sparse
-blend; it does not create missing motion support or prove axis independence.
+This demonstrates sparse 2-D AABB interpolation machinery, not convex-hull support enforcement.
+The authored samples form a triangle, but the executable parameter domain is
+their rectangular AABB. Requests outside the authored triangle are accepted
+because current reachable domains are AABBs.
+
+This is not a robust rectangular motion family. The jog anchor changes both
+turn rate and speed, and no `(1,1)` tight-jog example exists. Calibration
+measures and inverts the generated sparse blend; it does not create missing
+motion support or prove axis independence.
 See [`SPEC_AUDIT.md`](SPEC_AUDIT.md).
 
 Build and inspect:
