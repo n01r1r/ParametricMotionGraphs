@@ -172,6 +172,12 @@ Stable ids for the adaptations and gaps above.
   runtime use this path; frame-aligned diagnostics use the isolated
   `pmg::legacy::GenerateClipWithFrameCount` API. Spec distance thresholds were
   recalibrated because duration-true clips raise absolute point-cloud distances.
+  Because the duration is parameter-dependent, the viewer's blend playback runs
+  on a **canonical-phase clock** (`[0,1)`), not a seconds clock: phase is the
+  structural position and is held fixed across a parameter change, while only the
+  advance rate (`1 / duration`) varies. A seconds clock would instead recompute
+  `phase = seconds / duration` and teleport the pose the moment the parameter
+  moved.
 - **D3 — Source continues through cycle-crossing blends.**
   The runtime folds each completed source cycle into its accumulated world
   placement and resumes at the wrapped clip-local phase, so transitions play
