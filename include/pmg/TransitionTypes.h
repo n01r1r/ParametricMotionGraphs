@@ -143,6 +143,12 @@ struct TransitionSample {
     ParameterAabb target_parameter_box;
     float source_transition_phase = 0.85f;
     float target_transition_phase = 0.15f;
+    // Build-time transition quality: mean Kovar metric distance D over the GOOD
+    // target samples retained inside target_parameter_box (paper §3.1/§3.2). It
+    // is the offline D the runtime carries forward so a streamed transition can
+    // be tagged with the edge quality it was scheduled from. V9+ (zero when
+    // absent in older artifacts).
+    float transition_distance = 0.0f;
     std::vector<TargetTransitionPhaseSample> target_phase_samples;
 };
 

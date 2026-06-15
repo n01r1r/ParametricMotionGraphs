@@ -138,6 +138,7 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
         ParameterVector parameter;
         float source_phase;
         float target_phase;
+        float distance;
     };
 
     for (const ParameterVector& source_parameter : source_samples) {
@@ -167,7 +168,8 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
             if (distance <= config.good_transition_threshold) {
                 ++sample_report.good_count;
                 good_hits.push_back({target_samples[target_index],
-                                     transition.source_phase, transition.target_phase});
+                                     transition.source_phase, transition.target_phase,
+                                     distance});
             } else if (distance >= config.bad_transition_threshold) {
                 ++sample_report.bad_count;
                 bad_target_parameters.push_back(target_samples[target_index]);
@@ -231,6 +233,7 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
         int in_box_count = 0;
         float sum_source_phase = 0.0f;
         float sum_target_phase = 0.0f;
+        float sum_distance = 0.0f;
         for (const GoodHit& hit : good_hits) {
             if (!target_box.Contains(hit.parameter)) {
                 continue;
@@ -238,6 +241,7 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
             ++in_box_count;
             sum_source_phase += hit.source_phase;
             sum_target_phase += hit.target_phase;
+            sum_distance += hit.distance;
         }
 
         if (target_box.IsEmpty() || in_box_count == 0) {
@@ -259,6 +263,7 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
             sum_source_phase * inv_count;
         transition_sample.target_transition_phase =
             sum_target_phase * inv_count;
+        transition_sample.transition_distance = sum_distance * inv_count;
         transition_sample.target_phase_samples.reserve(
             static_cast<std::size_t>(in_box_count));
         for (const GoodHit& hit : good_hits) {

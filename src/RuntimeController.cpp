@@ -330,6 +330,14 @@ RuntimeController::ActiveTransitionDiagnostics() const {
     return diagnostics;
 }
 
+bool RuntimeController::IsCyclicNode(int node_index) const {
+    if (node_index < 0 ||
+        node_index >= static_cast<int>(config_.cyclic_nodes.size())) {
+        return false;
+    }
+    return config_.cyclic_nodes[static_cast<std::size_t>(node_index)];
+}
+
 bool RuntimeController::ShouldWrapTargetPreRoll(const PmgEdge& edge) const {
     switch (config_.preroll_policy) {
         case TransitionPreRollPolicy::kClampAtClipStart:
@@ -338,8 +346,12 @@ bool RuntimeController::ShouldWrapTargetPreRoll(const PmgEdge& edge) const {
         case TransitionPreRollPolicy::kWrapCyclicClip:
             return true;
 
-        case TransitionPreRollPolicy::kWrapSelfEdges:
-            return edge.source_node == edge.target_node;
+        case TransitionPreRollPolicy::kWrapCyclicSelfEdges:
+            // A self-edge only pre-rolls into the previous cycle tail when the
+            // node is genuinely cyclic; otherwise its pre-start frames are
+            // undefined and we clamp like a cross-node transition.
+            return edge.source_node == edge.target_node &&
+                   IsCyclicNode(edge.target_node);
     }
 
     return false;
@@ -483,6 +495,8 @@ void RuntimeController::TryScheduleTransition(
             transition->source_transition_phase;
         diagnostics.target_transition_phase =
             transition->target_transition_phase;
+        diagnostics.interpolated_transition_distance =
+            transition->transition_distance;
         diagnostics.transition_window_convention = config_.convention;
         diagnostics.runtime_windows = runtime_windows;
         diagnostics.metric_window_span_seconds = TransitionWindowSpanSeconds(
