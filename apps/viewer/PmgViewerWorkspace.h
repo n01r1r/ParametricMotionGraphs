@@ -107,6 +107,12 @@ private:
     void RecomputeSteeringCurve();
     void RefreshExampleContacts(PmgExample& example);
     std::vector<int> ResolveContactJointIndices() const;
+    // Authoring-boundary motion-family guard (mirrors core
+    // RequireBlendableMotionFamily, strict-(a)): returns a human-readable reason
+    // if a multi-example blend space mixes an acyclic clip into one motion
+    // family, else empty. Empty also when the family cannot be judged (no foot
+    // joints) so detection failure never blocks authoring.
+    std::string CheckBlendableMotionFamily() const;
     static float ComputeGroundOffset(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip);
     float ActiveReferenceDuration() const;
 
@@ -216,6 +222,10 @@ private:
     pmg::Skeleton pmg_skeleton_;
     pmg::ParametricMotionSpace pmg_space_;
     bool pmg_space_ready_ = false;
+    // Non-empty when the last RebuildPmgSpace rejected the space as a
+    // cross-family blend; surfaced in the Motion-space section and keeps
+    // pmg_space_ready_ false so Parametric blend stays gated.
+    std::string pmg_space_blend_error_;
     float pmg_ground_offset_ = 0.0f;
     // Multidimensional parameter authoring. The space has pmg_dimension_ axes;
     // every parameter vector below carries one value per axis. The 1-D
