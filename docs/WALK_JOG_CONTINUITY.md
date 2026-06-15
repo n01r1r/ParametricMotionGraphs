@@ -189,6 +189,35 @@ Commit `f3576c3` replaced the point-in-window test with a wrap-aware
 `CrossedPhase(previous_phase, phase_advance, gate)` so a gate crossed within an
 update (or a full-cycle jump) still schedules.
 
+### Transition-quality diagnostic Module (2026-06-15)
+
+The earlier continuity experiments computed pose step and acceleration in
+one-off command code. `TransitionQuality` now provides one reusable diagnostic
+Interface over a world-pose window. The default record measures three frame
+intervals before and after a transition and writes:
+
+```text
+D, local_max_step, local_pop_ratio
+pre/post root speed, root_speed_ratio
+pre/post signed yaw rate, yaw_rate_ratio
+left/right foot drift, max_contact_drift
+left/right contact state before and after
+quality_classification
+```
+
+Contact state uses the source node's declared contact joints when available;
+otherwise drift remains observable and contact state is `unknown`. The
+classification is evidence for separating pose, velocity, yaw-rate, contact,
+and future cyclic-seam failure modes. The CLI window is at least three
+intervals on each side and expands to the runtime blend-frame count. Near-zero
+yaw rates use a `0.05 rad/s` deadband. `cyclic_seam_mismatch` is reserved until
+the CyclicContinuity contract provides raw seam evidence. This diagnostic does
+not change PMG thresholds, scheduling, alignment, or blending.
+
+Smoke evidence on `demo_walk_self_edge_minimal`, 8 seconds, seed 99: 12
+transitions completed and 12 CSV rows were written. This validates diagnostic
+coverage, not perceptual smoothness.
+
 ### Conclusion
 
 The residual walk-loop jolt is **mostly** a corpus periodicity limit (wide-turn

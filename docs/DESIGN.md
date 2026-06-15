@@ -194,6 +194,35 @@ transition phases, computes the target-to-source `RigidTransform2D`, and compose
 it with current world placement. `RootOnlyAlignment` is a skeleton-free
 debug/test adapter, not the paper path.
 
+### Transition-quality diagnostics
+
+`TransitionQuality` is a read-only diagnostic Module. It consumes a Skeleton,
+world-space pose window, transition pose index, runtime sampling rate, the
+interpolated build-time distance `D`, and the enclosing run's median pose step.
+The default support is three frame intervals before and after the transition.
+
+Its `TransitionQualityRecord` reports:
+
+- existing local maximum pose step and local-pop ratio;
+- pre/post root floor speed in native BVH units/s and their magnitude ratio;
+- pre/post signed yaw rate in rad/s and a signed-change ratio that detects both
+  magnitude jumps and direction reversals, with a `0.05 rad/s` deadband for
+  near-zero noise;
+- left/right foot floor drift in native BVH units;
+- contact states when contact settings are available, otherwise `unknown`;
+- one dominant classification: smooth, pose pop, root-speed discontinuity,
+  yaw-rate discontinuity, contact mismatch, cyclic-seam mismatch, or
+  insufficient data.
+
+`pmg_cli --random-walk --dump-transitions-csv` is the first Adapter. It resolves
+the source node's declared contact joints, estimates contact thresholds once per
+node from the runtime trace, and writes every record field, including before/
+after contact states. Its support is at least three intervals on each side and
+expands to the runtime blend-frame count when that is larger.
+`cyclic_seam_mismatch` is reserved for the future CyclicContinuity contract;
+the current CLI does not claim to detect raw cyclic seams. The Module does not
+alter edge lookup, scheduling, alignment, blending, thresholds, or graph specs.
+
 ## Control layers
 
 - **Random walk.** `ChooseRandomOutgoingTransition` selects only actual outgoing

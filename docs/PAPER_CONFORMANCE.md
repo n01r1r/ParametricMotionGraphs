@@ -118,7 +118,7 @@ same-phase transitions; see `docs/WALK_JOG_CONTINUITY.md`.
 | Cyclic self-edge target pre-roll keeps the previous-cycle tail | ✓ | `TransitionPreRollPolicy::kWrapCyclicSelfEdges` (default); cyclicity from `RuntimeControllerConfig::cyclic_nodes` (registration `cycle_joint`) | `include/pmg/RuntimeController.h` |
 | n-way pose blend is order-independent | ✓ | `BlendPoseN` hemisphere-aligned weighted quaternion mean | `src/PoseBlend.cpp` |
 | Random graph walk | ✓ | `ChooseRandomOutgoingTransition` | `include/pmg/GoalDirectedLocomotion.h:87` |
-| Per-transition diagnostics (chosen edge, reachable box, clamped target, phases, interpolated distance D, local pop) | ✓ | `RuntimeTransitionDiagnostics`; `pmg_cli --random-walk --dump-transitions-csv` | `include/pmg/RuntimeController.h`; `apps/PmgRuntimeCommands.cpp` |
+| Per-transition diagnostics (chosen edge, reachable box, clamped target, phases, D, pose pop, root speed, yaw rate, foot drift, classification) | ✓ | `RuntimeTransitionDiagnostics`; `TransitionQuality`; `pmg_cli --random-walk --dump-transitions-csv` | `include/pmg/RuntimeController.h`; `include/pmg/TransitionQuality.h`; `apps/PmgRuntimeCommands.cpp` |
 | Goal-directed locomotion (thesis Ch. 6) | ◐ | `GoalDirectedLocomotion` (per-axis greedy steering; not branch-and-bound) | `include/pmg/GoalDirectedLocomotion.h:48` |
 | Multidimensional runtime control | ✓ | per-axis calibration + inversion drives all axes (turn_rate heading, travel_speed pace) | `src/GoalDirectedLocomotion.cpp` |
 
@@ -259,6 +259,16 @@ Stable ids for the adaptations and gaps above.
   streamed transition is tagged with the offline edge quality it was scheduled
   from (observable against runtime pop via `--dump-transitions-csv`). Serialized
   as `PMG_GRAPH_V9`; V2–V8 read back zero.
+- **Transition-quality classification is diagnostic, not a paper metric.**
+  `TransitionQuality` measures three intervals before and after a scheduled
+  transition by default; the CLI expands this to the runtime blend-frame count
+  when larger. It separates local pose pop, root-speed discontinuity, signed
+  yaw-rate discontinuity, and contact-foot drift. A `0.05 rad/s` yaw deadband
+  suppresses near-zero ratio inflation. `--dump-transitions-csv` writes these
+  fields and before/after contact states beside `D`. `cyclic_seam_mismatch` is
+  reserved until the CyclicContinuity contract supplies raw seam evidence.
+  Thresholds are diagnostic defaults, not universal perceptual limits, and do
+  not participate in PMG edge construction or runtime scheduling.
 - **D5 — Transition phases remain target-dependent.**
   Each source sample stores the phase pair measured at every retained GOOD
   target sample inside its shrunk box. Runtime clamps the requested target,
