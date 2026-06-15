@@ -444,6 +444,11 @@ struct ValidateGraphOptions {
     int min_contact_frames = 3;
     bool min_contact_frames_set = false;
     pmg::PmgBuilderConfig builder;
+    bool tgood_set = false;
+    bool tbad_set = false;
+    bool source_samples_set = false;
+    bool target_samples_set = false;
+    bool seed_set = false;
     // Assert thresholds on the registered build; negative = report only.
     int min_edge_samples = -1;
     float min_good_fraction = -1.0f;
@@ -451,6 +456,47 @@ struct ValidateGraphOptions {
     // Negative disables the comparison. A value of 1.0 requires no increase.
     float max_preparation_min_distance_ratio = -1.0f;
 };
+
+pmg::PmgBuilderConfig EffectiveEdgeConfig(
+    const pmg::GraphSpecEdge& edge,
+    const ValidateGraphOptions& options) {
+    pmg::PmgBuilderConfig config =
+        edge.has_build_config ? edge.build_config : options.builder;
+
+    // Explicit CLI values are diagnostic overrides. Unspecified values retain
+    // the authored per-edge config so validation matches artifact construction.
+    if (options.tgood_set) {
+        config.good_transition_threshold =
+            options.builder.good_transition_threshold;
+    }
+    if (options.tbad_set) {
+        config.bad_transition_threshold =
+            options.builder.bad_transition_threshold;
+    }
+    if (options.source_samples_set) {
+        config.source_sample_count = options.builder.source_sample_count;
+    }
+    if (options.target_samples_set) {
+        config.target_sample_count = options.builder.target_sample_count;
+    }
+    if (options.seed_set) {
+        config.seed = options.builder.seed;
+    }
+    return config;
+}
+
+void PrintEffectiveEdgeConfig(const pmg::PmgBuilderConfig& config) {
+    std::cout << "effective_edge_config:"
+              << " TGOOD=" << config.good_transition_threshold
+              << " TBAD=" << config.bad_transition_threshold
+              << " source_samples=" << config.source_sample_count
+              << " target_samples=" << config.target_sample_count
+              << " window_size=" << config.distance_grid.window_size
+              << " convention="
+              << pmg::TransitionWindowConventionName(
+                     config.transition_convention)
+              << "\n";
+}
 
 struct EdgeQuality {
     bool created = false;
@@ -552,12 +598,6 @@ int ValidateGraphCommand(const ValidateGraphOptions& options) {
         production_spaces.emplace(node.name, prepared_node.production);
     }
 
-    std::cout << "builder: TGOOD=" << options.builder.good_transition_threshold
-              << " TBAD=" << options.builder.bad_transition_threshold
-              << " source_samples=" << options.builder.source_sample_count
-              << " target_samples=" << options.builder.target_sample_count
-              << " seed=" << options.builder.seed << "\n";
-
     bool failed = false;
     auto fail_if = [&failed](bool condition, const std::string& message) {
         if (condition) {
@@ -568,15 +608,18 @@ int ValidateGraphCommand(const ValidateGraphOptions& options) {
 
     for (const pmg::GraphSpecEdge& edge : spec.edges) {
         std::cout << "=== edge " << edge.source_node << " -> " << edge.target_node << " ===\n";
+        const pmg::PmgBuilderConfig edge_config =
+            EffectiveEdgeConfig(edge, options);
+        PrintEffectiveEdgeConfig(edge_config);
 
         const pmg::EdgeBuildResult naive_result = pmg::PmgBuilder::BuildEdgeWithReport(
             prepared.skeleton, 0, 0, naive_spaces.at(edge.source_node),
-            naive_spaces.at(edge.target_node), options.builder);
+            naive_spaces.at(edge.target_node), edge_config);
         const pmg::EdgeBuildResult production_result =
             pmg::PmgBuilder::BuildEdgeWithReport(
                 prepared.skeleton, 0, 0,
                 production_spaces.at(edge.source_node),
-                production_spaces.at(edge.target_node), options.builder);
+                production_spaces.at(edge.target_node), edge_config);
 
         const EdgeQuality naive = MeasureEdgeQuality(
             naive_result, naive_spaces.at(edge.target_node));
@@ -669,15 +712,20 @@ ValidateGraphOptions ParseValidateGraphOptions(int argc, char** argv) {
             options.min_contact_frames_set = true;
         } else if (option == "--tgood") {
             options.builder.good_transition_threshold = std::stof(require_value("--tgood"));
+            options.tgood_set = true;
         } else if (option == "--tbad") {
             options.builder.bad_transition_threshold = std::stof(require_value("--tbad"));
+            options.tbad_set = true;
         } else if (option == "--source-samples") {
             options.builder.source_sample_count = std::stoi(require_value("--source-samples"));
+            options.source_samples_set = true;
         } else if (option == "--target-samples") {
             options.builder.target_sample_count = std::stoi(require_value("--target-samples"));
+            options.target_samples_set = true;
         } else if (option == "--seed") {
             options.builder.seed =
                 static_cast<unsigned int>(std::stoul(require_value("--seed")));
+            options.seed_set = true;
         } else if (option == "--min-edge-samples") {
             options.min_edge_samples = std::stoi(require_value("--min-edge-samples"));
         } else if (option == "--min-good-fraction") {

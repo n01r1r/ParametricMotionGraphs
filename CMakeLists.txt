@@ -181,6 +181,18 @@ if(PMG_BUILD_TESTS)
             --min-good-fraction 0.9
             --max-preparation-distance-ratio 1.10)
 
+    # Demo validation must use each spec's calibrated per-edge edge_config.
+    # Generic defaults reject these edges and would diverge from artifact builds.
+    add_test(NAME cli_validate_demo_walk_self_edge
+        COMMAND pmg_cli --validate-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_self_edge_minimal.pmg_spec)
+    add_test(NAME cli_validate_demo_walk_2d
+        COMMAND pmg_cli --validate-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec)
+    add_test(NAME cli_validate_demo_walk_jog
+        COMMAND pmg_cli --validate-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_jog_topology.pmg_spec)
+
     # Paper application A: 30 seconds of random transitions through the PMG.
     # The worst frame-to-frame step must stay within 3x the median walking
     # step (popping shows up as 5-20x spikes), and transitions must actually
