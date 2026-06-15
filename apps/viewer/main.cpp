@@ -101,28 +101,28 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
     input->dragging = (action == GLFW_PRESS) && !ImGui::GetIO().WantCaptureMouse;
 }
 
-// Poll WASD each frame to translate the camera in its own screen frame: A/D
-// move left/right, W/S move up/down (relative to the viewing direction). The
-// camera moves; the view direction is unchanged. Held keys accumulate smoothly,
+// Poll WASD each frame to fly the camera through the world like a 3D game: W/S
+// move forward/back along the view direction, A/D strafe left/right. The camera
+// translates; the view direction is unchanged. Held keys accumulate smoothly,
 // so this is polled rather than driven by key callbacks. Ignored while an ImGui
 // widget wants the keyboard.
-void PollCameraPan(GLFWwindow* window, pmgviewer::ViewerHost& app, float delta_seconds) {
+void PollCameraFly(GLFWwindow* window, pmgviewer::ViewerHost& app, float delta_seconds) {
     if (ImGui::GetIO().WantCaptureKeyboard) {
         return;
     }
     float right = 0.0f;
-    float up = 0.0f;
+    float forward = 0.0f;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) right += 1.0f;
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) right -= 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) up += 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) up -= 1.0f;
-    if (right == 0.0f && up == 0.0f) {
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) forward += 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) forward -= 1.0f;
+    if (right == 0.0f && forward == 0.0f) {
         return;
     }
-    constexpr float kPanSpeedPerSecond = 1.2f;  // fraction of orbit distance / s
-    const float step = kPanSpeedPerSecond * delta_seconds;
+    constexpr float kFlySpeedPerSecond = 1.2f;  // fraction of orbit distance / s
+    const float step = kFlySpeedPerSecond * delta_seconds;
     app.SetFollowSceneFocus(false);  // manual control overrides auto-follow
-    app.Camera().Pan(right * step, up * step);
+    app.Camera().Pan(right * step, forward * step);
 }
 
 void ScrollCallback(GLFWwindow* window, double x_offset, double y_offset) {
@@ -229,7 +229,7 @@ int main(int argc, char** argv) {
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
 
-            PollCameraPan(window, app, delta_seconds);
+            PollCameraFly(window, app, delta_seconds);
             app.Update(delta_seconds);
             app.BuildUi();
 

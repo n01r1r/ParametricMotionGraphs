@@ -35,15 +35,18 @@ void OrbitCamera::Zoom(float scroll_steps) {
                            kMinDistance, kMaxDistance);
 }
 
-void OrbitCamera::Pan(float right_amount, float up_amount) {
+void OrbitCamera::Pan(float right_amount, float forward_amount) {
+    // FPS fly: forward is the full 3D view direction (includes pitch), right is
+    // the horizontal strafe axis. Translating the target moves the eye with it
+    // (Position is the target plus a fixed orbit offset), so the whole camera
+    // flies through the world while the view direction stays the same.
     const glm::vec3 forward = glm::normalize(target_world_ - Position());
     const glm::vec3 world_up(0.0f, 1.0f, 0.0f);
     glm::vec3 right = glm::cross(forward, world_up);
     const float right_length = glm::length(right);
     right = right_length > 1.0e-6f ? right / right_length
                                    : glm::vec3(1.0f, 0.0f, 0.0f);
-    const glm::vec3 up = glm::normalize(glm::cross(right, forward));
-    target_world_ += (right * right_amount + up * up_amount) * distance_;
+    target_world_ += (right * right_amount + forward * forward_amount) * distance_;
 }
 
 void OrbitCamera::SetTarget(const glm::vec3& target_world) {
