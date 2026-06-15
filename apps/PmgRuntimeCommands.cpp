@@ -150,6 +150,10 @@ struct RandomWalkOptions {
     float max_pop_ratio = -1.0f;
     // Override runtime blend placement (default: artifact-derived / centered).
     std::optional<pmg::TransitionWindowConvention> blend_placement;
+    // Ablation: override the target pre-roll policy (default: clamp at clip
+    // start). kWrapCyclicClip lets a cyclic self-edge pre-roll into the previous
+    // cycle tail instead of clamping at phase 0.
+    std::optional<pmg::TransitionPreRollPolicy> preroll_policy;
     // Per-frame motion trace for offline plotting (path, pop-over-time,
     // before/after). Empty = no dump.
     std::string dump_motion_csv;
@@ -169,6 +173,15 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
     if (options.blend_placement.has_value()) {
         runtime_config.convention = *options.blend_placement;
     }
+    if (options.preroll_policy.has_value()) {
+        runtime_config.preroll_policy = *options.preroll_policy;
+    }
+    std::cout << "preroll_policy="
+              << (runtime_config.preroll_policy ==
+                          pmg::TransitionPreRollPolicy::kWrapCyclicClip
+                      ? "wrap"
+                      : "clamp")
+              << "\n";
     std::cout << "metric_convention="
               << pmg::TransitionWindowConventionName(
                      artifact.metadata.edge_builds.empty()
@@ -551,6 +564,18 @@ RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
             } else {
                 throw std::runtime_error(
                     "--blend-placement expects 'directional' or 'centered'");
+            }
+        } else if (option == "--preroll-policy") {
+            const std::string value = require_value("--preroll-policy");
+            if (value == "clamp") {
+                options.preroll_policy =
+                    pmg::TransitionPreRollPolicy::kClampAtClipStart;
+            } else if (value == "wrap") {
+                options.preroll_policy =
+                    pmg::TransitionPreRollPolicy::kWrapCyclicClip;
+            } else {
+                throw std::runtime_error(
+                    "--preroll-policy expects 'clamp' or 'wrap'");
             }
         } else if (option == "--dump-motion-csv") {
             options.dump_motion_csv = require_value("--dump-motion-csv");

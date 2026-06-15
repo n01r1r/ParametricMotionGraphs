@@ -15,6 +15,13 @@ struct RuntimeControlRequest {
     ParameterVector desired_parameter;
 };
 
+// How the runtime starts the target clip when a centered pre-roll would land
+// before its phase-0 frame. See RuntimeControllerConfig::preroll_policy.
+enum class TransitionPreRollPolicy {
+    kClampAtClipStart,  // clamp the start to phase 0 (default, cross-node safe)
+    kWrapCyclicClip,    // wrap into the previous cycle tail (cyclic self-edge)
+};
+
 struct RuntimeControllerConfig {
     // Number of sampled blend frames at the runtime sampling rate. k samples
     // span k-1 frame intervals. This must equal the DistanceGridConfig
@@ -30,6 +37,16 @@ struct RuntimeControllerConfig {
     // with Kovar's directional metric, then centers the blend on it.
     TransitionWindowConvention convention =
         TransitionWindowConvention::kPmgCentered;
+    // What to do when a centered (or wide directional) pre-roll would start the
+    // target clip before its phase-0 frame, i.e. target_phase*duration < lead.
+    // kClampAtClipStart (default, behavior-preserving) clamps the start to 0:
+    // safe when the target's pre-start frames are meaningless (a true cross-node
+    // clip). kWrapCyclicClip lets the start go negative and folds it into the
+    // previous cycle's tail (FoldCompletedCycles backward branch): correct for a
+    // cyclic locomotion self-edge, where the tail is the same clip's end and the
+    // clamp otherwise drops the target's pre-roll velocity support.
+    TransitionPreRollPolicy preroll_policy =
+        TransitionPreRollPolicy::kClampAtClipStart;
 };
 
 // Read-only snapshot of the transition currently being blended.

@@ -57,6 +57,17 @@ struct RigidTransform2D {
         return world_pose;
     }
 
+    // The inverse placement: undoes Apply. For p' = R(yaw)*p + t the inverse is
+    // p = R(-yaw)*p' - R(-yaw)*t, i.e. yaw -> -yaw and t -> R(-yaw)*(-t).
+    // Compose(Inverse(), *this) == Identity. Used to fold a cycle delta backwards
+    // when a cyclic clip plays before its phase-0 frame (negative pre-roll).
+    RigidTransform2D Inverse() const {
+        RigidTransform2D inverse;
+        inverse.yaw = -yaw;
+        inverse.RotateFloor(-dx, -dz, inverse.dx, inverse.dz);  // rotates by -yaw
+        return inverse;
+    }
+
     // Compose so that applying `inner` then `outer` equals applying the result:
     // (outer o inner)(p) = R(outer.yaw) * (R(inner.yaw)*p + inner.t) + outer.t.
     static RigidTransform2D Compose(const RigidTransform2D& outer,
