@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
@@ -28,14 +29,33 @@ constexpr float kEpsilon = 1.0e-6f;
 constexpr float kParameterCanvasHeight = 88.0f;
 constexpr float kPhaseRowHeight = 26.0f;
 constexpr int kSteeringCurveSamples = 24;  // turn-rate plot resolution
+constexpr std::size_t kMaxRuntimePathPoints = 600;
+constexpr std::size_t kMaxTransitionMarkers = 128;
+constexpr float kMinimumTracePointDistance = 0.01f;
 
 glm::vec3 ToGlm(const pmg::Vec3& v) { return glm::vec3(v.x, v.y, v.z); }
 
-float NormalizedPhase(float time_seconds, float duration_seconds) {
-    if (duration_seconds <= kEpsilon) {
-        return 0.0f;
-    }
-    float phase = std::fmod(time_seconds, duration_seconds) / duration_seconds;
+glm::vec3 TransitionMarkerColor(int source_node, int target_node) {
+    const std::array<glm::vec3, 6> kEdgeColors = {
+        glm::vec3(0.94f, 0.45f, 0.14f),
+        glm::vec3(0.86f, 0.23f, 0.45f),
+        glm::vec3(0.61f, 0.35f, 0.89f),
+        glm::vec3(0.13f, 0.65f, 0.82f),
+        glm::vec3(0.18f, 0.72f, 0.45f),
+        glm::vec3(0.93f, 0.72f, 0.17f),
+    };
+    const int edge_key = source_node * 31 + target_node;
+    const std::size_t edge_index =
+        static_cast<std::size_t>(std::abs(edge_key));
+    return kEdgeColors[edge_index % kEdgeColors.size()];
+}
+
+// Wrap a free-running phase into [0,1). The playback clock is stored directly
+// in phase now, so this is just a fractional wrap (no division by a
+// parameter-dependent duration, which is what used to teleport the pose when
+// the blend parameter changed).
+float WrapPhase(float phase) {
+    phase -= std::floor(phase);
     if (phase < 0.0f) {
         phase += 1.0f;
     }
@@ -157,7 +177,7 @@ void PmgViewerWorkspace::LoadClip(int file_index) {
         skeleton_ = data.skeleton;
         clip_ = data.clip;
         ground_offset_ = ComputeGroundOffset(skeleton_, clip_);
-        current_time_seconds_ = 0.0f;
+        current_phase_ = 0.0f;
         selected_file_index_ = file_index;
         mode_ = ViewerPlaybackMode::ClipPlayback;
         status_message_ = "Loaded " + bvh_files_[file_index].filename().string();
@@ -176,7 +196,7 @@ bool PmgViewerWorkspace::GraphRuntimeActive() const {
 }
 
 void PmgViewerWorkspace::ResetPlayback() {
-    current_time_seconds_ = 0.0f;
+    current_phase_ = 0.0f;
     playback_speed_ = 1.0f;
     playing_ = true;
 }
@@ -208,9 +228,7 @@ pmg::Pose PmgViewerWorkspace::CurrentPose() const {
         if (pmg_preview_clip_.NumFrames() == 0) {
             return pmg::Pose{};
         }
-        const float phase = NormalizedPhase(
-            current_time_seconds_, pmg_preview_clip_.DurationSeconds());
-        pmg::Pose pose = pmg_preview_clip_.SampleNormalizedPhase(phase);
+        pmg::Pose pose = pmg_preview_clip_.SampleNormalizedPhase(current_phase_);
         if (pmg_preview_in_place_) {
             // Lock the horizontal root to the cycle start; keep vertical (y).
             const pmg::Vec3& anchor =
@@ -223,8 +241,7 @@ pmg::Pose PmgViewerWorkspace::CurrentPose() const {
     if (clip_.NumFrames() == 0) {
         return pmg::Pose{};
     }
-    const float phase = NormalizedPhase(current_time_seconds_, ActiveReferenceDuration());
-    return clip_.SampleNormalizedPhase(phase);
+    return clip_.SampleNormalizedPhase(current_phase_);
 }
 
 void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
@@ -233,10 +250,101 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
         return;
     }
 
-    const std::vector<pmg::Vec3> positions =
-        pmg::ComputeJointWorldPositions(skeleton, pose);
     const float ground_offset =
         (ParametricBlendActive() || GraphRuntimeActive()) ? pmg_ground_offset_ : ground_offset_;
+    const std::vector<glm::vec3> world_positions =
+        PoseWorldPositions(pose, skeleton, ground_offset);
+
+    glm::vec3 centroid(0.0f);
+    scene_.joints.clear();
+    scene_.joints.reserve(world_positions.size());
+    for (const glm::vec3& world_position : world_positions) {
+        centroid += world_position;
+        scene_.joints.push_back(world_position);
+    }
+    if (!world_positions.empty()) {
+        centroid /= static_cast<float>(world_positions.size());
+    }
+
+    scene_.bones.clear();
+    for (int joint_index = 0; joint_index < skeleton.NumJoints(); ++joint_index) {
+        const int parent = skeleton.joints[joint_index].parent_index;
+        if (parent < 0) {
+            continue;
+        }
+        scene_.bones.push_back(
+            {world_positions[static_cast<std::size_t>(parent)],
+             world_positions[static_cast<std::size_t>(joint_index)]});
+    }
+
+    // Goto target gizmo: ground sphere plus a beacon roughly character-tall
+    // (native target back into display space, same transform as the root).
+    scene_.marker_points.clear();
+    scene_.marker_lines.clear();
+    scene_.diagnostic_points.clear();
+    scene_.diagnostic_lines.clear();
+
+    if (GraphRuntimeActive() && show_graph_path_trail_ &&
+        graph_path_points_.size() >= 2) {
+        constexpr glm::vec3 kPathTrailColor(0.10f, 0.70f, 0.95f);
+        const float trail_height = 0.05f * display_scale_;
+        const float trail_radius = 0.035f * display_scale_;
+        for (std::size_t index = 1; index < graph_path_points_.size();
+             ++index) {
+            const glm::vec2& previous = graph_path_points_[index - 1];
+            const glm::vec2& current = graph_path_points_[index];
+            scene_.diagnostic_lines.push_back({
+                glm::vec3(previous.x * display_scale_, trail_height,
+                          previous.y * display_scale_),
+                glm::vec3(current.x * display_scale_, trail_height,
+                          current.y * display_scale_),
+                kPathTrailColor,
+                trail_radius,
+            });
+        }
+    }
+
+    if (GraphRuntimeActive() && show_graph_transition_markers_) {
+        const float marker_height = 0.25f * display_scale_;
+        const float marker_radius = 0.065f * display_scale_;
+        const float line_radius = 0.022f * display_scale_;
+        for (const TransitionTraceMarker& marker :
+             graph_transition_markers_) {
+            const glm::vec3 color =
+                TransitionMarkerColor(marker.source_node, marker.target_node);
+            const glm::vec3 ground_position(
+                marker.root_position.x * display_scale_,
+                0.08f * display_scale_,
+                marker.root_position.y * display_scale_);
+            scene_.diagnostic_points.push_back(
+                {ground_position, color, marker_radius});
+            scene_.diagnostic_lines.push_back({
+                ground_position,
+                ground_position + glm::vec3(0.0f, marker_height, 0.0f),
+                color,
+                line_radius,
+            });
+        }
+    }
+
+    if (goto_active_ && GraphRuntimeActive()) {
+        const glm::vec3 base(goto_target_.x * display_scale_, 0.0f,
+                             goto_target_.y * display_scale_);
+        const glm::vec3 top = base + glm::vec3(0.0f, 1.8f * display_scale_, 0.0f);
+        scene_.marker_points.push_back(base);
+        scene_.marker_lines.push_back({base, top});
+    }
+
+    AppendPathPreview();
+
+    scene_.focus_point = centroid;
+}
+
+std::vector<glm::vec3> PmgViewerWorkspace::PoseWorldPositions(
+    const pmg::Pose& pose, const pmg::Skeleton& skeleton,
+    float ground_offset) const {
+    const std::vector<pmg::Vec3> positions =
+        pmg::ComputeJointWorldPositions(skeleton, pose);
 
     // Pass 1: lift onto the ground plane and find the horizontal centroid that
     // the skeleton scale pivots around.
@@ -262,47 +370,115 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     //     anchors vertically at y = 0, so resizing the body neither slides it
     //     across the floor nor lifts the feet.
     const float render_scale = display_scale_ * skeleton_scale_;
-    glm::vec3 centroid(0.0f);
-    scene_.joints.clear();
-    scene_.joints.reserve(positions.size());
-    for (std::size_t i = 0; i < positions.size(); ++i) {
-        glm::vec3& world_position = world_positions[i];
+    for (glm::vec3& world_position : world_positions) {
         world_position.x = display_scale_ *
             (horizontal_center.x + (world_position.x - horizontal_center.x) * skeleton_scale_);
         world_position.z = display_scale_ *
             (horizontal_center.y + (world_position.z - horizontal_center.y) * skeleton_scale_);
         world_position.y *= render_scale;
-        centroid += world_position;
-        scene_.joints.push_back(world_position);
     }
-    if (!world_positions.empty()) {
-        centroid /= static_cast<float>(world_positions.size());
+    return world_positions;
+}
+
+void PmgViewerWorkspace::AppendPathPreview() {
+    if (!path_preview_enabled_) {
+        return;
+    }
+    // Pick the clip actually being played: the blended preview in blend mode,
+    // the loaded clip in clip mode. Graph runtime is controller-driven and
+    // already has its own path trail, so it is skipped.
+    const pmg::MotionClip* clip = nullptr;
+    const pmg::Skeleton* skeleton = nullptr;
+    float ground_offset = 0.0f;
+    if (ParametricBlendActive() && pmg_preview_clip_.NumFrames() > 1) {
+        clip = &pmg_preview_clip_;
+        skeleton = &pmg_skeleton_;
+        ground_offset = pmg_ground_offset_;
+    } else if (mode_ == ViewerPlaybackMode::ClipPlayback && clip_.NumFrames() > 1) {
+        clip = &clip_;
+        skeleton = &skeleton_;
+        ground_offset = ground_offset_;
+    }
+    if (clip == nullptr || skeleton->NumJoints() == 0) {
+        return;
     }
 
-    scene_.bones.clear();
-    for (int joint_index = 0; joint_index < skeleton.NumJoints(); ++joint_index) {
-        const int parent = skeleton.joints[joint_index].parent_index;
-        if (parent < 0) {
+    const int ghost_count = std::clamp(path_preview_count_, 2, 12);
+    // Roughly two-thirds of the live bone radius: clearly visible as a trail
+    // while staying thinner than the active skeleton.
+    const float ghost_radius = 0.065f * display_scale_;
+    for (int ghost = 0; ghost < ghost_count; ++ghost) {
+        const float phase =
+            static_cast<float>(ghost) / static_cast<float>(ghost_count - 1);
+        const pmg::Pose ghost_pose = clip->SampleNormalizedPhase(phase);
+        if (ghost_pose.NumJoints() != skeleton->NumJoints()) {
             continue;
         }
-        scene_.bones.push_back(
-            {world_positions[static_cast<std::size_t>(parent)],
-             world_positions[static_cast<std::size_t>(joint_index)]});
+        // Cool (cyan) at the start fading to warm (amber) at the end, so the
+        // motion's direction in time reads at a glance.
+        const glm::vec3 ghost_color =
+            glm::mix(glm::vec3(0.20f, 0.75f, 0.95f),
+                     glm::vec3(0.98f, 0.62f, 0.20f), phase);
+        const std::vector<glm::vec3> ghost_world =
+            PoseWorldPositions(ghost_pose, *skeleton, ground_offset);
+        for (int joint_index = 0; joint_index < skeleton->NumJoints();
+             ++joint_index) {
+            const int parent = skeleton->joints[joint_index].parent_index;
+            if (parent < 0) {
+                continue;
+            }
+            scene_.diagnostic_lines.push_back({
+                ghost_world[static_cast<std::size_t>(parent)],
+                ghost_world[static_cast<std::size_t>(joint_index)],
+                ghost_color,
+                ghost_radius,
+            });
+        }
     }
+}
 
-    // Goto target gizmo: ground sphere plus a beacon roughly character-tall
-    // (native target back into display space, same transform as the root).
-    scene_.marker_points.clear();
-    scene_.marker_lines.clear();
-    if (goto_active_ && GraphRuntimeActive()) {
-        const glm::vec3 base(goto_target_.x * display_scale_, 0.0f,
-                             goto_target_.y * display_scale_);
-        const glm::vec3 top = base + glm::vec3(0.0f, 1.8f * display_scale_, 0.0f);
-        scene_.marker_points.push_back(base);
-        scene_.marker_lines.push_back({base, top});
+void PmgViewerWorkspace::ResetRuntimeTrace() {
+    graph_path_points_.clear();
+    graph_transition_markers_.clear();
+    if (graph_controller_.has_value()) {
+        RecordRuntimeTracePoint(graph_controller_->CurrentPose());
     }
+}
 
-    scene_.focus_point = centroid;
+void PmgViewerWorkspace::RecordRuntimeTracePoint(const pmg::Pose& pose) {
+    if (!graph_ready_) {
+        return;
+    }
+    const glm::vec2 root_position(
+        pose.root_position.x, pose.root_position.z);
+    if (!graph_path_points_.empty()) {
+        const glm::vec2 delta = root_position - graph_path_points_.back();
+        if (glm::dot(delta, delta) <
+            kMinimumTracePointDistance * kMinimumTracePointDistance) {
+            return;
+        }
+    }
+    graph_path_points_.push_back(root_position);
+    if (graph_path_points_.size() > kMaxRuntimePathPoints) {
+        graph_path_points_.erase(graph_path_points_.begin());
+    }
+}
+
+void PmgViewerWorkspace::RecordTransitionMarker(
+    const pmg::RuntimeTransitionDiagnostics& transition) {
+    if (!graph_controller_.has_value()) {
+        return;
+    }
+    const pmg::Pose pose = graph_controller_->CurrentPose();
+    graph_transition_markers_.push_back({
+        glm::vec2(pose.root_position.x, pose.root_position.z),
+        transition.source_node,
+        transition.target_node,
+    });
+    if (graph_transition_markers_.size() > kMaxTransitionMarkers) {
+        graph_transition_markers_.erase(
+            graph_transition_markers_.begin());
+    }
 }
 
 // --- Goto steering (viewer port of CLI --goto) ------------------------------
@@ -414,6 +590,8 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
     // Graph runtime: drive the RuntimeController and render its streamed pose.
     if (GraphRuntimeActive()) {
         if (playing_) {
+            const bool was_transitioning =
+                graph_controller_->IsTransitioning();
             if (goto_active_ && steering_.has_value()) {
                 UpdateGotoSteering(graph_controller_->CurrentPose());
             }
@@ -431,21 +609,37 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
                     ? goto_desired_parameter_
                     : DesiredParameterForNode(graph_desired_node_);
             graph_controller_->Update(delta_seconds * playback_speed_, request);
+            if (!was_transitioning &&
+                graph_controller_->IsTransitioning()) {
+                const auto transition =
+                    graph_controller_->ActiveTransitionDiagnostics();
+                if (transition.has_value()) {
+                    RecordTransitionMarker(*transition);
+                }
+            }
         }
         const pmg::Pose pose = graph_controller_->CurrentPose();
+        RecordRuntimeTracePoint(pose);
         UpdateRootMotionDiagnostics(
             pose, playing_ ? delta_seconds * playback_speed_ : 0.0f);
         RebuildScene(pose);
         return;
     }
 
-    if (playing_) {
-        current_time_seconds_ += delta_seconds * playback_speed_;
-    }
-    // Keep the cached parametric preview in sync with the blend parameter.
+    // Refresh the cached parametric preview FIRST so the duration used to pace
+    // the phase clock matches the parameter we are about to render. The phase
+    // itself is left untouched by a parameter change -- only its advance rate
+    // (1/duration) moves -- so nudging the blend no longer teleports the pose.
     if (ParametricBlendActive() &&
         (pmg_preview_dirty_ || pmg_parameter_ != pmg_preview_parameter_)) {
         RegeneratePreviewClip();
+    }
+    if (playing_) {
+        const float duration = ActiveReferenceDuration();
+        if (duration > kEpsilon) {
+            current_phase_ = WrapPhase(
+                current_phase_ + delta_seconds * playback_speed_ / duration);
+        }
     }
     const pmg::Pose pose = CurrentPose();
     UpdateRootMotionDiagnostics(
@@ -716,32 +910,20 @@ void PmgViewerWorkspace::StepFrame(int direction) {
     if (GraphRuntimeActive()) {
         return;  // graph runtime is controller-driven; stepping is for clip/blend
     }
-    const float duration = ActiveReferenceDuration();
-    if (duration <= kEpsilon) {
+    // Step by one frame of whatever clip is actually rendered: the blended
+    // preview in blend mode, the loaded clip otherwise. Phase is the clock, so
+    // one frame is 1/(frame_count - 1) of the cycle.
+    const int frame_count =
+        (ParametricBlendActive() && pmg_preview_clip_.NumFrames() > 1)
+            ? pmg_preview_clip_.NumFrames()
+            : clip_.NumFrames();
+    if (frame_count <= 1) {
         return;
     }
-    const int frame_count = (ParametricBlendActive() && !pmg_examples_.empty())
-                                ? pmg_examples_.front().clip.NumFrames()
-                                : clip_.NumFrames();
-    const float fps = (clip_.NumFrames() > 0) ? clip_.frames_per_second : 30.0f;
-    const float frame_seconds =
-        frame_count > 1 ? duration / static_cast<float>(frame_count - 1) : 1.0f / fps;
-
     playing_ = false;
-    // Fold the free-running play clock into one loop, step, then wrap. Clamping
-    // here used to pin the clock at exactly `duration` once playback had run
-    // past one loop; that displays as phase 0 (fmod) and made forward stepping
-    // a dead end until something moved the clock back inside the loop.
-    float time = std::fmod(current_time_seconds_, duration);
-    if (time < 0.0f) {
-        time += duration;
-    }
-    time += static_cast<float>(direction) * frame_seconds;
-    time = std::fmod(time, duration);
-    if (time < 0.0f) {
-        time += duration;
-    }
-    current_time_seconds_ = time;
+    const float frame_phase = 1.0f / static_cast<float>(frame_count - 1);
+    current_phase_ =
+        WrapPhase(current_phase_ + static_cast<float>(direction) * frame_phase);
 }
 
 bool PmgViewerWorkspace::ParameterSliderWithTicks(const char* label, float* value,
@@ -852,24 +1034,38 @@ void PmgViewerWorkspace::BuildTransportSection() {
         if (ImGui::Button("Restart graph")) {
             graph_controller_->Start(graph_controller_->CurrentNode(),
                                      graph_controller_->CurrentParameter(), graph_fps_);
+            ResetRuntimeTrace();
         }
     }
 
     ImGui::SliderFloat("Speed", &playback_speed_, 0.1f, 3.0f, "%.2fx");
 
     // Phase scrub: clip & blend only (the graph's phase is owned by the
-    // controller). Auto-pause while dragging so playback doesn't fight it.
-    const float duration = ActiveReferenceDuration();
+    // controller). Phase is the stored clock, so the slider reads/writes it
+    // directly. Auto-pause while dragging so playback doesn't fight it.
     if (time_mode) {
-        float phase = NormalizedPhase(current_time_seconds_, duration);
+        float phase = current_phase_;
         if (ImGui::SliderFloat("Phase", &phase, 0.0f, 1.0f, "%.3f")) {
-            current_time_seconds_ = phase * duration;
+            current_phase_ = phase;
         }
         if (ImGui::IsItemActive()) {
             playing_ = false;
         }
     } else if (graph_controller_.has_value()) {
         ImGui::Text("Phase %.3f", graph_controller_->CurrentPhase());
+    }
+
+    // Path preview: ghost skeletons sampled across the active clip so the start,
+    // middle(s), and end are visible at once (clip & blend modes).
+    if (time_mode) {
+        ImGui::Checkbox("Path preview", &path_preview_enabled_);
+        if (path_preview_enabled_) {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::SliderInt("Ghosts", &path_preview_count_, 2, 12);
+            ImGui::SameLine();
+            ImGui::TextDisabled("(cyan=start -> amber=end)");
+        }
     }
 }
 
@@ -1047,7 +1243,7 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
         const float canonical_phase =
             GraphRuntimeActive() && graph_controller_.has_value()
                 ? graph_controller_->CurrentPhase()
-                : NormalizedPhase(current_time_seconds_, ActiveReferenceDuration());
+                : current_phase_;
         DrawPhaseTimeline(canonical_phase);
 
         if (!ParametricBlendActive()) {

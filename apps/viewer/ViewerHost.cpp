@@ -53,6 +53,8 @@ void ViewerHost::BuildViewUi() {
         camera_.Reset();
         follow_scene_focus_ = true;
     }
+    ImGui::TextDisabled("WASD fly - drag orbit - scroll zoom");
+    ImGui::TextDisabled("(WASD fly turns off Follow)");
     ImGui::End();
 }
 
