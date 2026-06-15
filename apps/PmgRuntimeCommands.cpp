@@ -12,6 +12,7 @@
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/RuntimeController.h"
 #include "pmg/SkeletonCompatibility.h"
+#include "pmg/TransitionQuality.h"
 
 #include <algorithm>
 #include <cctype>
@@ -185,6 +186,57 @@ std::string JoinParameter(const pmg::ParameterVector& parameter) {
         cell << parameter[axis];
     }
     return cell.str();
+}
+
+int FindJointIndex(
+    const pmg::Skeleton& skeleton,
+    const std::string& joint_name) {
+    for (int joint_index = 0;
+         joint_index < skeleton.NumJoints();
+         ++joint_index) {
+        if (skeleton.joints[static_cast<std::size_t>(joint_index)].name ==
+            joint_name) {
+            return joint_index;
+        }
+    }
+    return -1;
+}
+
+struct RuntimeContactJoints {
+    int left = -1;
+    int right = -1;
+    int min_contact_frames = 3;
+};
+
+RuntimeContactJoints ResolveRuntimeContactJoints(
+    const pmg::BuiltPmgArtifact& artifact,
+    int node_index) {
+    RuntimeContactJoints joints;
+    const std::string& node_name = artifact.graph.Node(node_index).name;
+
+    for (const pmg::NodeRegistrationMetadata& registration :
+         artifact.metadata.node_registrations) {
+        if (registration.node_name != node_name) {
+            continue;
+        }
+        joints.min_contact_frames = registration.min_contact_frames;
+        for (const std::string& joint_name : registration.contact_joints) {
+            std::string lower_name = joint_name;
+            std::transform(
+                lower_name.begin(), lower_name.end(), lower_name.begin(),
+                [](unsigned char character) {
+                    return static_cast<char>(std::tolower(character));
+                });
+            if (lower_name.find("left") != std::string::npos) {
+                joints.left = FindJointIndex(artifact.skeleton, joint_name);
+            } else if (lower_name.find("right") != std::string::npos) {
+                joints.right = FindJointIndex(artifact.skeleton, joint_name);
+            }
+        }
+        break;
+    }
+
+    return joints;
 }
 
 // Paper application A: stream random transitions through the graph and verify
@@ -370,27 +422,69 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
                "box_min,box_max,source_phase,target_phase,preroll_policy,"
                "preroll_wrapped,raw_target_start,scheduled_target_start,"
                "align_dx,align_dz,align_yaw_deg,transition_distance,"
-               "local_max_step,local_pop_ratio\n";
-        // Local pop window: the blend span plus one window-length margin on each
-        // side, so a transition pop shows up against the run-median step.
-        const int window = std::max(1, runtime_config.transition_blend_frames);
+               "local_max_step,local_pop_ratio,"
+               "pre_root_speed,post_root_speed,root_speed_ratio,"
+               "pre_yaw_rate,post_yaw_rate,yaw_rate_ratio,"
+               "left_foot_drift,right_foot_drift,max_contact_drift,"
+               "quality_classification\n";
+
+        pmg::MotionClip runtime_trace;
+        runtime_trace.frames_per_second =
+            artifact.metadata.frames_per_second;
+        runtime_trace.frames = poses;
+        std::map<int, RuntimeContactJoints> contact_joints_by_node;
+        std::map<int, std::optional<pmg::ContactDetectionSettings>>
+            contact_settings_by_node;
+
         for (std::size_t i = 0; i < transition_rows.size(); ++i) {
             const TransitionRow& row = transition_rows[i];
             const pmg::RuntimeTransitionDiagnostics& d = row.diag;
-            const int lo = std::max(1, row.pose_index - window);
-            const int hi = std::min(static_cast<int>(poses.size()) - 1,
-                                    row.pose_index + 2 * window);
-            float local_max_step = 0.0f;
-            for (int f = lo; f <= hi; ++f) {
-                local_max_step = std::max(
-                    local_max_step,
-                    MeanJointDistance(artifact.skeleton, poses[f - 1],
-                                      poses[f]));
+
+            if (!contact_joints_by_node.contains(d.source_node)) {
+                const RuntimeContactJoints contact_joints =
+                    ResolveRuntimeContactJoints(artifact, d.source_node);
+                contact_joints_by_node.emplace(
+                    d.source_node, contact_joints);
+
+                std::vector<int> contact_indices;
+                if (contact_joints.left >= 0) {
+                    contact_indices.push_back(contact_joints.left);
+                }
+                if (contact_joints.right >= 0 &&
+                    contact_joints.right != contact_joints.left) {
+                    contact_indices.push_back(contact_joints.right);
+                }
+
+                std::optional<pmg::ContactDetectionSettings>
+                    contact_settings;
+                if (!contact_indices.empty()) {
+                    contact_settings = pmg::EstimateContactSettings(
+                        artifact.skeleton, runtime_trace, contact_indices);
+                    contact_settings->min_contact_frames =
+                        contact_joints.min_contact_frames;
+                }
+                contact_settings_by_node.emplace(
+                    d.source_node, contact_settings);
             }
-            const float local_pop_ratio =
-                stats.median_step > 1.0e-6f
-                    ? local_max_step / stats.median_step
-                    : 0.0f;
+
+            const RuntimeContactJoints& contact_joints =
+                contact_joints_by_node.at(d.source_node);
+            pmg::TransitionQualityContext quality_context;
+            quality_context.frames_per_second =
+                artifact.metadata.frames_per_second;
+            quality_context.transition_distance =
+                d.interpolated_transition_distance;
+            quality_context.baseline_median_step = stats.median_step;
+            quality_context.left_foot_joint = contact_joints.left;
+            quality_context.right_foot_joint = contact_joints.right;
+            quality_context.contact_settings =
+                contact_settings_by_node.at(d.source_node);
+
+            const pmg::TransitionQualityRecord quality =
+                pmg::MeasureTransitionQuality(
+                    artifact.skeleton, poses, row.pose_index,
+                    quality_context);
+
             csv << i << ',' << row.pose_index << ','
                 << static_cast<float>(row.pose_index) * dt << ','
                 << d.source_node << ',' << d.target_node << ','
@@ -405,8 +499,21 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
                 << d.raw_target_start_seconds << ','
                 << d.scheduled_target_start_seconds << ',' << d.alignment.dx
                 << ',' << d.alignment.dz << ',' << d.alignment.yaw * kRadToDeg
-                << ',' << d.interpolated_transition_distance << ','
-                << local_max_step << ',' << local_pop_ratio << '\n';
+                << ',' << quality.transition_distance << ','
+                << quality.local_max_step << ','
+                << quality.local_pop_ratio << ','
+                << quality.pre_root_speed << ','
+                << quality.post_root_speed << ','
+                << quality.root_speed_ratio << ','
+                << quality.pre_yaw_rate << ','
+                << quality.post_yaw_rate << ','
+                << quality.yaw_rate_ratio << ','
+                << quality.left_foot_drift << ','
+                << quality.right_foot_drift << ','
+                << quality.max_contact_drift << ','
+                << pmg::TransitionQualityClassificationName(
+                       quality.classification)
+                << '\n';
         }
         std::cout << "transitions_csv=" << options.dump_transitions_csv
                   << " rows=" << transition_rows.size() << "\n";

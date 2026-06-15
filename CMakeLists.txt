@@ -30,6 +30,7 @@ add_library(pmg_core
     src/RuntimeController.cpp
     src/SkeletonCompatibility.cpp
     src/TimeWarp.cpp
+    src/TransitionQuality.cpp
     src/TransitionWindow.cpp
 )
 
@@ -87,6 +88,11 @@ if(PMG_BUILD_TESTS)
     target_link_libraries(test_transition_window_contract PRIVATE pmg_core)
     add_test(NAME test_transition_window_contract
         COMMAND test_transition_window_contract)
+
+    add_executable(test_transition_quality
+        tests/test_transition_quality.cpp)
+    target_link_libraries(test_transition_quality PRIVATE pmg_core)
+    add_test(NAME test_transition_quality COMMAND test_transition_quality)
 
     add_executable(test_pmg_builder tests/test_pmg_builder.cpp)
     target_link_libraries(test_pmg_builder PRIVATE pmg_core)
