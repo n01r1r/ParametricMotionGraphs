@@ -11,6 +11,16 @@ paper-faithful behavior from useful but non-equivalent reference code.
 
 ## Finding
 
+Update 2026-06-16: a dedicated cyclic-continuity audit now measures raw cyclic
+seam quality for the current walk/jog clips and generated production samples.
+It found no cyclic-strong anchors in the audited demo specs. Walk samples are
+weak mainly by pose seam ratio; jog is pose-cleaner but weak by pre/post
+yaw-rate discontinuity. Root/yaw seam rates are raw cyclic-audit diagnostics;
+root/yaw ratios compare pre/post in-clip rates, not the near-zero seam rates.
+Generated walk samples remain in the authored-anchor range, so they are not the
+primary culprit. See
+[`docs/experiments/CYCLIC_CONTINUITY_AUDIT.md`](experiments/CYCLIC_CONTINUITY_AUDIT.md).
+
 The remaining walk interruption was caused by viewer request policy, not
 world-space root placement.
 

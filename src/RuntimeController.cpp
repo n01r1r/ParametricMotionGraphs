@@ -1,5 +1,7 @@
 #include "pmg/RuntimeController.h"
 
+#include "pmg/CyclicContinuity.h"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -7,44 +9,6 @@
 namespace pmg {
 
 namespace {
-
-float PoseHeading(const Pose& pose) {
-    if (pose.local_rotations.empty()) {
-        return 0.0f;
-    }
-
-    const Vec3 forward =
-        Rotate(pose.local_rotations.front(), {0.0f, 0.0f, 1.0f});
-    return std::atan2(forward.x, forward.z);
-}
-
-float WrapPi(float angle_radians) {
-    return angle_radians -
-           2.0f * kPi * std::round(angle_radians / (2.0f * kPi));
-}
-
-// Rigid floor transform that maps the clip's first-frame placement onto its
-// last-frame placement. Applying it to a pose at phase p yields the pose one
-// cycle later in clip-local coordinates.
-RigidTransform2D CycleDelta(const MotionClip& clip) {
-    const Pose& first = clip.frames.front();
-    const Pose& last = clip.frames.back();
-
-    RigidTransform2D delta;
-    delta.yaw = WrapPi(PoseHeading(last) - PoseHeading(first));
-
-    float rotated_x = 0.0f;
-    float rotated_z = 0.0f;
-    delta.RotateFloor(
-        first.root_position.x,
-        first.root_position.z,
-        rotated_x,
-        rotated_z);
-
-    delta.dx = last.root_position.x - rotated_x;
-    delta.dz = last.root_position.z - rotated_z;
-    return delta;
-}
 
 float NormalizeUnitPhase(float phase) {
     phase = std::fmod(phase, 1.0f);
@@ -206,13 +170,14 @@ void RuntimeController::FoldCompletedCycles(
 
     while (time_seconds >= duration) {
         time_seconds -= duration;
-        transform = RigidTransform2D::Compose(transform, CycleDelta(clip));
+        transform =
+            RigidTransform2D::Compose(transform, ComputeCycleDelta(clip));
     }
 
     while (time_seconds < 0.0f) {
         time_seconds += duration;
-        transform =
-            RigidTransform2D::Compose(transform, CycleDelta(clip).Inverse());
+        transform = RigidTransform2D::Compose(
+            transform, ComputeCycleDelta(clip).Inverse());
     }
 }
 

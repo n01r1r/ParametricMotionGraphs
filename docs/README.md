@@ -43,6 +43,9 @@ The PDFs are source material, not build inputs.
 - [`WALK_JOG_CONTINUITY.md`](WALK_JOG_CONTINUITY.md) - measured loop-seam
   analysis, paper comparison, jog-domain limits, and desired-parameter
   semantics.
+- [`experiments/CYCLIC_CONTINUITY_AUDIT.md`](experiments/CYCLIC_CONTINUITY_AUDIT.md)
+  - tracked conclusion from the cyclic seam audit; generated CSV/markdown lives
+  under ignored `outputs/cyclic_continuity/`.
 - [`adr/`](adr/) - accepted implementation decisions.
 
 ## Evidence Hierarchy

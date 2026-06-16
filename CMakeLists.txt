@@ -12,6 +12,7 @@ add_library(pmg_core
     src/AlignmentStrategy.cpp
     src/BvhLoader.cpp
     src/ContactDetection.cpp
+    src/CyclicContinuity.cpp
     src/FootLocking.cpp
     src/ForwardKinematics.cpp
     src/GoalDirectedLocomotion.cpp
@@ -93,6 +94,11 @@ if(PMG_BUILD_TESTS)
         tests/test_transition_quality.cpp)
     target_link_libraries(test_transition_quality PRIVATE pmg_core)
     add_test(NAME test_transition_quality COMMAND test_transition_quality)
+
+    add_executable(test_cyclic_continuity
+        tests/test_cyclic_continuity.cpp)
+    target_link_libraries(test_cyclic_continuity PRIVATE pmg_core)
+    add_test(NAME test_cyclic_continuity COMMAND test_cyclic_continuity)
 
     add_executable(test_pmg_builder tests/test_pmg_builder.cpp)
     target_link_libraries(test_pmg_builder PRIVATE pmg_core)

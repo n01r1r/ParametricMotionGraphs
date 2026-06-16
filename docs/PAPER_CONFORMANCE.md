@@ -173,8 +173,12 @@ Spec-exposing the distance-grid phase ranges (formerly item 2) landed via the
 The D6 equation/window gap also landed: transition grids use source-start and
 target-end windows plus Kovar's unnormalized weighted squared sum. Thresholds
 were recalibrated because raw sums scale with point count and weights.
-The wide-turn walk-loop jolt was diagnosed as **mostly** a corpus periodicity
-limit, but a 2026-06-15 continuity audit isolated a deterministic slice: the
+self-edge wrap behavior remains diagnostic-covered, and a tracked
+2026-06-16 cyclic-continuity audit confirms that the current cyclic anchors are
+not cyclic-strong under local seam pose, velocity, yaw, and contact evidence
+(`docs/experiments/CYCLIC_CONTINUITY_AUDIT.md`). The wide-turn walk-loop jolt
+was diagnosed as **mostly** a corpus periodicity limit, but a 2026-06-15
+continuity audit isolated a deterministic slice: the
 self-edge target pre-roll was clamped at clip start, dropping the previous-cycle
 tail. The default now wraps that pre-roll for cyclic nodes
 (`TransitionPreRollPolicy::kWrapCyclicSelfEdges`, bidirectional

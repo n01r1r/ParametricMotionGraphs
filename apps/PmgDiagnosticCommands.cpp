@@ -1,6 +1,7 @@
 #include "PmgCommandModules.h"
 
 #include "pmg/AlignmentStrategy.h"
+#include "pmg/CyclicContinuity.h"
 #include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
@@ -14,12 +15,15 @@
 #include "pmg/legacy/FrameCountClipGeneration.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <random>
@@ -457,6 +461,401 @@ struct ValidateGraphOptions {
     float max_preparation_min_distance_ratio = -1.0f;
 };
 
+struct CyclicAuditOptions {
+    std::string spec_path;
+    std::string output_csv;
+    std::string output_md;
+    float frames_per_second = 30.0f;
+};
+
+struct CyclicAuditRow {
+    std::string node;
+    std::string sample_type;
+    pmg::ParameterVector parameter;
+    std::string source_clip;
+    int num_frames = 0;
+    pmg::CyclicContinuityRecord record;
+};
+
+std::string JoinParameter(const pmg::ParameterVector& parameter) {
+    std::ostringstream cell;
+    for (std::size_t axis = 0; axis < parameter.size(); ++axis) {
+        if (axis != 0) {
+            cell << '|';
+        }
+        cell << parameter[axis];
+    }
+    return cell.str();
+}
+
+std::string EscapeCsvCell(const std::string& cell) {
+    if (cell.find_first_of(",\"\n") == std::string::npos) {
+        return cell;
+    }
+    std::string escaped = "\"";
+    for (const char ch : cell) {
+        if (ch == '"') {
+            escaped += "\"\"";
+        } else {
+            escaped += ch;
+        }
+    }
+    escaped += '"';
+    return escaped;
+}
+
+std::string CurrentGitCommit() {
+    std::array<char, 128> buffer{};
+    std::string output;
+#ifdef _WIN32
+    FILE* pipe = _popen("git rev-parse --short HEAD", "r");
+#else
+    FILE* pipe = popen("git rev-parse --short HEAD", "r");
+#endif
+    if (pipe == nullptr) {
+        return "unknown";
+    }
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) !=
+           nullptr) {
+        output += buffer.data();
+    }
+#ifdef _WIN32
+    _pclose(pipe);
+#else
+    pclose(pipe);
+#endif
+    while (!output.empty() &&
+           (output.back() == '\n' || output.back() == '\r')) {
+        output.pop_back();
+    }
+    return output.empty() ? "unknown" : output;
+}
+
+std::string CommandLineString(int argc, char** argv) {
+    std::ostringstream command;
+    for (int index = 0; index < argc; ++index) {
+        if (index != 0) {
+            command << ' ';
+        }
+        command << argv[index];
+    }
+    return command.str();
+}
+
+int ResolveJointIndex(
+    const pmg::Skeleton& skeleton,
+    const std::string& joint_name) {
+    for (int joint_index = 0; joint_index < skeleton.NumJoints();
+         ++joint_index) {
+        if (skeleton.joints[static_cast<std::size_t>(joint_index)].name ==
+            joint_name) {
+            return joint_index;
+        }
+    }
+    return -1;
+}
+
+pmg::CyclicContinuityContext CyclicContextForNode(
+    const pmg::Skeleton& skeleton,
+    const pmg::PreparedMotionSpace& prepared_node) {
+    pmg::CyclicContinuityContext context;
+    for (const std::string& joint_name :
+         prepared_node.registration.contact_joints) {
+        std::string lower_name = joint_name;
+        std::transform(
+            lower_name.begin(), lower_name.end(), lower_name.begin(),
+            [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+        if (lower_name.find("left") != std::string::npos) {
+            context.left_foot_joint = ResolveJointIndex(skeleton, joint_name);
+        } else if (lower_name.find("right") != std::string::npos) {
+            context.right_foot_joint = ResolveJointIndex(skeleton, joint_name);
+        }
+    }
+    context.contact_settings = prepared_node.contact_settings;
+    return context;
+}
+
+std::vector<pmg::ParameterVector> GeneratedAuditParameters(
+    const pmg::ParametricMotionSpace& space) {
+    const int dimension = space.ParameterDimension();
+    const std::vector<pmg::ParameterVector> examples =
+        space.ExampleParameters();
+    if (examples.empty()) {
+        throw std::runtime_error(
+            "GeneratedAuditParameters: space has no examples");
+    }
+    pmg::ParameterVector min_corner(static_cast<std::size_t>(dimension),
+                                    std::numeric_limits<float>::infinity());
+    pmg::ParameterVector max_corner(static_cast<std::size_t>(dimension),
+                                    -std::numeric_limits<float>::infinity());
+    for (const pmg::ParameterVector& parameter : examples) {
+        pmg::RequireSameParameterDimension(
+            min_corner, parameter, "GeneratedAuditParameters");
+        for (int axis = 0; axis < dimension; ++axis) {
+            min_corner[static_cast<std::size_t>(axis)] = std::min(
+                min_corner[static_cast<std::size_t>(axis)],
+                parameter[static_cast<std::size_t>(axis)]);
+            max_corner[static_cast<std::size_t>(axis)] = std::max(
+                max_corner[static_cast<std::size_t>(axis)],
+                parameter[static_cast<std::size_t>(axis)]);
+        }
+    }
+
+    std::vector<pmg::ParameterVector> samples;
+
+    if (dimension == 1) {
+        const float min_value = min_corner[0];
+        const float max_value = max_corner[0];
+        samples.push_back({min_value});
+        if (std::abs(max_value - min_value) > 1.0e-6f) {
+            samples.push_back({0.5f * (min_value + max_value)});
+            samples.push_back({max_value});
+        }
+        return samples;
+    }
+
+    if (dimension == 2) {
+        for (int x = 0; x < 2; ++x) {
+            for (int y = 0; y < 2; ++y) {
+                samples.push_back({
+                    x == 0 ? min_corner[0] : max_corner[0],
+                    y == 0 ? min_corner[1] : max_corner[1],
+                });
+            }
+        }
+        samples.push_back({
+            0.5f * (min_corner[0] + max_corner[0]),
+            0.5f * (min_corner[1] + max_corner[1]),
+        });
+        return samples;
+    }
+
+    pmg::ParameterVector center(static_cast<std::size_t>(dimension), 0.0f);
+    for (int axis = 0; axis < dimension; ++axis) {
+        center[static_cast<std::size_t>(axis)] =
+            0.5f * (min_corner[static_cast<std::size_t>(axis)] +
+                    max_corner[static_cast<std::size_t>(axis)]);
+    }
+    samples.push_back(center);
+    return samples;
+}
+
+void WriteCyclicAuditCsv(
+    const std::string& path,
+    const std::vector<CyclicAuditRow>& rows) {
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error("--audit-cyclic-continuity: cannot write CSV");
+    }
+
+    csv << "node,sample_type,parameter,source_clip,num_frames,"
+           "cycle_delta_dx,cycle_delta_dz,cycle_delta_yaw,"
+           "seam_step,median_step,seam_step_ratio,"
+           "pre_root_speed,seam_root_speed,post_root_speed,root_speed_ratio,"
+           "pre_yaw_rate,seam_yaw_rate,post_yaw_rate,yaw_rate_ratio,"
+           "left_foot_drift,right_foot_drift,max_contact_drift,"
+           "has_contact_evidence,contact_state_matches,classification\n";
+    for (const CyclicAuditRow& row : rows) {
+        const pmg::CyclicContinuityRecord& r = row.record;
+        csv << EscapeCsvCell(row.node) << ','
+            << EscapeCsvCell(row.sample_type) << ','
+            << EscapeCsvCell(JoinParameter(row.parameter)) << ','
+            << EscapeCsvCell(row.source_clip) << ',' << row.num_frames << ','
+            << r.cycle_delta.dx << ',' << r.cycle_delta.dz << ','
+            << r.cycle_delta.yaw << ',' << r.seam_step << ','
+            << r.median_step << ',' << r.seam_step_ratio << ','
+            << r.pre_root_speed << ',' << r.seam_root_speed << ','
+            << r.post_root_speed << ',' << r.root_speed_ratio << ','
+            << r.pre_yaw_rate << ',' << r.seam_yaw_rate << ','
+            << r.post_yaw_rate << ',' << r.yaw_rate_ratio << ','
+            << r.left_foot_drift << ',' << r.right_foot_drift << ','
+            << r.max_contact_drift << ','
+            << (r.has_contact_evidence ? 1 : 0) << ','
+            << (r.contact_state_matches ? 1 : 0) << ','
+            << pmg::CyclicContinuityClassificationName(r.classification)
+            << '\n';
+    }
+}
+
+void WriteCyclicAuditMarkdown(
+    const std::string& path,
+    const CyclicAuditOptions& options,
+    const std::string& command_line,
+    const std::vector<CyclicAuditRow>& rows) {
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    std::ofstream md(path);
+    if (!md) {
+        throw std::runtime_error("--audit-cyclic-continuity: cannot write markdown");
+    }
+
+    md << "# Cyclic Continuity Audit\n\n";
+    md << "- Commit: `" << CurrentGitCommit() << "`\n";
+    md << "- Command: `" << command_line << "`\n";
+    md << "- Spec: `" << options.spec_path << "`\n";
+    md << "- Sampling rate: " << options.frames_per_second << " fps\n\n";
+
+    md << "## Summary By Node\n\n";
+    md << "| Node | Samples | Strong | Weak pose | Weak root speed | "
+          "Weak yaw rate | Weak contact | Insufficient |\n";
+    md << "|---|---:|---:|---:|---:|---:|---:|---:|\n";
+    std::map<std::string, std::array<int, 6>> counts_by_node;
+    for (const CyclicAuditRow& row : rows) {
+        auto& counts = counts_by_node[row.node];
+        const int index = static_cast<int>(row.record.classification);
+        counts[static_cast<std::size_t>(index)] += 1;
+    }
+    for (const auto& [node, counts] : counts_by_node) {
+        int total = 0;
+        for (const int count : counts) {
+            total += count;
+        }
+        md << "| " << node << " | " << total << " | "
+           << counts[0] << " | " << counts[1] << " | "
+           << counts[2] << " | " << counts[3] << " | "
+           << counts[4] << " | " << counts[5] << " |\n";
+    }
+
+    md << "\n## Per Sample\n\n";
+    md << "| Node | Type | Parameter | Clip | Frames | Seam ratio | "
+          "Root ratio | Yaw ratio | Contact drift | Classification |\n";
+    md << "|---|---|---|---|---:|---:|---:|---:|---:|---|\n";
+    for (const CyclicAuditRow& row : rows) {
+        const pmg::CyclicContinuityRecord& r = row.record;
+        md << "| " << row.node << " | " << row.sample_type << " | `"
+           << JoinParameter(row.parameter) << "` | `" << row.source_clip
+           << "` | " << row.num_frames << " | " << r.seam_step_ratio
+           << " | " << r.root_speed_ratio << " | " << r.yaw_rate_ratio
+           << " | " << r.max_contact_drift << " | "
+           << pmg::CyclicContinuityClassificationName(r.classification)
+           << " |\n";
+    }
+
+    std::vector<CyclicAuditRow> ranked = rows;
+    std::sort(
+        ranked.begin(), ranked.end(),
+        [](const CyclicAuditRow& left, const CyclicAuditRow& right) {
+            const auto worst = [](const CyclicAuditRow& row) {
+                return std::max({
+                    row.record.seam_step_ratio,
+                    row.record.root_speed_ratio,
+                    row.record.yaw_rate_ratio,
+                });
+            };
+            return worst(left) < worst(right);
+        });
+
+    md << "\n## Strongest Cyclic Anchors\n\n";
+    for (std::size_t index = 0; index < std::min<std::size_t>(3, ranked.size());
+         ++index) {
+        const CyclicAuditRow& row = ranked[index];
+        md << "- `" << row.node << "` " << row.sample_type << " `"
+           << JoinParameter(row.parameter) << "`: "
+           << pmg::CyclicContinuityClassificationName(
+                  row.record.classification)
+           << ", seam ratio " << row.record.seam_step_ratio
+           << ", root ratio " << row.record.root_speed_ratio
+           << ", yaw ratio " << row.record.yaw_rate_ratio << "\n";
+    }
+
+    md << "\n## Weakest Cyclic Anchors\n\n";
+    for (std::size_t offset = 0;
+         offset < std::min<std::size_t>(3, ranked.size()); ++offset) {
+        const CyclicAuditRow& row = ranked[ranked.size() - 1 - offset];
+        md << "- `" << row.node << "` " << row.sample_type << " `"
+           << JoinParameter(row.parameter) << "`: "
+           << pmg::CyclicContinuityClassificationName(
+                  row.record.classification)
+           << ", seam ratio " << row.record.seam_step_ratio
+           << ", root ratio " << row.record.root_speed_ratio
+           << ", yaw ratio " << row.record.yaw_rate_ratio << "\n";
+    }
+
+    const bool all_strong = std::all_of(
+        rows.begin(), rows.end(), [](const CyclicAuditRow& row) {
+            return row.record.classification ==
+                   pmg::CyclicContinuityClassification::kStrong;
+        });
+    md << "\n## Conclusion\n\n";
+    md << (all_strong
+               ? "Every audited cyclic sample classified strong under this "
+                 "local seam diagnostic."
+               : "At least one audited cyclic sample classified weak, so the "
+                 "current corpus should not be described as uniformly strong "
+                 "for PMG cyclic self-edge streaming.")
+       << " This diagnostic measures local seam continuity only; it does not "
+          "claim perceptual smoothness.\n";
+}
+
+int CyclicAuditCommand(
+    const CyclicAuditOptions& options,
+    const std::string& command_line) {
+    const pmg::GraphSpec spec = pmg::LoadGraphSpec(options.spec_path);
+    pmg::MotionSpacePreparationConfig preparation_config;
+    preparation_config.calibration_frames_per_second =
+        options.frames_per_second;
+    const pmg::PreparedMotionSpaces prepared =
+        pmg::PrepareMotionSpaces(spec, preparation_config);
+
+    std::vector<CyclicAuditRow> rows;
+    for (const pmg::GraphSpecNode& node : spec.nodes) {
+        const pmg::PreparedMotionSpace& prepared_node =
+            prepared.Node(node.name);
+        if (prepared_node.registration.cycle_joint.empty()) {
+            continue;
+        }
+
+        const pmg::CyclicContinuityContext context =
+            CyclicContextForNode(prepared.skeleton, prepared_node);
+        for (std::size_t example_index = 0;
+             example_index < prepared_node.authored.Examples().size();
+             ++example_index) {
+            const pmg::ExampleMotion& example =
+                prepared_node.authored.Examples()[example_index];
+            CyclicAuditRow row;
+            row.node = node.name;
+            row.sample_type = "authored";
+            row.parameter = example.parameter;
+            row.source_clip =
+                example.clip.name.empty()
+                    ? "authored_example_" + std::to_string(example_index)
+                    : example.clip.name;
+            row.num_frames = example.clip.NumFrames();
+            row.record = pmg::MeasureCyclicContinuity(
+                prepared.skeleton, example.clip, context);
+            rows.push_back(std::move(row));
+        }
+
+        for (const pmg::ParameterVector& parameter :
+             GeneratedAuditParameters(prepared_node.production)) {
+            const pmg::MotionClip clip =
+                prepared_node.production.GenerateClip(
+                    parameter, options.frames_per_second);
+            CyclicAuditRow row;
+            row.node = node.name;
+            row.sample_type = "generated";
+            row.parameter = parameter;
+            row.source_clip = "";
+            row.num_frames = clip.NumFrames();
+            row.record = pmg::MeasureCyclicContinuity(
+                prepared.skeleton, clip, context);
+            rows.push_back(std::move(row));
+        }
+    }
+
+    WriteCyclicAuditCsv(options.output_csv, rows);
+    WriteCyclicAuditMarkdown(options.output_md, options, command_line, rows);
+
+    std::cout << "cyclic_audit_rows=" << rows.size() << "\n";
+    std::cout << "cyclic_audit_csv=" << options.output_csv << "\n";
+    std::cout << "cyclic_audit_md=" << options.output_md << "\n";
+    return 0;
+}
+
 pmg::PmgBuilderConfig EffectiveEdgeConfig(
     const pmg::GraphSpecEdge& edge,
     const ValidateGraphOptions& options) {
@@ -793,6 +1192,47 @@ SpaceSweepOptions ParseSpaceSweepOptions(int argc, char** argv) {
     return options;
 }
 
+CyclicAuditOptions ParseCyclicAuditOptions(int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error("--audit-cyclic-continuity needs <spec>");
+    }
+    CyclicAuditOptions options;
+    options.spec_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(
+                    std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--output-csv") {
+            options.output_csv = require_value("--output-csv");
+        } else if (option == "--output-md") {
+            options.output_md = require_value("--output-md");
+        } else if (option == "--fps") {
+            options.frames_per_second = std::stof(require_value("--fps"));
+        } else {
+            throw std::runtime_error(
+                "unknown audit-cyclic-continuity option '" + option + "'");
+        }
+    }
+    if (options.output_csv.empty()) {
+        throw std::runtime_error(
+            "--audit-cyclic-continuity requires --output-csv");
+    }
+    if (options.output_md.empty()) {
+        throw std::runtime_error(
+            "--audit-cyclic-continuity requires --output-md");
+    }
+    if (options.frames_per_second <= 0.0f) {
+        throw std::runtime_error("--fps must be positive");
+    }
+    return options;
+}
+
 }  // namespace
 
 namespace pmgcli {
@@ -804,6 +1244,11 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
     }
     if (command == "--validate-graph" && argc >= 3) {
         return ValidateGraphCommand(ParseValidateGraphOptions(argc, argv));
+    }
+    if (command == "--audit-cyclic-continuity" && argc >= 3) {
+        return CyclicAuditCommand(
+            ParseCyclicAuditOptions(argc, argv),
+            CommandLineString(argc, argv));
     }
     return std::nullopt;
 }
