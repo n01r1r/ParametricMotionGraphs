@@ -4,14 +4,14 @@
 # conservative BAD exclusion only; playback cannot validate node semantics.
 node source_walk 1
 registration source_walk - - 3 0
-example source_walk 0.0 ../BVH/walkMoreCurve.bvh
+example source_walk 0.0 ../../BVH/walkMoreCurve.bvh
 expect source_walk spanned_axes 0
 
 node nonconvex_target 1
 registration nonconvex_target - - 3 0
-example nonconvex_target 0.0 ../BVH/walkCurve.bvh
-example nonconvex_target 0.5 ../BVH/jogCurve.bvh
-example nonconvex_target 1.0 ../BVH/walkTightCurve.bvh
+example nonconvex_target 0.0 ../../BVH/walkCurve.bvh
+example nonconvex_target 0.5 ../../BVH/jogCurve.bvh
+example nonconvex_target 1.0 ../../BVH/walkTightCurve.bvh
 expect nonconvex_target spanned_axes 1
 expect nonconvex_target corner_coverage full
 

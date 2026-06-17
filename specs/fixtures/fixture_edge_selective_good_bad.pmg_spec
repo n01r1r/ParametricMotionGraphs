@@ -4,9 +4,9 @@
 # Does not claim calibrated physical control or controller-quality playback.
 node walk 1
 registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
-example walk 0.0 ../BVH/walkCurve.bvh
-example walk 0.5 ../BVH/walkMoreCurve.bvh
-example walk 1.0 ../BVH/walkTightCurve.bvh
+example walk 0.0 ../../BVH/walkCurve.bvh
+example walk 0.5 ../../BVH/walkMoreCurve.bvh
+example walk 1.0 ../../BVH/walkTightCurve.bvh
 expect walk spanned_axes 1
 expect walk corner_coverage full
 # D6 raw-sum thresholds keep classification selective: the widest-turn source
