@@ -160,168 +160,36 @@ if(PMG_BUILD_TESTS)
     target_link_libraries(test_goal_directed_locomotion PRIVATE pmg_core)
     add_test(NAME test_goal_directed_locomotion COMMAND test_goal_directed_locomotion)
 
-    # CLI-level numeric validation on the real BVH corpus: the registered
-    # Walk(curvature) space must keep feet planted (contacts, slide) and vary
-    # smoothly across its parameter range, and must not regress the naive
-    # blend's contact metrics. --dtw-refine additionally gates the DTW-refined
-    # warps against the contact-anchor registration (measured: foot slide
-    # 0.173 -> 0.146), and --foot-lock gates IK contact locking on top of it
-    # (measured slide rate 0.41 -> 0.20, must stay below 0.6x). Thresholds
-    # carry ~40% headroom over measured values so they catch regressions, not
-    # corpus noise.
-    add_test(NAME cli_space_sweep_walk
-        COMMAND pmg_cli --space-sweep ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec walk
-            --cycle-joint LeftAnkle
-            --min-contacts 2
-            --max-foot-slide 0.25
-            --max-adjacent-step 1.8
-            --assert-no-regression
-            --dtw-refine
-            --foot-lock)
+    set(PMG_TEST_ARTIFACT_ROOT ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts)
 
-    # PMG edge construction on the production-prepared Walk(curvature) space:
-    # the edge must build with full sample coverage, keep its GOOD fraction at
-    # the corpus-calibrated raw-sum thresholds. Exact asymmetric Kovar windows
-    # expose a measured 1.0775 production/authored best-distance ratio on this
-    # corpus; cap it at 1.10 so further registration regressions still fail.
-    add_test(NAME cli_validate_graph_walk
-        COMMAND pmg_cli --validate-graph ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec
-            --cycle-joint LeftAnkle
-            --source-samples 12 --target-samples 60 --seed 7
-            --tgood 225 --tbad 250
-            --min-edge-samples 10
-            --min-good-fraction 0.9
-            --max-preparation-distance-ratio 1.10)
-
-    # Demo validation must use each spec's calibrated per-edge edge_config.
-    # Generic defaults reject these edges and would diverge from artifact builds.
-    add_test(NAME cli_validate_demo_walk_self_edge
-        COMMAND pmg_cli --validate-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_self_edge_minimal.pmg_spec)
+    # Canonical course-demo spec. This is the only viewer-facing PMG demo kept
+    # for the final clean repository.
     add_test(NAME cli_validate_demo_walk_2d
         COMMAND pmg_cli --validate-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec)
-    add_test(NAME cli_validate_demo_walk_jog
-        COMMAND pmg_cli --validate-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_jog_topology.pmg_spec)
 
-    # Corpus-curation diagnostic only: scan raw Group-B walk/jog BVHs for
-    # better cyclic cut points using the same CyclicContinuity metrics. Writes
-    # ignored test artifacts; does not mutate BVHs, specs, graph build, or
-    # runtime behavior.
-    add_test(NAME cli_search_cyclic_recuts
-        COMMAND pmg_cli --search-cyclic-recuts
-            --bvh-dir ${CMAKE_CURRENT_SOURCE_DIR}/BVH
-            --output-csv ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b.csv
-            --output-md ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b.md)
-    add_test(NAME cli_evaluate_cyclic_recuts
-        COMMAND pmg_cli --evaluate-cyclic-recuts
-            --bvh-dir ${CMAKE_CURRENT_SOURCE_DIR}/BVH
-            --output-cyclic-csv ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b_eval_cyclic.csv
-            --output-edge-csv ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b_eval_edges.csv
-            --output-md ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b_eval.md)
-
-    # Paper application A: 30 seconds of random transitions through the PMG.
-    # The worst frame-to-frame step must stay within 3x the median walking
-    # step (popping shows up as 5-20x spikes), and transitions must actually
-    # happen so the metric is not vacuous.
-    add_test(NAME cli_random_walk_walk
-        COMMAND pmg_cli --random-walk ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec
-            --cycle-joint LeftAnkle
-            --source-samples 6 --target-samples 30
-            --tgood 225 --tbad 250
-            --seconds 30
-            --min-transitions 20
-            --max-pop-ratio 3.0)
-
-    # Paper application B/C: goal-directed locomotion through semantic control
-    # (target position -> heading -> curvature). One target ahead, one behind
-    # (the behind case exercises the swing-through steering branch). Measured
-    # reach times are 3-10 s; 60 s leaves headroom.
-    add_test(NAME cli_goto_walk_ahead
-        COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec 10 10
-            --cycle-joint LeftAnkle
-            --source-samples 6 --target-samples 30
-            --tgood 225 --tbad 250
-            --seconds 60 --tolerance 3
-            --max-pop-ratio 3.0)
-    add_test(NAME cli_goto_walk_behind
-        COMMAND pmg_cli --goto ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec 0 -20
-            --cycle-joint LeftAnkle
-            --source-samples 6 --target-samples 30
-            --tgood 225 --tbad 250
-            --seconds 60 --tolerance 3
-            --max-pop-ratio 3.0)
-
-    set(PMG_TEST_ARTIFACT_ROOT ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts)
-    add_test(NAME cli_build_artifact_walk
-        COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/legacy_walk_curvature.pmg_spec
-            ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg)
-    set_tests_properties(cli_build_artifact_walk PROPERTIES
-        FIXTURES_SETUP pmg_artifact_walk)
-
-    add_test(NAME cli_random_walk_artifact
-        COMMAND pmg_cli --random-walk
-            ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg
-            --seconds 10 --min-transitions 5 --max-pop-ratio 3.0)
-    set_tests_properties(cli_random_walk_artifact PROPERTIES
-        FIXTURES_REQUIRED pmg_artifact_walk)
-
-    add_test(NAME cli_goto_artifact
-        COMMAND pmg_cli --goto
-            ${PMG_TEST_ARTIFACT_ROOT}/walk/artifact.pmg 10 10
-            --seconds 60 --tolerance 3 --max-pop-ratio 3.0)
-    set_tests_properties(cli_goto_artifact PROPERTIES
-        FIXTURES_REQUIRED pmg_artifact_walk)
-
-    add_test(NAME cli_build_artifact_walk_jog
-        COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_jog_topology.pmg_spec
-            ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/artifact.pmg)
-    set_tests_properties(cli_build_artifact_walk_jog PROPERTIES
-        FIXTURES_SETUP pmg_artifact_walk_jog)
-
-    add_test(NAME cli_random_walk_artifact_walk_jog
-        COMMAND pmg_cli --random-walk
-            ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/artifact.pmg
-            --seconds 20 --min-transitions 5 --max-pop-ratio 5.0
-            --dump-motion-csv ${PMG_TEST_ARTIFACT_ROOT}/walk_jog/motion.csv)
-    set_tests_properties(cli_random_walk_artifact_walk_jog PROPERTIES
-        FIXTURES_REQUIRED pmg_artifact_walk_jog)
-
-    add_test(NAME cli_build_artifact_selective
-        COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixture_edge_selective_good_bad.pmg_spec
-            ${PMG_TEST_ARTIFACT_ROOT}/selective/artifact.pmg)
-
-    add_test(NAME cli_build_artifact_box_shrink
-        COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixture_transition_box_shrink.pmg_spec
-            ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
-
-    # Real-BVH multidimensional parameter calibration: straight/turning and
-    # regular/fast examples produce a V7 node calibrated against turn rate and
-    # travel speed. No graph edge is required for this motion-space test.
     add_test(NAME cli_build_artifact_walk_2d
         COMMAND pmg_cli --build-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg)
 
-    # Multidimensional goal-directed control: the 2-D (turn_rate, travel_speed)
-    # node must stream end-to-end through --goto, steering both axes. Report-only
-    # (no reach assertion) since the categorical jog anchor is not a controllable
-    # arrival gait; this guards the N-D control path against regressions/crashes.
     add_test(NAME cli_goto_walk_2d
         COMMAND pmg_cli --goto
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec 10 10
-            --seconds 20 --max-pop-ratio 8.0)
+            --seconds 20
+            --max-pop-ratio 8.0)
 
-    # Diagnose must honor the spec's per-edge edge_config: walk->jog needs
-    # TGOOD=450, so the generic default would falsely report a reject (exit 1).
-    add_test(NAME cli_diagnose_walk_jog_edge
-        COMMAND pmg_cli --diagnose-graph-edge
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_jog_topology.pmg_spec walk jog)
+    # Unit fixtures. These are not presentation demos; they exercise edge
+    # classification and transition-domain shrink behavior.
+    add_test(NAME cli_build_artifact_selective
+        COMMAND pmg_cli --build-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixtures/fixture_edge_selective_good_bad.pmg_spec
+            ${PMG_TEST_ARTIFACT_ROOT}/selective/artifact.pmg)
+
+    add_test(NAME cli_build_artifact_box_shrink
+        COMMAND pmg_cli --build-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixtures/fixture_transition_box_shrink.pmg_spec
+            ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -349,7 +217,7 @@ if(PMG_BUILD_VIEWER)
         GIT_SHALLOW TRUE
     )
 
-    set(ONLY_LIBS ON CACHE BOOL "" FORCE)          # glew-cmake: build libs only
+    set(ONLY_LIBS ON CACHE BOOL "" FORCE)
     set(glew-cmake_BUILD_SHARED OFF CACHE BOOL "" FORCE)
     set(glew-cmake_BUILD_STATIC ON CACHE BOOL "" FORCE)
     FetchContent_Declare(
@@ -417,7 +285,7 @@ if(PMG_BUILD_VIEWER)
     )
 
     # Resolve the BVH corpus and spec library next to the source tree at
-    # runtime; write built artifacts into the (always-writable) build tree.
+    # runtime; write built artifacts into the always-writable build tree.
     target_compile_definitions(pmg_viewer_workspace PRIVATE
         PMG_BVH_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/BVH"
         PMG_SPEC_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/specs"
