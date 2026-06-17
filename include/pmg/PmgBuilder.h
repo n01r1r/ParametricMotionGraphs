@@ -8,6 +8,11 @@
 
 namespace pmg {
 
+enum class TransitionMetricType {
+    kKovarDirectionalPointCloud,
+    kDynamicsWindow,
+};
+
 // Configuration for sampling-based edge construction (paper §3.2).
 struct PmgBuilderConfig {
     int source_sample_count = 50;
@@ -50,6 +55,11 @@ struct PmgBuilderConfig {
     // endpoint-clamped windows, so the metric scores the real cycle-boundary
     // frames. Cross-node edges are unaffected. See DistanceGridConfig::cyclic_wrap.
     bool self_edge_cyclic_metric = false;
+    // Default preserves paper-compatible Kovar point-cloud distances and their
+    // calibrated thresholds. kDynamicsWindow is an opt-in quality extension.
+    TransitionMetricType transition_metric_type =
+        TransitionMetricType::kKovarDirectionalPointCloud;
+    TransitionMetricConfig transition_metric;
 };
 
 struct SourceSampleBuildReport {

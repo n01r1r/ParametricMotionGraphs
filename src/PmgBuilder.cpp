@@ -80,6 +80,25 @@ float PercentileSorted(const std::vector<float>& sorted, float percentile) {
     return (1.0f - alpha) * sorted[lower] + alpha * sorted[upper];
 }
 
+OptimalTransition FindConfiguredTransition(
+    const Skeleton& skeleton,
+    const MotionClip& source_clip,
+    const MotionClip& target_clip,
+    const DistanceGridConfig& edge_grid,
+    const PmgBuilderConfig& config) {
+    switch (config.transition_metric_type) {
+        case TransitionMetricType::kKovarDirectionalPointCloud:
+            return MotionDistance::FindOptimalTransitionForConvention(
+                skeleton, source_clip, target_clip, edge_grid,
+                config.transition_convention);
+        case TransitionMetricType::kDynamicsWindow:
+            return MotionDistance::FindOptimalDynamicsTransitionForConvention(
+                skeleton, source_clip, target_clip, edge_grid,
+                config.transition_metric, config.transition_convention);
+    }
+    throw std::runtime_error("PmgBuilder::BuildEdge: unknown transition metric type");
+}
+
 }  // namespace
 
 PmgEdge PmgBuilder::BuildEdge(
@@ -159,9 +178,9 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
 
         for (std::size_t target_index = 0; target_index < target_samples.size(); ++target_index) {
             const OptimalTransition transition =
-                MotionDistance::FindOptimalTransitionForConvention(
+                FindConfiguredTransition(
                     skeleton, source_clip, target_clips[target_index],
-                    edge_grid, config.transition_convention);
+                    edge_grid, config);
             const float distance = transition.distance;
             distances.push_back(distance);
 

@@ -67,6 +67,23 @@ pmg::MotionClip RotateClipY(pmg::MotionClip clip, float theta) {
     return clip;
 }
 
+pmg::MotionClip RaiseClip(pmg::MotionClip clip, float dy) {
+    for (pmg::Pose& pose : clip.frames) {
+        pose.root_position.y += dy;
+    }
+    return clip;
+}
+
+pmg::TransitionMetricConfig PositionVelocityMetricConfig() {
+    pmg::TransitionMetricConfig config;
+    config.position_weight = 1.0f;
+    config.velocity_weight = 1.0f;
+    config.acceleration_weight = 1.0f;
+    config.root_motion_weight = 0.0f;
+    config.foot_contact_weight = 0.0f;
+    return config;
+}
+
 pmg::PointCloud Cloud(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip) {
     return pmg::MotionDistance::BuildPointCloud(skeleton, clip, clip.NumFrames() / 2, clip.NumFrames());
 }
@@ -175,6 +192,82 @@ int main() {
                 pmg::TransitionWindowConvention::kKovarDirectional);
         assert(clamped.SourceCount() == 1 && clamped.TargetCount() == 1);
         assert(std::abs(clamped.At(0, 0) - wrapped.At(0, 0)) > 1.0e-3f);
+    }
+
+    // Dynamics metric uses the same point/vector alignment contract as the
+    // paper metric: translation affects positions only, not velocities or
+    // accelerations.
+    {
+        pmg::DistanceGridConfig grid_config;
+        grid_config.window_size = base.NumFrames();
+        const pmg::TransitionMetricConfig metric_config =
+            PositionVelocityMetricConfig();
+
+        const pmg::TransitionMetricResult translated =
+            pmg::MotionDistance::EvaluateDynamicsTransition(
+                skeleton, base, TranslateClip(base, 12.0f, -5.0f),
+                /*source_frame=*/0, /*target_frame=*/base.NumFrames() - 1,
+                grid_config, metric_config);
+        assert(translated.position_cost < 1.0e-3f);
+        assert(translated.velocity_cost < 1.0e-3f);
+        assert(translated.acceleration_cost < 1.0e-3f);
+
+        const pmg::TransitionMetricResult yawed =
+            pmg::MotionDistance::EvaluateDynamicsTransition(
+                skeleton, base, RotateClipY(base, 0.35f),
+                /*source_frame=*/0, /*target_frame=*/base.NumFrames() - 1,
+                grid_config, metric_config);
+        assert(yawed.position_cost < 1.0e-3f);
+        assert(yawed.velocity_cost < 1.0e-3f);
+    }
+
+    // Dynamics metric reports the directional Kovar support explicitly:
+    // source starts at i, target ends at j.
+    {
+        pmg::DistanceGridConfig grid_config;
+        grid_config.window_size = 3;
+        const pmg::TransitionMetricResult result =
+            pmg::MotionDistance::EvaluateDynamicsTransition(
+                skeleton, base, base, /*source_frame=*/2,
+                /*target_frame=*/6, grid_config,
+                PositionVelocityMetricConfig());
+        assert(result.source_first_frame == 2);
+        assert(result.source_last_frame == 4);
+        assert(result.target_first_frame == 4);
+        assert(result.target_last_frame == 6);
+        assert(result.compared_frame_count == 3);
+        assert(result.compared_joint_count == skeleton.NumJoints());
+    }
+
+    // Foot contacts are inactive unless explicit contact config and joints are
+    // supplied; with explicit config, mismatched low/high foot states add cost.
+    {
+        pmg::DistanceGridConfig grid_config;
+        grid_config.window_size = 3;
+        pmg::TransitionMetricConfig no_contact_config =
+            PositionVelocityMetricConfig();
+        no_contact_config.foot_contact_weight = 1.0f;
+        const pmg::TransitionMetricResult inactive =
+            pmg::MotionDistance::EvaluateDynamicsTransition(
+                skeleton, base, RaiseClip(base, 5.0f), /*source_frame=*/1,
+                /*target_frame=*/3, grid_config, no_contact_config);
+        assert(inactive.foot_comparison_count == 0);
+        assert(inactive.foot_cost == 0.0f);
+
+        pmg::TransitionMetricConfig contact_config = no_contact_config;
+        contact_config.contact_joint_indices = {1};
+        pmg::ContactDetectionSettings settings;
+        settings.height_threshold = 1.0f;
+        settings.speed_threshold = 1.0e6f;
+        settings.min_contact_frames = 1;
+        contact_config.contact_settings = settings;
+        const pmg::TransitionMetricResult active =
+            pmg::MotionDistance::EvaluateDynamicsTransition(
+                skeleton, base, RaiseClip(base, 5.0f), /*source_frame=*/1,
+                /*target_frame=*/3, grid_config, contact_config);
+        assert(active.foot_comparison_count == grid_config.window_size);
+        assert(active.foot_mismatch_count == grid_config.window_size);
+        assert(active.foot_cost > 0.0f);
     }
 
     return 0;

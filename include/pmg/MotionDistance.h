@@ -1,11 +1,13 @@
 #pragma once
 
 #include "pmg/MathTypes.h"
+#include "pmg/ContactDetection.h"
 #include "pmg/MotionClip.h"
 #include "pmg/RigidTransform2D.h"
 #include "pmg/Skeleton.h"
 #include "pmg/TransitionWindow.h"
 
+#include <optional>
 #include <vector>
 
 namespace pmg {
@@ -58,6 +60,57 @@ struct DistanceGridConfig {
     // cycle frames rather than a repeated endpoint. Only valid for a single
     // cyclic clip (self-edge); leave false for cross-node clips.
     bool cyclic_wrap = false;
+};
+
+// Default-off transition-quality extension. Costs are RMS values divided by
+// explicit native-unit scales before weighting; scales must be calibrated for
+// each corpus/unit convention before thresholds are interpreted physically.
+struct TransitionMetricConfig {
+    float position_weight = 1.0f;
+    float velocity_weight = 0.1f;
+    float acceleration_weight = 0.01f;
+    float root_motion_weight = 0.5f;
+    float foot_contact_weight = 1.0f;
+
+    float position_scale = 1.0f;
+    float velocity_scale = 1.0f;
+    float acceleration_scale = 1.0f;
+    float root_speed_scale = 1.0f;
+    float yaw_rate_scale = 1.0f;
+
+    float root_displacement_weight = 1.0f;
+    float root_speed_weight = 1.0f;
+    float root_yaw_rate_weight = 1.0f;
+    float foot_mismatch_penalty = 1.0f;
+
+    std::vector<float> per_joint_weights;
+    std::vector<int> contact_joint_indices;
+    std::optional<ContactDetectionSettings> contact_settings;
+};
+
+struct TransitionMetricResult {
+    float position_cost = 0.0f;
+    float velocity_cost = 0.0f;
+    float acceleration_cost = 0.0f;
+    float root_cost = 0.0f;
+    float foot_cost = 0.0f;
+    float total_cost = 0.0f;
+
+    float raw_position_sse = 0.0f;
+    float raw_velocity_sse = 0.0f;
+    float raw_acceleration_sse = 0.0f;
+
+    int compared_frame_count = 0;
+    int compared_joint_count = 0;
+    int foot_mismatch_count = 0;
+    int foot_comparison_count = 0;
+
+    int source_first_frame = 0;
+    int source_last_frame = 0;
+    int target_first_frame = 0;
+    int target_last_frame = 0;
+
+    RigidTransform2D alignment;
 };
 
 // Aligned point-cloud distance for every sampled (source_frame, target_frame)
@@ -131,6 +184,28 @@ public:
         const DistanceGridConfig& config,
         TransitionWindowConvention convention);
 
+    // Opt-in dynamics/contact extension over the same directional transition
+    // windows. Alignment is estimated from positions; position uses the full
+    // rigid transform, velocity/acceleration/root deltas use yaw rotation only.
+    static TransitionMetricResult EvaluateDynamicsTransition(
+        const Skeleton& skeleton,
+        const MotionClip& source_clip,
+        const MotionClip& target_clip,
+        int source_frame,
+        int target_frame,
+        const DistanceGridConfig& grid_config,
+        const TransitionMetricConfig& metric_config,
+        TransitionWindowConvention convention =
+            TransitionWindowConvention::kKovarDirectional);
+
+    static DistanceGrid BuildDynamicsDistanceGridForConvention(
+        const Skeleton& skeleton,
+        const MotionClip& source_clip,
+        const MotionClip& target_clip,
+        const DistanceGridConfig& grid_config,
+        const TransitionMetricConfig& metric_config,
+        TransitionWindowConvention convention);
+
     // Minimum cell of the distance grid. The result is `valid` only when the
     // minimum distance is <= `max_distance` (default: accept any finite cell).
     static OptimalTransition FindOptimalTransition(
@@ -145,6 +220,15 @@ public:
         const MotionClip& source_clip,
         const MotionClip& target_clip,
         const DistanceGridConfig& config,
+        TransitionWindowConvention convention,
+        float max_distance = std::numeric_limits<float>::infinity());
+
+    static OptimalTransition FindOptimalDynamicsTransitionForConvention(
+        const Skeleton& skeleton,
+        const MotionClip& source_clip,
+        const MotionClip& target_clip,
+        const DistanceGridConfig& grid_config,
+        const TransitionMetricConfig& metric_config,
         TransitionWindowConvention convention,
         float max_distance = std::numeric_limits<float>::infinity());
 };

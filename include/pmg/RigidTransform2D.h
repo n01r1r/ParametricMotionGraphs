@@ -36,6 +36,20 @@ struct RigidTransform2D {
         out_z += dz;
     }
 
+    Vec3 ApplyPoint(const Vec3& point) const {
+        float aligned_x = 0.0f;
+        float aligned_z = 0.0f;
+        ApplyFloor(point.x, point.z, aligned_x, aligned_z);
+        return {aligned_x, point.y, aligned_z};
+    }
+
+    Vec3 ApplyVector(const Vec3& vector) const {
+        float rotated_x = 0.0f;
+        float rotated_z = 0.0f;
+        RotateFloor(vector.x, vector.z, rotated_x, rotated_z);
+        return {rotated_x, vector.y, rotated_z};
+    }
+
     // Apply to a clip-local pose, producing a world-space pose: the root's
     // (x, z) is mapped through the transform and the root joint's facing is
     // yawed by `yaw`. y and all non-root local rotations are unchanged.

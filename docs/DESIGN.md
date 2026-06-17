@@ -110,6 +110,29 @@ The edge build fails immediately when one sampled source has no GOOD target, an
 empty adjusted box, no retained GOOD target inside the box, or a sampled BAD
 target still inside the box.
 
+### Transition metric extension
+
+`PmgBuilderConfig::transition_metric_type` defaults to
+`kKovarDirectionalPointCloud`, preserving the existing Kovar directional
+point-cloud metric and its raw squared-sum thresholds. `kDynamicsWindow` is an
+opt-in repository extension for transition-quality experiments. It uses the
+same metric support convention, source `[i, i+k-1]` and target `[j-k+1, j]`,
+but computes a weighted total from RMS-normalized terms:
+
+- joint position error in native BVH units;
+- joint velocity error in native units/s;
+- joint acceleration error in native units/s^2, with zero acceleration at clip
+  endpoints;
+- root floor displacement, root speed profile, and root yaw-rate profile;
+- explicit foot-contact mismatch ratio.
+
+The planar alignment is estimated from weighted joint positions. Positions use
+the full yaw+translation transform; velocity, acceleration, and root deltas use
+yaw rotation only. Each term is divided by its configured scale before weighting,
+so thresholds for this metric are separate calibration artifacts. Foot-contact
+cost is exactly zero unless the caller supplies contact settings and valid
+contact joint indices; the metric never guesses contact joints from names.
+
 ### Artifact boundary
 
 ```text
