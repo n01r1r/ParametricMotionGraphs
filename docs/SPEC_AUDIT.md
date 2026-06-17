@@ -102,7 +102,8 @@ Distances are raw weighted squared sums in native BVH units. They are only
 comparable under this skeleton, window, weighting, registration, and sampling
 configuration.
 
-No spec declares `edge_phase_range`. Every edge uses:
+Current specs declare the advancing `edge_phase_range` explicitly. Every edge
+uses:
 
 ```text
 source phase [0.70, 0.95]
@@ -128,7 +129,7 @@ edges. This supports advancing intent. It does not prove smooth advancement.
 
 ## Spec Configuration Catalog
 
-All edges below use default phase ranges
+All edges below declare phase ranges
 `[0.70,0.95] -> [0.05,0.30]`, five-frame directional metric windows, and
 centered runtime blend placement.
 
@@ -154,7 +155,8 @@ duplicate samples collapse in zero-volume domains.
 - One 1-D `walk` motion space.
 - `walkCurve` at `0` and `walkTightCurve` at `1`.
 - Cycle extraction, ankle registration, and DTW refinement.
-- One self-edge with `TGOOD=225`, `TBAD=250`, `12/60` samples, seed `7`.
+- One self-edge with phase range `[0.70,0.95] -> [0.05,0.30]`,
+  `TGOOD=225`, `TBAD=250`, `12/60` samples, seed `7`.
 
 #### Node validity
 
@@ -174,8 +176,8 @@ control rather than a calibrated physical turn-rate request.
 
 #### Edge validity
 
-The self-edge is conceptually correct for repeated locomotion and uses the
-advancing default phase policy. At the widest-turn source, targets above about
+The self-edge is conceptually correct for repeated locomotion and declares the
+advancing late-source/early-target phase policy. At the widest-turn source, targets above about
 `0.69` become NEUTRAL; no targets become BAD because `TBAD=250` exceeds the
 observed maximum. Other sampled sources admit the full target interval.
 

@@ -7,7 +7,10 @@ registration walk LeftAnkle LeftAnkle,RightAnkle 3 1
 example walk 0.0 ../BVH/walkCurve.bvh
 example walk 0.5 ../BVH/walkMoreCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
+expect walk spanned_axes 1
+expect walk corner_coverage full
 # D6 raw-sum thresholds keep classification selective: the widest-turn source
 # sees GOOD, NEUTRAL, and BAD targets while tight-turn sources stay fully GOOD.
 edge walk walk
+edge_phase_range walk walk 0.70 0.95 0.05 0.30
 edge_config walk walk 203 210 12 60 7

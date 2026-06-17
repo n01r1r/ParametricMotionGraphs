@@ -12,6 +12,9 @@ registration nonconvex_target - - 3 0
 example nonconvex_target 0.0 ../BVH/walkCurve.bvh
 example nonconvex_target 0.5 ../BVH/jogCurve.bvh
 example nonconvex_target 1.0 ../BVH/walkTightCurve.bvh
+expect nonconvex_target spanned_axes 1
+expect nonconvex_target corner_coverage full
 
 edge source_walk nonconvex_target
+edge_phase_range source_walk nonconvex_target 0.70 0.95 0.05 0.30
 edge_config source_walk nonconvex_target 10 100 4 100 31

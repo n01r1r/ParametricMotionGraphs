@@ -70,6 +70,7 @@ example walk 0.0 ../BVH/walkCurve.bvh
 example walk 0.5 ../BVH/walkMoreCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
 edge walk walk
+edge_phase_range walk walk 0.70 0.95 0.05 0.30
 edge_config walk walk 225 250 12 60 7
 ```
 

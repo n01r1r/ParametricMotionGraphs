@@ -9,7 +9,10 @@ parameter_metric walk turn_rate
 example walk 0.0 ../BVH/walkCurve.bvh
 example walk 0.5 ../BVH/walkMoreCurve.bvh
 example walk 1.0 ../BVH/walkTightCurve.bvh
+expect walk spanned_axes 1
+expect walk corner_coverage full
 edge walk walk
 # Thresholds calibrated for D6's asymmetric windows and raw weighted squared
 # sum. Values are specific to this 31-joint corpus and five-frame window.
+edge_phase_range walk walk 0.70 0.95 0.05 0.30
 edge_config walk walk 225 250 12 60 7

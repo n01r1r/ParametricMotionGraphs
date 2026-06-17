@@ -52,6 +52,9 @@ added with the spec-expectation validator):
 - `demo_walk_self_edge_minimal` declares `expect walk corner_coverage full`
   because its 1-D
   axis genuinely samples both extremes.
+- `demo_walk_jog_topology` declares full 1-D walk coverage and singleton jog
+  dimensionality separately, so topology remains explicit without implying a
+  parameterized jog family.
 
 ## Consequences
 

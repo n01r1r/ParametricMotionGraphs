@@ -29,4 +29,7 @@ expect walk_2d spanned_axes 2
 # outside the authored triangle remain valid AABB requests and may synthesize
 # sparse three-example blends.
 edge walk_2d walk_2d
+# Explicit default advancing phase range. This does not enforce triangular
+# support; it only fixes where the transition metric searches within cycles.
+edge_phase_range walk_2d walk_2d 0.70 0.95 0.05 0.30
 edge_config walk_2d walk_2d 300 400 3 6 41
