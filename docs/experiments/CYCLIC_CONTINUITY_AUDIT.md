@@ -1,6 +1,6 @@
 # Cyclic Continuity Audit
 
-Last updated: 2026-06-16.
+Last updated: 2026-06-17.
 
 ## Purpose
 
@@ -114,6 +114,23 @@ Further PMG core, window, or threshold changes are not justified by this audit.
 The next improvement should be walk clip/corpus curation. Tuning around input
 seam defects could hide corpus issues without making cyclic anchors strong.
 
+## Feedback Loop Added 2026-06-17
+
+The cyclic audit is now surfaced at artifact consumption points, not only as a
+separate offline command:
+
+- `pmg_cli --build-graph` prints a cyclic continuity warning when a built
+  artifact contains weak cyclic samples;
+- generated `metrics.json` records cyclic strong/weak sample counts;
+- generated `report.md` records the same warning at build time;
+- the viewer reports the warning when a `.pmg_spec` build or artifact load
+  installs a graph.
+
+This is an invertible diagnostic change. It does not modify BVH files, graph
+specs, registration, edge thresholds, runtime scheduling, or transition
+blending. Reverting the warning/report API and viewer/CLI call sites restores
+the prior behavior without artifact migration.
+
 ## Checklist
 
 - [x] Diagnostic-only module added.
@@ -123,3 +140,4 @@ seam defects could hide corpus issues without making cyclic anchors strong.
 - [x] CTest passed.
 - [x] No specs, edge thresholds, runtime scheduling, edge lookup, or blend logic
       changed.
+- [x] Artifact build/load feedback loop added without changing runtime behavior.

@@ -223,6 +223,13 @@ expands to the runtime blend-frame count when that is larger.
 the current CLI does not claim to detect raw cyclic seams. The Module does not
 alter edge lookup, scheduling, alignment, blending, thresholds, or graph specs.
 
+`CyclicContinuity` is the separate raw-loop diagnostic for nodes that declare a
+cycle joint. It measures last-frame to next-cycle-first-frame continuity under
+the same `ComputeCycleDelta` used by runtime cycle folding. Artifact build/load
+summaries now surface weak cyclic samples in CLI reports and in the viewer, but
+this feedback loop is diagnostic-only: it does not alter edge lookup,
+scheduling, alignment, blending, thresholds, or graph specs.
+
 `TransitionQualityGateConfig` adds an opt-in ablation contract over one quality
 record. `pmg_cli --quality-gate` evaluates a prospective copy of the runtime
 controller over the same diagnostic support before scheduling the live

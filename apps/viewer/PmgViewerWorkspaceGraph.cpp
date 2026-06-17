@@ -15,6 +15,7 @@
 
 #include "pmg/GraphSpec.h"
 #include "pmg/MathTypes.h"
+#include "pmg/CyclicContinuity.h"
 #include "pmg/SkeletonCompatibility.h"
 
 namespace pmgviewer {
@@ -246,7 +247,12 @@ void PmgViewerWorkspace::AdoptArtifact(
     graph_open_runtime_tab_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
     playing_ = true;
+    graph_cyclic_warning_ = pmg::FormatCyclicContinuityWarning(
+        pmg::SummarizeArtifactCyclicContinuity(adopted));
     graph_status_ = status_label;
+    if (!graph_cyclic_warning_.empty()) {
+        graph_status_ += " | " + graph_cyclic_warning_;
+    }
     status_message_ = graph_status_;
 }
 
@@ -326,6 +332,7 @@ void PmgViewerWorkspace::BuildGraphRuntime() {
     graph_ready_ = false;
     graph_origin_ = GraphOrigin::None;
     graph_controller_.reset();
+    graph_cyclic_warning_.clear();
     // The sandbox self-edge graph has no backing artifact; drop any retained one
     // so "Save artifact" cannot write stale metadata from a prior build/load.
     source_artifact_.reset();
@@ -381,6 +388,7 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     graph_ready_ = false;
     graph_controller_.reset();
     source_artifact_.reset();
+    graph_cyclic_warning_.clear();
     steering_.reset();
     goto_active_ = false;
     goto_status_.clear();
@@ -1520,6 +1528,12 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
         "%s | %d nodes, %d edges | %s",
         GraphOriginLabel(), graph_.NumNodes(), graph_.NumEdges(),
         GraphPersistenceLabel());
+    if (!graph_cyclic_warning_.empty()) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.78f, 0.35f, 1.0f),
+            "%s",
+            graph_cyclic_warning_.c_str());
+    }
     if (source_artifact_.has_value()) {
         ImGui::SetNextItemWidth(200.0f);
         ImGui::InputTextWithHint(

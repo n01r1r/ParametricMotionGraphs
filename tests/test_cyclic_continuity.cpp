@@ -208,6 +208,38 @@ void TestInsufficientDataDoesNotCrash() {
            pmg::CyclicContinuityClassification::kInsufficientData);
 }
 
+void TestArtifactSummaryWarnsForWeakCyclicNode() {
+    const pmg::Skeleton skeleton = MakeSkeleton();
+    pmg::ParametricMotionSpace space("walk", 1);
+    space.AddExample({0.0f}, MakeClip({
+                               MakePose(0.0f, 0.0f, 0.0f),
+                               MakePose(0.0f, 0.0f, 0.1f),
+                               MakePose(0.0f, 0.0f, 0.2f),
+                               MakePose(0.0f, 0.0f, 0.3f),
+                               MakePose(0.0f, 0.0f, 2.5f),
+                           }));
+
+    pmg::BuiltPmgArtifact artifact;
+    artifact.skeleton = skeleton;
+    artifact.graph.AddNode("walk", space);
+    artifact.metadata.node_registrations.push_back(
+        {"walk", "root", {}, 3, false});
+
+    pmg::CyclicContinuityConfig config;
+    config.root_speed_ratio_threshold = 100.0f;
+    config.yaw_rate_ratio_threshold = 100.0f;
+    const pmg::CyclicContinuityGraphSummary summary =
+        pmg::SummarizeArtifactCyclicContinuity(artifact, config);
+    const std::string warning =
+        pmg::FormatCyclicContinuityWarning(summary);
+
+    assert(summary.cyclic_sample_count == 1);
+    assert(summary.weak_pose_seam_count == 1);
+    assert(summary.strong_count == 0);
+    assert(warning.find("Cyclic continuity warning") != std::string::npos);
+    assert(warning.find("weak_pose_seam") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -218,5 +250,6 @@ int main() {
     TestZeroSeamRatesDoNotExplodeRatios();
     TestPoseSeamPrecedesContactWeakness();
     TestInsufficientDataDoesNotCrash();
+    TestArtifactSummaryWarnsForWeakCyclicNode();
     return 0;
 }

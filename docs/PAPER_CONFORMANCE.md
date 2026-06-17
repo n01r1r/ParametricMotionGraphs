@@ -119,6 +119,7 @@ same-phase transitions; see `docs/WALK_JOG_CONTINUITY.md`.
 | n-way pose blend is order-independent | ✓ | `BlendPoseN` hemisphere-aligned weighted quaternion mean | `src/PoseBlend.cpp` |
 | Random graph walk | ✓ | `ChooseRandomOutgoingTransition` | `include/pmg/GoalDirectedLocomotion.h:87` |
 | Per-transition diagnostics (chosen edge, reachable box, clamped target, phases, D, pose pop, root speed, yaw rate, foot drift, classification) | ✓ | `RuntimeTransitionDiagnostics`; `TransitionQuality`; `pmg_cli --random-walk --dump-transitions-csv` | `include/pmg/RuntimeController.h`; `include/pmg/TransitionQuality.h`; `apps/PmgRuntimeCommands.cpp` |
+| Raw cyclic-seam feedback at artifact build/load | ✓ | `SummarizeArtifactCyclicContinuity`; `pmg_cli --build-graph` reports; viewer warning | `include/pmg/CyclicContinuity.h`; `apps/PmgGraphCommands.cpp`; `apps/viewer/PmgViewerWorkspaceGraph.cpp` |
 | Goal-directed locomotion (thesis Ch. 6) | ◐ | `GoalDirectedLocomotion` (per-axis greedy steering; not branch-and-bound) | `include/pmg/GoalDirectedLocomotion.h:48` |
 | Multidimensional runtime control | ✓ | per-axis calibration + inversion drives all axes (turn_rate heading, travel_speed pace) | `src/GoalDirectedLocomotion.cpp` |
 

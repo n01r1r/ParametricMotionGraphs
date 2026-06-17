@@ -1,6 +1,6 @@
 # Walk/Jog Continuity and Control Audit
 
-Last updated: 2026-06-16.
+Last updated: 2026-06-17.
 
 ## Purpose
 
@@ -20,6 +20,12 @@ root/yaw ratios compare pre/post in-clip rates, not the near-zero seam rates.
 Generated walk samples remain in the authored-anchor range, so they are not the
 primary culprit. See
 [`docs/experiments/CYCLIC_CONTINUITY_AUDIT.md`](experiments/CYCLIC_CONTINUITY_AUDIT.md).
+
+Update 2026-06-17: artifact build/load now exposes this diagnostic directly.
+`pmg_cli --build-graph` emits a cyclic continuity warning, build reports store
+cyclic strong/weak counts, and the viewer displays the same warning after
+loading or building a graph. This is a feedback loop only; it leaves BVH clips,
+specs, registration, edge thresholds, and runtime scheduling unchanged.
 
 The remaining walk interruption was caused by viewer request policy, not
 world-space root placement.

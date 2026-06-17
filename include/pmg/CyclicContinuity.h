@@ -2,10 +2,13 @@
 
 #include "pmg/ContactDetection.h"
 #include "pmg/MotionClip.h"
+#include "pmg/PmgArtifact.h"
 #include "pmg/RigidTransform2D.h"
 #include "pmg/Skeleton.h"
 
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace pmg {
 
@@ -69,6 +72,24 @@ struct CyclicContinuityRecord {
         CyclicContinuityClassification::kInsufficientData;
 };
 
+struct CyclicContinuitySampleSummary {
+    std::string node_name;
+    ParameterVector parameter;
+    std::string clip_name;
+    CyclicContinuityRecord record;
+};
+
+struct CyclicContinuityGraphSummary {
+    int cyclic_sample_count = 0;
+    int strong_count = 0;
+    int weak_pose_seam_count = 0;
+    int weak_root_speed_count = 0;
+    int weak_yaw_rate_count = 0;
+    int weak_contact_count = 0;
+    int insufficient_data_count = 0;
+    std::vector<CyclicContinuitySampleSummary> samples;
+};
+
 // Rigid floor transform that maps the first frame of a cyclic clip onto its
 // final frame. Runtime cycle folding and cyclic diagnostics share this helper
 // so seam measurements use exactly the placement rule used during streaming.
@@ -93,6 +114,18 @@ CyclicContinuityRecord MeasureCyclicContinuity(
     const MotionClip& clip,
     const CyclicContinuityContext& context = {},
     const CyclicContinuityConfig& config = {});
+
+// Summarizes cyclic seam quality for every artifact node that declares a
+// non-empty cycle_joint in metadata. This is diagnostic-only: it does not
+// mutate clips, graph edges, runtime scheduling, or thresholds.
+CyclicContinuityGraphSummary SummarizeArtifactCyclicContinuity(
+    const BuiltPmgArtifact& artifact,
+    const CyclicContinuityConfig& config = {});
+
+// Human-facing one-line warning. Empty means the artifact has no cyclic weak
+// samples under the configured thresholds.
+std::string FormatCyclicContinuityWarning(
+    const CyclicContinuityGraphSummary& summary);
 
 const char* CyclicContinuityClassificationName(
     CyclicContinuityClassification classification);

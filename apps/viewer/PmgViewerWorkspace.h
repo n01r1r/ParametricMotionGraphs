@@ -190,6 +190,7 @@ private:
     int selected_file_index_ = -1;
     char clip_filter_[64] = "";  // case-insensitive substring filter for the clip list
     std::string status_message_ = "No clip loaded.";
+    std::string graph_cyclic_warning_;
 
     // Spec library (multi-node graph authoring source) and the artifact most
     // recently built/loaded, kept whole so "Save artifact" is lossless.

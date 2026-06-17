@@ -1,6 +1,7 @@
 #include "PmgCommandModules.h"
 
 #include "pmg/AlignmentStrategy.h"
+#include "pmg/CyclicContinuity.h"
 #include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
@@ -357,6 +358,10 @@ void WriteArtifactReports(
         }
     }
     const ArtifactRuntimeMetrics runtime = BenchmarkArtifact(artifact);
+    const pmg::CyclicContinuityGraphSummary cyclic_summary =
+        pmg::SummarizeArtifactCyclicContinuity(artifact);
+    const std::string cyclic_warning =
+        pmg::FormatCyclicContinuityWarning(cyclic_summary);
 
     {
         std::ofstream config(output_directory / "config.json");
@@ -440,6 +445,18 @@ void WriteArtifactReports(
                      << "  \"runtime_transitions\": " << runtime.transitions << ",\n"
                      << "  \"runtime_frames_per_second\": "
                      << runtime.runtime_frames_per_second << ",\n"
+                     << "  \"cyclic_samples\": "
+                     << cyclic_summary.cyclic_sample_count << ",\n"
+                     << "  \"cyclic_strong_samples\": "
+                     << cyclic_summary.strong_count << ",\n"
+                     << "  \"cyclic_weak_pose_seam_samples\": "
+                     << cyclic_summary.weak_pose_seam_count << ",\n"
+                     << "  \"cyclic_weak_root_speed_samples\": "
+                     << cyclic_summary.weak_root_speed_count << ",\n"
+                     << "  \"cyclic_weak_yaw_rate_samples\": "
+                     << cyclic_summary.weak_yaw_rate_count << ",\n"
+                     << "  \"cyclic_weak_contact_samples\": "
+                     << cyclic_summary.weak_contact_count << ",\n"
                      << "  \"target_10_10_min_distance\": ";
         if (std::isfinite(runtime.target_min_distance)) {
             metrics_file << runtime.target_min_distance;
@@ -504,7 +521,14 @@ void WriteArtifactReports(
                << (std::isfinite(runtime.target_min_distance)
                        ? std::to_string(runtime.target_min_distance)
                        : std::string("not applicable"))
-               << "\n\n"
+               << "\n"
+               << "- Cyclic strong samples: "
+               << cyclic_summary.strong_count << " / "
+               << cyclic_summary.cyclic_sample_count << "\n";
+        if (!cyclic_warning.empty()) {
+            report << "- Warning: " << cyclic_warning << "\n";
+        }
+        report << "\n"
                << "## Limitations\n\n"
                << "- This validates renderer-conditioned PMG behavior on the "
                   "included BVH corpus; it does not reproduce the paper's "
@@ -544,6 +568,11 @@ int BuildGraphCommand(const std::string& spec_path,
                       << " -> " << edge_build.target_node << "': "
                       << edge_build.report.reject_reason << "\n";
         }
+    }
+    const std::string cyclic_warning = pmg::FormatCyclicContinuityWarning(
+        pmg::SummarizeArtifactCyclicContinuity(artifact));
+    if (!cyclic_warning.empty()) {
+        std::cout << "warning: " << cyclic_warning << "\n";
     }
     std::cout << "skeleton_joints=" << artifact.skeleton.NumJoints() << "\n";
     std::cout << "generated_frame_count="
