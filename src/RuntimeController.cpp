@@ -377,8 +377,15 @@ void RuntimeController::TryScheduleTransition(
             continue;
         }
 
-        const ParameterVector target_parameter =
-            transition->target_parameter_box.Clamp(request.desired_parameter);
+        ParameterVector p = target_node.motion_space.ProjectToSupport(request.desired_parameter);
+        p = transition->target_parameter_box.Clamp(p);
+        p = target_node.motion_space.ProjectToSupport(p);
+
+        // TODO: Exact projection to support ∩ reachable_box is not currently implemented.
+        // The second projection guarantees the target is inside the simplex support (preventing
+        // invalid extrapolations like the missing (1,1) corner), but it may push the parameter
+        // slightly outside the AABB reachable box if the box boundary and simplex face are not aligned.
+        const ParameterVector target_parameter = p;
 
         next_clip_ = target_node.motion_space.GenerateClip(
             target_parameter,

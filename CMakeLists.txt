@@ -170,7 +170,7 @@ if(PMG_BUILD_TESTS)
     # Canonical course-demo spec. This is the only viewer-facing PMG demo kept
     # for the final clean repository.
     add_test(NAME cli_validate_demo_walk_2d
-        COMMAND pmg_cli --validate-graph
+        COMMAND pmg_cli --validate-graph-spec
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec)
 
     add_test(NAME cli_build_artifact_walk_2d

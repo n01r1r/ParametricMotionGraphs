@@ -3,8 +3,10 @@
 #include "pmg/MotionClip.h"
 #include "pmg/ParameterVector.h"
 #include "pmg/ParameterDomain.h"
+#include "pmg/ParameterSupport.h"
 #include "pmg/TimeWarp.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -88,6 +90,14 @@ public:
     bool HasParameterCalibration() const;
     const ParameterCalibration& ParameterCalibrationData() const;
 
+    void SetParameterSupport(ParameterSupport support);
+    const std::optional<ParameterSupport>& ExplicitSupport() const;
+    bool HasExplicitParameterSupport() const;
+
+    ParameterVector ProjectToSupport(const ParameterVector& parameter) const;
+    bool ContainsSupportedParameter(const ParameterVector& parameter) const;
+    ParameterVector SampleSupportedParameter(std::mt19937& rng) const;
+
     std::vector<float> ComputeLocalBlendWeights(
         const ParameterVector& parameter) const;
 
@@ -135,6 +145,7 @@ private:
     std::vector<TimeWarp> example_time_warps_;
     // Empty metrics means uncalibrated (Shepard weights).
     ParameterCalibration parameter_calibration_;
+    std::optional<ParameterSupport> parameter_support_;
 
     friend ParameterCalibration CalibrateParameterMetrics(
         const ParametricMotionSpace& space,

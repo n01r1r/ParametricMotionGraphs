@@ -114,6 +114,10 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
                                      "' has no examples");
         }
 
+        if (node.parameter_support_simplex) {
+            authored.SetParameterSupport(ParameterSupport(authored.ExampleParameters()));
+        }
+
         stages.authored = authored;
         ParametricMotionSpace production = authored;
 
@@ -164,6 +168,11 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
         }
 
         stages.production = std::move(production);
+        
+        if (node.parameter_support_simplex && !stages.production.HasExplicitParameterSupport()) {
+            throw std::runtime_error("PrepareMotionSpaces: production space lost explicit parameter support");
+        }
+
         const auto insertion = prepared.nodes.emplace(node.name, std::move(stages));
         if (!insertion.second) {
             throw std::runtime_error("PrepareMotionSpaces: duplicate node '" + node.name + "'");

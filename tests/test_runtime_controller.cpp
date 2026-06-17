@@ -409,5 +409,57 @@ int main() {
         assert(acyclic_diag.scheduled_target_start_seconds >= 0.0f);
     }
 
+    // Simplex support: request outside support boundary
+    {
+        int simplex_node = -1;
+        pmg::ParametricMotionSpace space("simplex", 2);
+        space.AddExample({0.0f, 0.0f}, MakeWalkClip(0.0f));
+        space.AddExample({1.0f, 0.0f}, MakeWalkClip(1.0f));
+        space.AddExample({0.0f, 1.0f}, MakeWalkClip(1.0f));
+        space.SetParameterSupport(pmg::ParameterSupport(space.ExampleParameters()));
+
+        pmg::ParametricMotionGraph simplex_graph;
+        simplex_node = simplex_graph.AddNode("simplex", space);
+
+        pmg::PmgEdge edge;
+        edge.source_node = simplex_node;
+        edge.target_node = simplex_node;
+        edge.samples.push_back({
+            {0.5f, 0.0f},
+            {{0.0f, 0.0f}, {1.0f, 1.0f}},
+            0.5f,
+            0.5f,
+        });
+        simplex_graph.AddEdge(std::move(edge));
+
+        pmg::RootOnlyAlignment alignment;
+        pmg::RuntimeControllerConfig config;
+        pmg::RuntimeController c(simplex_graph, alignment, config);
+        c.Start(simplex_node, {0.5f, 0.0f}, kFramesPerSecond);
+
+        pmg::RuntimeControlRequest req;
+        req.desired_node = simplex_node;
+        // Outside the simplex x+y <= 1
+        req.desired_parameter = {1.0f, 1.0f};
+
+        bool transitioned = false;
+        for (int step = 0; step < 120; ++step) {
+            c.Update(delta_seconds, req);
+            if (c.IsTransitioning()) {
+                const auto diagnostics = c.ActiveTransitionDiagnostics();
+                assert(diagnostics.has_value());
+                assert(diagnostics->requested_target_parameter.size() == 2);
+                assert(diagnostics->requested_target_parameter[0] == 1.0f);
+                assert(diagnostics->requested_target_parameter[1] == 1.0f);
+                // The projection of (1, 1) onto the simplex ((0,0), (1,0), (0,1)) is (0.5, 0.5)
+                assert(std::abs(diagnostics->actual_target_parameter[0] - 0.5f) < 1.0e-5f);
+                assert(std::abs(diagnostics->actual_target_parameter[1] - 0.5f) < 1.0e-5f);
+                transitioned = true;
+                break;
+            }
+        }
+        assert(transitioned);
+    }
+
     return 0;
 }

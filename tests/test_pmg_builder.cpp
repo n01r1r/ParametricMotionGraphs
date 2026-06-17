@@ -62,6 +62,7 @@ pmg::ParametricMotionSpace MakeTriangleSpace() {
     space.AddExample({0.0f, 0.0f}, MakeLoopClip2D({0.0f, 0.0f}));
     space.AddExample({1.0f, 0.0f}, MakeLoopClip2D({1.0f, 0.0f}));
     space.AddExample({0.0f, 1.0f}, MakeLoopClip2D({0.0f, 1.0f}));
+    space.SetParameterSupport(pmg::ParameterSupport(space.ExampleParameters()));
     return space;
 }
 

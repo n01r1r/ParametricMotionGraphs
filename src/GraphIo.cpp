@@ -27,19 +27,21 @@ struct GraphPayloadFormat {
     bool has_transition_convention;  // V8+ store the edge transition-window convention
     bool has_transition_distance;    // V9+ store per-sample build-time distance D
     bool has_transition_metric_config;  // V10+ store metric kind/config per edge build
+    bool has_parameter_support;      // V11+ store explicit parameter support
 };
 
 std::optional<GraphPayloadFormat> FormatForHeader(const std::string& header) {
-    //                                       meta+skel warp  calib vector target quoted conv   dist   metric
-    if (header == "PMG_GRAPH_V10") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true};
-    if (header == "PMG_GRAPH_V9")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  false};
-    if (header == "PMG_GRAPH_V8")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  false, false};
-    if (header == "PMG_GRAPH_V7")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false, false, false};
-    if (header == "PMG_GRAPH_V6")  return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false, false, false};
-    if (header == "PMG_GRAPH_V5")  return GraphPayloadFormat{true,  true,  true,  false, false, true,  false, false, false};
-    if (header == "PMG_GRAPH_V4")  return GraphPayloadFormat{true,  true,  false, false, false, true,  false, false, false};
-    if (header == "PMG_GRAPH_V3")  return GraphPayloadFormat{false, true,  false, false, false, false, false, false, false};
-    if (header == "PMG_GRAPH_V2")  return GraphPayloadFormat{false, false, false, false, false, false, false, false, false};
+    //                                       meta+skel warp  calib vector target quoted conv   dist   metric support
+    if (header == "PMG_GRAPH_V11") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true};
+    if (header == "PMG_GRAPH_V10") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  false};
+    if (header == "PMG_GRAPH_V9")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  false, false};
+    if (header == "PMG_GRAPH_V8")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  false, false, false};
+    if (header == "PMG_GRAPH_V7")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V6")  return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V5")  return GraphPayloadFormat{true,  true,  true,  false, false, true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V4")  return GraphPayloadFormat{true,  true,  false, false, false, true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V3")  return GraphPayloadFormat{false, true,  false, false, false, false, false, false, false, false};
+    if (header == "PMG_GRAPH_V2")  return GraphPayloadFormat{false, false, false, false, false, false, false, false, false, false};
     return std::nullopt;
 }
 
@@ -344,6 +346,17 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
                 output << '\n';
             }
         }
+        if (space.HasExplicitParameterSupport()) {
+            const ParameterSupport& support = *space.ExplicitSupport();
+            output << "support_simplex " << support.NumVertices() << '\n';
+            for (const ParameterVector& vertex : support.Vertices()) {
+                output << "vertex ";
+                WriteParameter(output, vertex);
+                output << '\n';
+            }
+        } else {
+            output << "support_none\n";
+        }
     }
 
     output << "edges " << graph.NumEdges() << '\n';
@@ -514,9 +527,7 @@ ParametricMotionGraph ReadGraphPayload(
                             "LoadPmgArtifactText: invalid empty calibration record");
                     }
                 }
-                graph.AddNode(node_name, std::move(space));
-                continue;
-            }
+            } else {
 
             int metric_value = -1;
             input >> keyword >> metric_value;
@@ -618,6 +629,31 @@ ParametricMotionGraph ReadGraphPayload(
                         ? range
                         : 1.0f};
                 space.SetParameterCalibration(std::move(calibration));
+            }
+        }
+        }
+        if (format.has_parameter_support) {
+            input >> keyword;
+            if (keyword == "support_simplex") {
+                int vertex_count = 0;
+                input >> vertex_count;
+                if (vertex_count <= 0) {
+                    throw std::runtime_error("LoadPmgArtifactText: invalid support_simplex record");
+                }
+                std::vector<ParameterVector> vertices;
+                vertices.reserve(vertex_count);
+                for (int v = 0; v < vertex_count; ++v) {
+                    input >> keyword;
+                    if (keyword != "vertex") {
+                        throw std::runtime_error("LoadPmgArtifactText: expected vertex record");
+                    }
+                    vertices.push_back(ReadParameter(input));
+                }
+                space.SetParameterSupport(ParameterSupport(std::move(vertices)));
+            } else if (keyword == "support_none") {
+                // explicit lack of support
+            } else {
+                throw std::runtime_error("LoadPmgArtifactText: expected support record");
             }
         }
         graph.AddNode(node_name, std::move(space));
@@ -879,7 +915,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V10\n";
+    output << "PMG_GRAPH_V11\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
