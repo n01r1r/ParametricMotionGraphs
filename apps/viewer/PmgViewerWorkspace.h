@@ -268,8 +268,9 @@ private:
     int heatmap_target_index_ = -1;
     pmg::MotionClip heatmap_target_clip_;
     pmg::DistanceGridConfig heatmap_config_{5, 2, 2, 0.70f, 0.95f, 0.05f, 0.30f, {}};
-    // GOOD/BAD raw-sum thresholds. One source of truth shared by the heatmap
-    // classification and graph edge build.
+    // GOOD/BAD raw-sum thresholds. One source of truth for heatmap
+    // classification and sandbox graph builds. Spec builds keep their
+    // per-edge thresholds from .pmg_spec authoritative.
     float tgood_ = kDefaultGoodTransitionThreshold;
     float tbad_ = kDefaultBadTransitionThreshold;
     pmg::DistanceGrid heatmap_grid_;
@@ -319,7 +320,8 @@ private:
     // --- Path B authoring model (sandbox, not saveable) ------------------------
     // Viewer-side description of a multi-node graph. Nodes snapshot a 1-D motion
     // space (+ its skeleton, so a build can reject mismatched skeletons); edges
-    // carry per-edge GOOD/BAD thresholds. BuildAuthoredGraph rebuilds the
+    // carry per-edge GOOD/BAD thresholds and use the current Distance Grid
+    // phase range during sandbox builds. BuildAuthoredGraph rebuilds the
     // immutable ParametricMotionGraph from these each time, so no remove/edit
     // API is needed on the core graph.
     struct AuthoredNode {
