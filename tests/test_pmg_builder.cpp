@@ -295,6 +295,36 @@ int main() {
             pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, narrow_source, static_target, config);
         assert(!built.samples.empty());
     }
+    {
+        // PmgBuilder_SamplesInsideTriangulatedSupport
+        pmg::ParametricMotionSpace triangulated_source("walk", 2);
+        triangulated_source.AddExample({-0.3f, 0.0f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        triangulated_source.AddExample({0.0f, 0.0f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        triangulated_source.AddExample({1.0f, 0.0f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        triangulated_source.AddExample({0.0f, 1.0f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        triangulated_source.AddExample({0.15f, 0.75f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        std::vector<pmg::ParameterVector> vertices = {
+            {-0.3f, 0.0f}, {0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}, {0.15f, 0.75f}
+        };
+        std::vector<std::array<int, 3>> triangles = {{0, 1, 4}, {1, 2, 4}, {2, 3, 4}, {3, 0, 4}};
+        const pmg::ParameterSupport support = pmg::ParameterSupport::CreateTriangulated2D(vertices, triangles);
+        triangulated_source.SetParameterSupport(support);
+
+        pmg::PmgBuilderConfig config;
+        config.source_sample_count = 50;
+        config.target_sample_count = 1;
+        config.generated_frame_count = 1;
+        config.good_transition_threshold = 1.0e9f;
+        config.bad_transition_threshold = 2.0e9f;
+
+        const pmg::PmgEdge built =
+            pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, triangulated_source, triangulated_source, config);
+        
+        assert(built.samples.size() == 50);
+        for (const pmg::TransitionSample& sample : built.samples) {
+            assert(support.Contains(sample.source_parameter));
+        }
+    }
 
     return 0;
 }

@@ -237,6 +237,69 @@ void ValidateParameterSupport(const GraphSpec& spec) {
     }
 }
 
+void ValidateTriangulatedSupport(const GraphSpec& spec) {
+    for (const GraphSpecNode& node : spec.nodes) {
+        if (!node.parameter_support_triangulated_2d) {
+            continue;
+        }
+        if (node.parameter_dimension != 2) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' triangulated_2d requires parameter dimension == 2");
+        }
+        if (node.parameter_triangles.empty()) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' triangulated_2d requires at least one triangle");
+        }
+
+        std::vector<const ParameterVector*> params;
+        for (const GraphSpecExample& example : spec.examples) {
+            if (example.node_name == node.name) {
+                params.push_back(&example.parameter);
+            }
+        }
+
+        std::vector<bool> covered(params.size(), false);
+        for (const std::array<int, 3>& t : node.parameter_triangles) {
+            for (int idx : t) {
+                if (idx < 0 || idx >= static_cast<int>(params.size())) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec: node '" + node.name +
+                        "' triangle index out of bounds");
+                }
+            }
+            if (t[0] == t[1] || t[1] == t[2] || t[2] == t[0]) {
+                throw std::runtime_error(
+                    "LoadGraphSpec: node '" + node.name +
+                    "' duplicate vertex index inside a triangle");
+            }
+
+            const ParameterVector& p0 = *params[static_cast<std::size_t>(t[0])];
+            const ParameterVector& p1 = *params[static_cast<std::size_t>(t[1])];
+            const ParameterVector& p2 = *params[static_cast<std::size_t>(t[2])];
+            float cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
+            if (std::abs(cross) <= 1.0e-5f) {
+                throw std::runtime_error(
+                    "LoadGraphSpec: node '" + node.name +
+                    "' triangle area must be > epsilon");
+            }
+
+            covered[static_cast<std::size_t>(t[0])] = true;
+            covered[static_cast<std::size_t>(t[1])] = true;
+            covered[static_cast<std::size_t>(t[2])] = true;
+        }
+
+        for (std::size_t i = 0; i < covered.size(); ++i) {
+            if (!covered[i]) {
+                throw std::runtime_error(
+                    "LoadGraphSpec: node '" + node.name +
+                    "' example is not covered by any triangle");
+            }
+        }
+    }
+}
+
 }  // namespace
 
 GraphSpec LoadGraphSpec(const std::string& path) {
@@ -471,7 +534,7 @@ GraphSpec LoadGraphSpec(const std::string& path) {
             if (!(line >> node_name >> support_shape)) {
                 throw std::runtime_error(
                     "LoadGraphSpec line " + std::to_string(line_number) +
-                    ": expected parameter_support <node> simplex");
+                    ": expected parameter_support <node> <simplex|triangulated_2d>");
             }
             auto node_it = std::find_if(
                 spec.nodes.begin(), spec.nodes.end(),
@@ -484,17 +547,49 @@ GraphSpec LoadGraphSpec(const std::string& path) {
                     ": parameter_support references unknown node '" +
                     node_name + "'");
             }
-            if (support_shape != "simplex") {
+            if (support_shape == "simplex") {
+                if (node_it->parameter_support_simplex || node_it->parameter_support_triangulated_2d) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec line " + std::to_string(line_number) +
+                        ": duplicate parameter_support for node '" + node_name + "'");
+                }
+                node_it->parameter_support_simplex = true;
+            } else if (support_shape == "triangulated_2d") {
+                if (node_it->parameter_support_simplex || node_it->parameter_support_triangulated_2d) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec line " + std::to_string(line_number) +
+                        ": duplicate parameter_support for node '" + node_name + "'");
+                }
+                node_it->parameter_support_triangulated_2d = true;
+            } else {
                 throw std::runtime_error(
                     "LoadGraphSpec line " + std::to_string(line_number) +
-                    ": parameter_support only supports 'simplex'");
+                    ": parameter_support only supports 'simplex' and 'triangulated_2d'");
             }
-            if (node_it->parameter_support_simplex) {
+            continue;
+        }
+
+        if (keyword == "triangle") {
+            std::string node_name;
+            int i0 = 0;
+            int i1 = 0;
+            int i2 = 0;
+            if (!(line >> node_name >> i0 >> i1 >> i2)) {
                 throw std::runtime_error(
                     "LoadGraphSpec line " + std::to_string(line_number) +
-                    ": duplicate parameter_support for node '" + node_name + "'");
+                    ": expected triangle <node> <i0> <i1> <i2>");
             }
-            node_it->parameter_support_simplex = true;
+            auto node_it = std::find_if(
+                spec.nodes.begin(), spec.nodes.end(),
+                [&](const GraphSpecNode& node) {
+                    return node.name == node_name;
+                });
+            if (node_it == spec.nodes.end()) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": triangle references unknown node '" + node_name + "'");
+            }
+            node_it->parameter_triangles.push_back({i0, i1, i2});
             continue;
         }
 
@@ -770,6 +865,7 @@ GraphSpec LoadGraphSpec(const std::string& path) {
     }
     ValidateNodeExpectations(spec);
     ValidateParameterSupport(spec);
+    ValidateTriangulatedSupport(spec);
     return spec;
 }
 

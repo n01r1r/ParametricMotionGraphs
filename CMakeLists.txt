@@ -313,5 +313,10 @@ if(PMG_BUILD_VIEWER)
             PRIVATE apps/viewer)
         add_test(NAME test_viewer_graph_authoring
             COMMAND test_viewer_graph_authoring)
+
+        add_executable(test_viewer_graph_runtime tests/test_viewer_graph_runtime.cpp)
+        target_include_directories(test_viewer_graph_runtime PRIVATE apps/viewer include)
+        target_link_libraries(test_viewer_graph_runtime PRIVATE pmg_viewer_workspace pmg_core)
+        add_test(NAME test_viewer_graph_runtime COMMAND test_viewer_graph_runtime)
     endif()
 endif()

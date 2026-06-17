@@ -1,0 +1,26 @@
+# Triangulated 2D Scattered Support/Interpolation
+# Demonstrates expanding the walk_2d node with scattered interior and boundary anchors.
+# It uses explicit triangles to form the parameter support region and define interpolation.
+
+node walk_2d 2
+registration walk_2d - - 3 0
+parameter_metrics walk_2d turn_rate travel_speed
+parameter_calibration walk_2d 5
+parameter_support walk_2d triangulated_2d
+
+example walk_2d -0.3 0.0 ../BVH/walkMoreCurve.bvh
+example walk_2d  0.0 0.0 ../BVH/walkCurve.bvh
+example walk_2d  1.0 0.0 ../BVH/walkTightCurve.bvh
+example walk_2d  0.0 1.0 ../BVH/jogCurve.bvh
+example walk_2d  0.15 0.75 ../BVH/walkStraightTwiceAsFast.bvh
+
+triangle walk_2d 0 1 4
+triangle walk_2d 1 2 4
+triangle walk_2d 2 3 4
+triangle walk_2d 3 0 4
+
+expect walk_2d spanned_axes 2
+
+edge walk_2d walk_2d
+edge_phase_range walk_2d walk_2d 0.70 0.95 0.05 0.30
+edge_config walk_2d walk_2d 300 400 3 6 41

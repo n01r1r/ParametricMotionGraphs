@@ -2135,6 +2135,172 @@ CyclicRecutEvaluateOptions ParseCyclicRecutEvaluateOptions(
     return options;
 }
 
+struct SimplexAuditOptions {
+    std::string pmg_path;
+    std::string node_name;
+    std::string output_csv;
+    std::string output_md;
+    int samples_per_axis = 10;
+};
+
+SimplexAuditOptions ParseSimplexAuditOptions(int argc, char** argv) {
+    SimplexAuditOptions options;
+    if (argc < 4) {
+        throw std::runtime_error("Usage: pmg_cli --audit-parameter-node graph.pmg node_name --output-csv ... --output-md ... [--samples N]");
+    }
+    options.pmg_path = argv[2];
+    options.node_name = argv[3];
+    for (int index = 4; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) throw std::runtime_error(std::string(name) + " requires a value");
+            return argv[++index];
+        };
+        if (option == "--output-csv") options.output_csv = require_value("--output-csv");
+        else if (option == "--output-md") options.output_md = require_value("--output-md");
+        else if (option == "--samples") options.samples_per_axis = std::stoi(require_value("--samples"));
+        else throw std::runtime_error("Unknown option: " + option);
+    }
+    return options;
+}
+
+int SimplexAuditCommand(const SimplexAuditOptions& options) {
+    if (options.output_csv.empty() || options.output_md.empty()) {
+        throw std::runtime_error("--audit-parameter-node requires --output-csv and --output-md");
+    }
+    const pmg::BuiltPmgArtifact artifact = pmg::LoadPmgArtifactText(options.pmg_path);
+    int node_idx = -1;
+    for (int i = 0; i < artifact.graph.NumNodes(); ++i) {
+        if (artifact.graph.Node(i).name == options.node_name) {
+            node_idx = i;
+            break;
+        }
+    }
+    if (node_idx < 0) throw std::runtime_error("Node not found: " + options.node_name);
+
+    const pmg::ParametricMotionSpace& space = artifact.graph.Node(node_idx).motion_space;
+    if (!space.HasExplicitParameterSupport()) {
+        throw std::runtime_error("Node has no explicit parameter support");
+    }
+    const pmg::ParameterSupport& support = *space.ExplicitSupport();
+    
+    const pmg::ParameterDomain domain = space.Domain();
+    
+    std::ofstream csv(options.output_csv);
+    // Foot contact/sliding proxy intentionally omitted until a formal contact metric is available.
+    csv << "p0,p1,duration,root_disp,speed,net_heading,curvature,projected\n";
+    
+    std::vector<pmg::ParameterVector> grid;
+    if (domain.Dimension() == 1) {
+        for (int i = 0; i < options.samples_per_axis; ++i) {
+            float t = i / std::max(1.0f, float(options.samples_per_axis - 1));
+            pmg::ParameterVector pt = {domain.Bounds().min_corner[0] + t * (domain.Bounds().max_corner[0] - domain.Bounds().min_corner[0])};
+            if (support.Contains(pt)) grid.push_back(pt);
+        }
+    } else if (domain.Dimension() == 2) {
+        for (int i = 0; i < options.samples_per_axis; ++i) {
+            float ty = i / std::max(1.0f, float(options.samples_per_axis - 1));
+            float y = domain.Bounds().min_corner[1] + ty * (domain.Bounds().max_corner[1] - domain.Bounds().min_corner[1]);
+            for (int j = 0; j < options.samples_per_axis; ++j) {
+                float tx = j / std::max(1.0f, float(options.samples_per_axis - 1));
+                float x = domain.Bounds().min_corner[0] + tx * (domain.Bounds().max_corner[0] - domain.Bounds().min_corner[0]);
+                pmg::ParameterVector pt = {x, y};
+                if (support.Contains(pt)) grid.push_back(pt);
+            }
+        }
+    } else {
+        throw std::runtime_error("Only 1D and 2D spaces supported");
+    }
+    
+    for (const auto& p : grid) {
+        bool projected = !support.Contains(p);
+        pmg::ParameterVector sp = support.Project(p);
+        float duration = space.BlendedDurationSeconds(sp);
+        pmg::MotionClip clip = space.GenerateClip(sp, artifact.metadata.frames_per_second);
+        float speed = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTravelSpeed, clip);
+        float turn_rate = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTurnRate, clip);
+        float heading = turn_rate * duration;
+        float disp = speed * duration;
+        float curvature = disp > 1e-4f ? heading / disp : 0.0f;
+        
+        csv << (p.size() > 0 ? p[0] : 0) << "," 
+            << (p.size() > 1 ? p[1] : 0) << ","
+            << duration << "," << disp << "," << speed << "," << heading << "," << curvature << "," << projected << "\n";
+    }
+    
+    std::ofstream md(options.output_md);
+    md << "# Parameter Node Audit: " << options.node_name << "\n\n";
+    md << "Audit complete. " << grid.size() << " samples taken.\n\n";
+    md << "**Curvature Definition**: curvature = net_heading / max(root_disp, 1e-4)\n\n";
+    md << "The audit samples from the node's declared support; therefore projected=false is expected for normal samples. Projection becomes relevant only when evaluating externally requested parameters outside support.\n";
+    return 0;
+}
+
+struct InventoryBvhOptions {
+    std::string bvh_dir;
+    std::string pmg_path;
+    std::string output_csv;
+};
+
+InventoryBvhOptions ParseInventoryBvhOptions(int argc, char** argv) {
+    InventoryBvhOptions options;
+    if (argc < 5) {
+        throw std::runtime_error("Usage: pmg_cli --inventory-bvh <dir> <pmg> <csv>");
+    }
+    options.bvh_dir = argv[2];
+    options.pmg_path = argv[3];
+    options.output_csv = argv[4];
+    return options;
+}
+
+int InventoryBvhCommand(const InventoryBvhOptions& options) {
+    const pmg::BuiltPmgArtifact artifact = pmg::LoadPmgArtifactText(options.pmg_path);
+    std::ofstream csv(options.output_csv);
+    csv << "filename,compatible,frames,duration,root_disp,speed,net_heading,curvature,loopability,locomotion,idle,start,stop,turn,jump,unknown\n";
+    
+    for (const auto& entry : std::filesystem::directory_iterator(options.bvh_dir)) {
+        if (entry.path().extension() != ".bvh") continue;
+        std::string filename = entry.path().filename().string();
+        try {
+            pmg::BvhData bvh = pmg::BvhLoader::Load(entry.path().string());
+            bool compat = pmg::CheckSkeletonCompatibility(artifact.skeleton, bvh.skeleton).compatible;
+            int frames = bvh.clip.NumFrames();
+            float duration = bvh.clip.DurationSeconds();
+            float speed = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTravelSpeed, bvh.clip);
+            float heading_rate = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTurnRate, bvh.clip);
+            float heading = heading_rate * duration;
+            float root_disp = speed * duration;
+            float curvature = root_disp > 1e-4f ? heading / root_disp : 0.0f;
+            
+            float loopability = 0.0f;
+            if (frames > 0) {
+                pmg::PointCloud p1 = pmg::MotionDistance::BuildPointCloudFromFirstFrame(bvh.skeleton, bvh.clip, 0, 1);
+                pmg::PointCloud p2 = pmg::MotionDistance::BuildPointCloudFromFirstFrame(bvh.skeleton, bvh.clip, frames-1, 1);
+                loopability = pmg::MotionDistance::AlignedPointCloudDistance(p1, p2).distance;
+            }
+            
+            std::string lower = filename;
+            for (char& c : lower) c = std::tolower(c);
+            
+            bool is_locomotion = lower.find("walk") != std::string::npos || lower.find("jog") != std::string::npos || lower.find("run") != std::string::npos || lower.find("sneak") != std::string::npos || lower.find("strut") != std::string::npos;
+            bool is_idle = lower.find("stand") != std::string::npos || lower.find("idle") != std::string::npos;
+            bool is_start = lower.find("start") != std::string::npos || lower.find("to") != std::string::npos;
+            bool is_stop = lower.find("stop") != std::string::npos;
+            bool is_turn = lower.find("turn") != std::string::npos || lower.find("aboutface") != std::string::npos;
+            bool is_jump = lower.find("jump") != std::string::npos || lower.find("vault") != std::string::npos;
+            bool is_unknown = !is_locomotion && !is_idle && !is_start && !is_stop && !is_turn && !is_jump;
+            
+            csv << filename << "," << compat << "," << frames << "," << duration << "," 
+                << root_disp << "," << speed << "," << heading << "," << curvature << "," 
+                << loopability << "," << is_locomotion << "," << is_idle << "," << is_start << "," 
+                << is_stop << "," << is_turn << "," << is_jump << "," << is_unknown << "\n";
+        } catch (...) {
+            csv << filename << ",0,0,0,0,0,0,0,0,0,0,0,0,0,0,1\n";
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 namespace pmgcli {
@@ -2161,6 +2327,14 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
         return CyclicRecutEvaluateCommand(
             ParseCyclicRecutEvaluateOptions(argc, argv),
             CommandLineString(argc, argv));
+    }
+    if (command == "--audit-simplex-node" || command == "--audit-parameter-node") {
+        if (argc >= 4) {
+            return SimplexAuditCommand(ParseSimplexAuditOptions(argc, argv));
+        }
+    }
+    if (command == "--inventory-bvh" && argc >= 5) {
+        return InventoryBvhCommand(ParseInventoryBvhOptions(argc, argv));
     }
     return std::nullopt;
 }

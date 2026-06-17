@@ -3,6 +3,7 @@
 #include "pmg/PmgArtifact.h"
 #include "pmg/PmgBuilder.h"
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,8 @@ struct GraphSpecNode {
     bool has_expect_spanned_axes = false;
     int expect_spanned_axes = 0;
     bool parameter_support_simplex = false;
+    bool parameter_support_triangulated_2d = false;
+    std::vector<std::array<int, 3>> parameter_triangles;
 };
 
 struct GraphSpecExample {

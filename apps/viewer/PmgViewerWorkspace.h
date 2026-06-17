@@ -44,6 +44,16 @@ enum class ViewerPlaybackMode {
 // distance grid, graph, and PMG display settings as tabs).
 // Assumptions: world is Y-up; a clip's lowest point over its whole duration is
 // rested on y = 0 so vertical dynamics are preserved.
+// Resolves the desired parameter vector for a node based on UI state.
+// If vector_valid is true and size matches, it returns vector_request.
+// Otherwise it falls back to scalar_request in axis 0, and the bounding-box center for others.
+// It also projects into the explicit support if available.
+pmg::ParameterVector ResolveDesiredParameterForNode(
+    const pmg::ParametricMotionSpace& space,
+    float scalar_request,
+    bool vector_valid,
+    const pmg::ParameterVector& vector_request);
+
 class PmgViewerWorkspace final : public ViewerWorkspace {
 public:
     void Initialize(const std::string& artifact_path = {}) override;
@@ -316,6 +326,10 @@ private:
     GraphOrigin graph_origin_ = GraphOrigin::None;
     bool graph_open_runtime_tab_ = false;
     float graph_desired_parameter_ = 0.0f;
+    // Full vector target request for graph runtime UI. Overrides the 1D slider
+    // graph_desired_parameter_ when valid.
+    pmg::ParameterVector graph_desired_parameter_vector_;
+    bool graph_desired_parameter_vector_valid_ = false;
     // Full per-axis steering vector while a goto is active (empty otherwise);
     // lets multidimensional goal-directed control drive every axis, not just 0.
     pmg::ParameterVector goto_desired_parameter_;

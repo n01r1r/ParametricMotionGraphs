@@ -116,6 +116,9 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
 
         if (node.parameter_support_simplex) {
             authored.SetParameterSupport(ParameterSupport(authored.ExampleParameters()));
+        } else if (node.parameter_support_triangulated_2d) {
+            authored.SetParameterSupport(ParameterSupport::CreateTriangulated2D(
+                authored.ExampleParameters(), node.parameter_triangles));
         }
 
         stages.authored = authored;
@@ -169,7 +172,7 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
 
         stages.production = std::move(production);
         
-        if (node.parameter_support_simplex && !stages.production.HasExplicitParameterSupport()) {
+        if ((node.parameter_support_simplex || node.parameter_support_triangulated_2d) && !stages.production.HasExplicitParameterSupport()) {
             throw std::runtime_error("PrepareMotionSpaces: production space lost explicit parameter support");
         }
 

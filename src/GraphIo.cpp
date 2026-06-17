@@ -348,11 +348,24 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
         }
         if (space.HasExplicitParameterSupport()) {
             const ParameterSupport& support = *space.ExplicitSupport();
-            output << "support_simplex " << support.NumVertices() << '\n';
-            for (const ParameterVector& vertex : support.Vertices()) {
-                output << "vertex ";
-                WriteParameter(output, vertex);
-                output << '\n';
+            if (support.GetType() == ParameterSupport::Type::kSimplex) {
+                output << "support_simplex " << support.NumVertices() << '\n';
+                for (const ParameterVector& vertex : support.Vertices()) {
+                    output << "vertex ";
+                    WriteParameter(output, vertex);
+                    output << '\n';
+                }
+            } else if (support.GetType() == ParameterSupport::Type::kTriangulated2D) {
+                const auto& triangles = support.Triangles();
+                output << "support_triangulated_2d " << support.NumVertices() << ' ' << triangles.size() << '\n';
+                for (const ParameterVector& vertex : support.Vertices()) {
+                    output << "vertex ";
+                    WriteParameter(output, vertex);
+                    output << '\n';
+                }
+                for (const auto& t : triangles) {
+                    output << "triangle " << t[0] << ' ' << t[1] << ' ' << t[2] << '\n';
+                }
             }
         } else {
             output << "support_none\n";
@@ -650,6 +663,34 @@ ParametricMotionGraph ReadGraphPayload(
                     vertices.push_back(ReadParameter(input));
                 }
                 space.SetParameterSupport(ParameterSupport(std::move(vertices)));
+            } else if (keyword == "support_triangulated_2d") {
+                int vertex_count = 0;
+                int triangle_count = 0;
+                input >> vertex_count >> triangle_count;
+                if (vertex_count <= 0 || triangle_count <= 0) {
+                    throw std::runtime_error("LoadPmgArtifactText: invalid support_triangulated_2d record");
+                }
+                std::vector<ParameterVector> vertices;
+                vertices.reserve(vertex_count);
+                for (int v = 0; v < vertex_count; ++v) {
+                    input >> keyword;
+                    if (keyword != "vertex") {
+                        throw std::runtime_error("LoadPmgArtifactText: expected vertex record");
+                    }
+                    vertices.push_back(ReadParameter(input));
+                }
+                std::vector<std::array<int, 3>> triangles;
+                triangles.reserve(triangle_count);
+                for (int t = 0; t < triangle_count; ++t) {
+                    input >> keyword;
+                    if (keyword != "triangle") {
+                        throw std::runtime_error("LoadPmgArtifactText: expected triangle record");
+                    }
+                    std::array<int, 3> tri;
+                    input >> tri[0] >> tri[1] >> tri[2];
+                    triangles.push_back(tri);
+                }
+                space.SetParameterSupport(ParameterSupport::CreateTriangulated2D(std::move(vertices), std::move(triangles)));
             } else if (keyword == "support_none") {
                 // explicit lack of support
             } else {

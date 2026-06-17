@@ -309,6 +309,43 @@ int main() {
     }
     assert(invalid_joint_threw);
 
+    // GraphSpec_ParsesTriangulated2D
+    const std::filesystem::path triangulated_spec_path = directory / "triangulated.txt";
+    {
+        std::ofstream triangulated_spec(triangulated_spec_path);
+        triangulated_spec << "node g 2\n"
+                          << "parameter_support g triangulated_2d\n"
+                          << "example g -0.3 0.0 walk_a.bvh\n"
+                          << "example g 0.0 0.0 walk_a.bvh\n"
+                          << "example g 1.0 0.0 walk_a.bvh\n"
+                          << "example g 0.0 1.0 walk_a.bvh\n"
+                          << "example g 0.15 0.75 walk_a.bvh\n"
+                          << "triangle g 0 1 4\n"
+                          << "triangle g 1 2 4\n"
+                          << "triangle g 2 3 4\n"
+                          << "triangle g 3 0 4\n";
+    }
+    const pmg::GraphSpec triangulated_spec_parsed =
+        pmg::LoadGraphSpec(triangulated_spec_path.string());
+    assert(triangulated_spec_parsed.nodes[0].parameter_support_triangulated_2d);
+    assert(triangulated_spec_parsed.nodes[0].parameter_triangles.size() == 4);
+
+    const std::filesystem::path triangulated_invalid_spec_path = directory / "triangulated_invalid.txt";
+    {
+        std::ofstream triangulated_invalid_spec(triangulated_invalid_spec_path);
+        triangulated_invalid_spec << "node g 2\n"
+                                  << "parameter_support g triangulated_2d\n"
+                                  << "example g 0.0 0.0 walk_a.bvh\n"
+                                  << "triangle g 0 1 2\n"; // invalid indices
+    }
+    bool triangulated_invalid_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(triangulated_invalid_spec_path.string());
+    } catch (const std::runtime_error&) {
+        triangulated_invalid_threw = true;
+    }
+    assert(triangulated_invalid_threw);
+
     std::filesystem::remove_all(directory);
     return 0;
 }

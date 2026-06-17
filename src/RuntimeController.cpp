@@ -330,6 +330,17 @@ void RuntimeController::TryScheduleTransition(
         return;
     }
 
+    if (request.desired_node == current_node_) {
+        float sq_dist = 0.0f;
+        for (std::size_t i = 0; i < request.desired_parameter.size() && i < current_parameter_.size(); ++i) {
+            const float d = request.desired_parameter[i] - current_parameter_[i];
+            sq_dist += d * d;
+        }
+        if (sq_dist < kSmallEpsilon * kSmallEpsilon) {
+            return;
+        }
+    }
+
     for (const int edge_index : graph_.OutgoingEdgeIndices(current_node_)) {
         const PmgEdge& edge = graph_.Edge(edge_index);
         if (edge.target_node != request.desired_node) {

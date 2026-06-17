@@ -461,5 +461,88 @@ int main() {
         assert(transitioned);
     }
 
+    // Triangulated 2D support: request inside and outside
+    {
+        int tri_node = -1;
+        pmg::ParametricMotionSpace space("triangulated", 2);
+        space.AddExample({0.0f, 0.0f}, MakeWalkClip(0.0f));
+        space.AddExample({1.0f, 0.0f}, MakeWalkClip(1.0f));
+        space.AddExample({0.0f, 1.0f}, MakeWalkClip(1.0f));
+        
+        std::vector<pmg::ParameterVector> vertices = {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}};
+        std::vector<std::array<int, 3>> triangles = {{0, 1, 2}};
+        space.SetParameterSupport(pmg::ParameterSupport::CreateTriangulated2D(vertices, triangles));
+
+        pmg::ParametricMotionGraph tri_graph;
+        tri_node = tri_graph.AddNode("triangulated", space);
+
+        pmg::PmgEdge edge;
+        edge.source_node = tri_node;
+        edge.target_node = tri_node;
+        edge.samples.push_back({
+            {0.5f, 0.0f},
+            {{0.0f, 0.0f}, {1.0f, 1.0f}},
+            0.5f,
+            0.5f,
+        });
+        tri_graph.AddEdge(std::move(edge));
+
+        pmg::RootOnlyAlignment alignment;
+        pmg::RuntimeControllerConfig config;
+        
+        // Case A: inside support
+        {
+            pmg::RuntimeController c(tri_graph, alignment, config);
+            c.Start(tri_node, {0.1f, 0.1f}, kFramesPerSecond);
+
+            pmg::RuntimeControlRequest req;
+            req.desired_node = tri_node;
+            req.desired_parameter = {0.15f, 0.75f}; // Inside support
+
+            bool transitioned = false;
+            for (int step = 0; step < 120; ++step) {
+                c.Update(delta_seconds, req);
+                if (c.IsTransitioning()) {
+                    const auto diagnostics = c.ActiveTransitionDiagnostics();
+                    assert(diagnostics.has_value());
+                    assert(diagnostics->requested_target_parameter[0] == 0.15f);
+                    assert(diagnostics->requested_target_parameter[1] == 0.75f);
+                    assert(std::abs(diagnostics->actual_target_parameter[0] - 0.15f) < 1.0e-5f);
+                    assert(std::abs(diagnostics->actual_target_parameter[1] - 0.75f) < 1.0e-5f);
+                    transitioned = true;
+                    break;
+                }
+            }
+            assert(transitioned);
+        }
+
+        // Case B: outside support
+        {
+            pmg::RuntimeController c(tri_graph, alignment, config);
+            c.Start(tri_node, {0.1f, 0.1f}, kFramesPerSecond);
+
+            pmg::RuntimeControlRequest req;
+            req.desired_node = tri_node;
+            req.desired_parameter = {0.8f, 0.8f}; // Outside support x+y <= 1
+
+            bool transitioned = false;
+            for (int step = 0; step < 120; ++step) {
+                c.Update(delta_seconds, req);
+                if (c.IsTransitioning()) {
+                    const auto diagnostics = c.ActiveTransitionDiagnostics();
+                    assert(diagnostics.has_value());
+                    assert(diagnostics->requested_target_parameter[0] == 0.8f);
+                    assert(diagnostics->requested_target_parameter[1] == 0.8f);
+                    // The projection of (0.8, 0.8) onto the simplex ((0,0), (1,0), (0,1)) is (0.5, 0.5)
+                    assert(std::abs(diagnostics->actual_target_parameter[0] - 0.5f) < 1.0e-5f);
+                    assert(std::abs(diagnostics->actual_target_parameter[1] - 0.5f) < 1.0e-5f);
+                    transitioned = true;
+                    break;
+                }
+            }
+            assert(transitioned);
+        }
+    }
+
     return 0;
 }

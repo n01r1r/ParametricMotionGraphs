@@ -161,23 +161,50 @@ void DrawArrowHead(
 
 // --- Graph runtime (PMG streaming) -----------------------------------------
 
-pmg::ParameterVector PmgViewerWorkspace::DesiredParameterForNode(int node) const {
-    if (node < 0 || node >= graph_.NumNodes()) {
-        return {graph_desired_parameter_};
-    }
-    const pmg::ParametricMotionSpace& space = graph_.Node(node).motion_space;
+pmg::ParameterVector ResolveDesiredParameterForNode(
+    const pmg::ParametricMotionSpace& space,
+    float scalar_request,
+    bool vector_valid,
+    const pmg::ParameterVector& vector_request) {
     const int dim = std::max(1, space.ParameterDimension());
     const std::vector<float> lo = space.MinParameter();
     const std::vector<float> hi = space.MaxParameter();
     pmg::ParameterVector desired(static_cast<std::size_t>(dim), 0.0f);
+    
+    // Default to center of bounding box
     for (int axis = 0; axis < dim; ++axis) {
         const float axis_lo = axis < static_cast<int>(lo.size()) ? lo[axis] : 0.0f;
         const float axis_hi = axis < static_cast<int>(hi.size()) ? hi[axis] : 1.0f;
         desired[static_cast<std::size_t>(axis)] = 0.5f * (axis_lo + axis_hi);
     }
-    // The 1-D runtime control steers axis 0.
-    desired[0] = graph_desired_parameter_;
+
+    if (vector_valid && vector_request.size() == desired.size()) {
+        return vector_request;
+    }
+
+    if (space.HasExplicitParameterSupport()) {
+        desired = space.ExplicitSupport()->Project(desired);
+    }
+
+    // Fallback: 1-D runtime control steers axis 0.
+    desired[0] = scalar_request;
+
+    if (space.HasExplicitParameterSupport()) {
+        desired = space.ExplicitSupport()->Project(desired);
+    }
     return desired;
+}
+
+pmg::ParameterVector PmgViewerWorkspace::DesiredParameterForNode(int node) const {
+    if (node < 0 || node >= graph_.NumNodes()) {
+        return {graph_desired_parameter_};
+    }
+    const pmg::ParametricMotionSpace& space = graph_.Node(node).motion_space;
+    return ResolveDesiredParameterForNode(
+        space,
+        graph_desired_parameter_,
+        graph_desired_parameter_vector_valid_,
+        graph_desired_parameter_vector_);
 }
 
 void PmgViewerWorkspace::ResetGraphRuntimeSession(
@@ -1678,9 +1705,91 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
                 target_min, target_max, "%.3f");
             ImGui::EndDisabled();
         }
+    } else if (target_space.ParameterDimension() == 2 && target_space.HasExplicitParameterSupport()) {
+        const pmg::ParameterSupport& support = *target_space.ExplicitSupport();
+        ImGui::TextDisabled("2D Parameter Control (click to request target)");
+
+        const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+        const float canvas_size = 200.0f;
+        const ImVec2 canvas_max = ImVec2(canvas_pos.x + canvas_size, canvas_pos.y + canvas_size);
+
+        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        draw_list->AddRectFilled(canvas_pos, canvas_max, IM_COL32(30, 30, 35, 255));
+        draw_list->AddRect(canvas_pos, canvas_max, IM_COL32(100, 100, 100, 255));
+
+        const std::vector<float> lo = target_space.MinParameter();
+        const std::vector<float> hi = target_space.MaxParameter();
+        const float p0_min = lo[0], p0_max = hi[0];
+        const float p1_min = lo[1], p1_max = hi[1];
+        
+        const float p0_range = std::max(1e-5f, p0_max - p0_min);
+        const float p1_range = std::max(1e-5f, p1_max - p1_min);
+
+        auto param_to_canvas = [&](const pmg::ParameterVector& p) {
+            float nx = (p[0] - p0_min) / p0_range;
+            float ny = (p[1] - p1_min) / p1_range;
+            return ImVec2(canvas_pos.x + nx * canvas_size, canvas_pos.y + (1.0f - ny) * canvas_size);
+        };
+        auto canvas_to_param = [&](const ImVec2& c) {
+            float nx = (c.x - canvas_pos.x) / canvas_size;
+            float ny = 1.0f - (c.y - canvas_pos.y) / canvas_size;
+            return pmg::ParameterVector{
+                std::clamp(p0_min + nx * p0_range, p0_min - p0_range * 0.5f, p0_max + p0_range * 0.5f),
+                std::clamp(p1_min + ny * p1_range, p1_min - p1_range * 0.5f, p1_max + p1_range * 0.5f)};
+        };
+
+        if (support.GetType() == pmg::ParameterSupport::Type::kTriangulated2D) {
+            for (const auto& tri : support.Triangles()) {
+                ImVec2 v0 = param_to_canvas(support.Vertices()[tri[0]]);
+                ImVec2 v1 = param_to_canvas(support.Vertices()[tri[1]]);
+                ImVec2 v2 = param_to_canvas(support.Vertices()[tri[2]]);
+                draw_list->AddTriangleFilled(v0, v1, v2, IM_COL32(60, 70, 80, 255));
+                draw_list->AddTriangle(v0, v1, v2, IM_COL32(100, 120, 140, 255));
+            }
+        } else if (support.GetType() == pmg::ParameterSupport::Type::kSimplex && support.NumVertices() == 3) {
+            ImVec2 v0 = param_to_canvas(support.Vertices()[0]);
+            ImVec2 v1 = param_to_canvas(support.Vertices()[1]);
+            ImVec2 v2 = param_to_canvas(support.Vertices()[2]);
+            draw_list->AddTriangleFilled(v0, v1, v2, IM_COL32(60, 70, 80, 255));
+            draw_list->AddTriangle(v0, v1, v2, IM_COL32(100, 120, 140, 255));
+        }
+
+        for (const auto& v : support.Vertices()) {
+            draw_list->AddCircleFilled(param_to_canvas(v), 3.0f, IM_COL32(200, 200, 200, 255));
+        }
+
+        ImGui::InvisibleButton("##canvas", ImVec2(canvas_size, canvas_size));
+        const bool is_hovered = ImGui::IsItemHovered();
+        const bool is_active = ImGui::IsItemActive();
+        if ((is_hovered && ImGui::IsMouseClicked(0)) || (is_active && ImGui::IsMouseDragging(0))) {
+            graph_desired_parameter_vector_ = canvas_to_param(ImGui::GetMousePos());
+            graph_desired_parameter_vector_valid_ = true;
+        }
+
+        auto preview = graph_controller_->ActiveTransitionDiagnostics();
+        if (!preview) {
+             if (graph_desired_parameter_vector_valid_ && graph_desired_parameter_vector_.size() == 2) {
+                 ImVec2 req = param_to_canvas(graph_desired_parameter_vector_);
+                 draw_list->AddCircleFilled(req, 4.0f, IM_COL32(255, 100, 100, 255));
+                 draw_list->AddCircle(req, 5.0f, IM_COL32(255, 255, 255, 255));
+             }
+        } else {
+             if (preview->requested_target_parameter.size() == 2) {
+                 ImVec2 req = param_to_canvas(preview->requested_target_parameter);
+                 draw_list->AddCircleFilled(req, 3.0f, IM_COL32(255, 200, 200, 255));
+                 draw_list->AddCircle(req, 4.0f, IM_COL32(255, 255, 255, 255));
+             }
+             if (preview->actual_target_parameter.size() == 2) {
+                 ImVec2 act = param_to_canvas(preview->actual_target_parameter);
+                 draw_list->AddCircleFilled(act, 4.0f, IM_COL32(100, 255, 100, 255));
+             }
+        }
+        
+        ImGui::TextDisabled("Requested parameter is updated immediately; actual transition\n"
+                            "is scheduled when the current PMG edge reaches its valid transition phase.");
     } else {
         ImGui::TextDisabled(
-            "Viewer controls currently expose one-dimensional target spaces.");
+            "Viewer controls currently expose one/two-dimensional target spaces.");
     }
 
     ImGui::Text(
@@ -1759,8 +1868,9 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     }
 
     std::optional<pmg::InterpolatedTransition> preview;
-    if (selected_edge != nullptr && source_parameter.size() == 1 &&
-        graph_.Node(graph_desired_node_).motion_space.ParameterDimension() == 1) {
+    if (selected_edge != nullptr &&
+        source_parameter.size() == graph_.Node(source_node).motion_space.ParameterDimension() &&
+        requested_target.size() == graph_.Node(graph_desired_node_).motion_space.ParameterDimension()) {
         preview = selected_edge->LookupInterpolated(
             source_parameter, requested_target);
     }
@@ -1771,116 +1881,87 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     ImGui::TextDisabled("Transition");
 
     constexpr const char* kSourceParameterLabel = "SOURCE";
-    constexpr const char* kRequestedTargetLabel = "REQUESTED";
-    constexpr const char* kActualTargetLabel = "ACTUAL";
-    constexpr const char* kReachableTargetLabel = "TARGET RANGE";
-    constexpr const char* kTransitionPhasesLabel = "PHASES";
+    constexpr const char* kRequestedRawLabel = "REQUESTED RAW";
+    constexpr const char* kProjectedSupportLabel = "REQUESTED PROJECTED";
+    constexpr const char* kActualTargetLabel = "RUNTIME ACTUAL";
+    constexpr const char* kSchedulingLabel = "SCHEDULING";
+    constexpr const char* kCompletedTransitionsLabel = "COMPLETED";
     constexpr const char* kMetricContractLabel = "METRIC";
     constexpr const char* kMetricSupportLabel = "METRIC SUPPORT";
     constexpr const char* kRuntimeSupportLabel = "RUNTIME SUPPORT";
     constexpr const char* kAlignmentTransformLabel = "ALIGNMENT";
     constexpr const char* kRuntimeBlendWindowLabel = "BLEND";
+
     const float widest_label_width = std::max({
         ImGui::CalcTextSize(kSourceParameterLabel).x,
-        ImGui::CalcTextSize(kRequestedTargetLabel).x,
+        ImGui::CalcTextSize(kRequestedRawLabel).x,
+        ImGui::CalcTextSize(kProjectedSupportLabel).x,
         ImGui::CalcTextSize(kActualTargetLabel).x,
-        ImGui::CalcTextSize(kReachableTargetLabel).x,
-        ImGui::CalcTextSize(kTransitionPhasesLabel).x,
-        ImGui::CalcTextSize(kMetricContractLabel).x,
-        ImGui::CalcTextSize(kMetricSupportLabel).x,
-        ImGui::CalcTextSize(kRuntimeSupportLabel).x,
-        ImGui::CalcTextSize(kAlignmentTransformLabel).x,
-        ImGui::CalcTextSize(kRuntimeBlendWindowLabel).x,
+        ImGui::CalcTextSize(kSchedulingLabel).x,
+        ImGui::CalcTextSize(kCompletedTransitionsLabel).x,
     });
     const float value_column_x =
         ImGui::GetCursorPosX() + widest_label_width +
         ImGui::GetStyle().ItemSpacing.x;
 
-    ImGui::TextColored(
-        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        kSourceParameterLabel);
+    ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kSourceParameterLabel);
     ImGui::SameLine(value_column_x);
     if (!source_parameter.empty()) {
-        const std::string source_label = ParameterLabel(source_parameter);
-        ImGui::Text(
-            "%s  p=%s",
-            graph_.Node(source_node).name.c_str(),
-            source_label.c_str());
+        ImGui::Text("%s  p=%s",
+                    graph_.Node(source_node).name.c_str(),
+                    ParameterLabel(source_parameter).c_str());
     }
 
-    ImGui::TextColored(
-        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        kRequestedTargetLabel);
+    ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kRequestedRawLabel);
     ImGui::SameLine(value_column_x);
-    const std::string requested_label = ParameterLabel(requested_target);
-    ImGui::Text(
-        "%s  p=%s",
-        graph_.Node(graph_desired_node_).name.c_str(),
-        requested_label.c_str());
+    ImGui::Text("%s  p=%s",
+                graph_.Node(graph_desired_node_).name.c_str(),
+                ParameterLabel(requested_target).c_str());
 
-    ImGui::TextColored(
-        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        kActualTargetLabel);
+    ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kProjectedSupportLabel);
     ImGui::SameLine(value_column_x);
-    if (active.has_value()) {
-        const std::string actual_label =
-            ParameterLabel(active->actual_target_parameter);
-        ImGui::Text(
-            "%s  p=%s",
-            graph_.Node(active->target_node).name.c_str(),
-            actual_label.c_str());
-    } else if (preview.has_value()) {
-        const std::string actual_label =
-            ParameterLabel(preview->target_parameter_box.Clamp(requested_target));
-        ImGui::Text("%s  p=%s (preview)",
-                    graph_.Node(graph_desired_node_).name.c_str(),
-                    actual_label.c_str());
-    } else {
-        ImGui::TextDisabled("waiting for transition lookup");
+    pmg::ParameterVector projected_target = requested_target;
+    if (graph_.Node(graph_desired_node_).motion_space.HasExplicitParameterSupport()) {
+        projected_target = graph_.Node(graph_desired_node_).motion_space.ProjectToSupport(requested_target);
     }
+    ImGui::Text("%s  p=%s",
+                graph_.Node(graph_desired_node_).name.c_str(),
+                ParameterLabel(projected_target).c_str());
 
-    ImGui::TextColored(
-        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        kReachableTargetLabel);
-    ImGui::SameLine(value_column_x);
-    const pmg::ParameterAabb* reachable_box = nullptr;
-    if (active.has_value()) {
-        reachable_box = &active->reachable_target_box;
-    } else if (preview.has_value()) {
-        reachable_box = &preview->target_parameter_box;
-    }
-    if (reachable_box != nullptr && !reachable_box->IsEmpty() &&
-        reachable_box->min_corner.size() == 1) {
-        const float actual_parameter =
-            active.has_value()
-                ? active->actual_target_parameter.front()
-                : reachable_box->Clamp(requested_target).front();
-        ImGui::Text(
-            "[%.3f, %.3f]  %.3f -> %.3f",
-            reachable_box->min_corner.front(),
-            reachable_box->max_corner.front(),
-            graph_desired_parameter_, actual_parameter);
-    } else {
-        ImGui::TextDisabled("no edge / empty region");
-    }
-
-    ImGui::TextColored(
-        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        kTransitionPhasesLabel);
+    ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kActualTargetLabel);
     ImGui::SameLine(value_column_x);
     if (active.has_value()) {
-        ImGui::Text(
-            "source %.3f -> target %.3f",
-            active->source_transition_phase,
-            active->target_transition_phase);
-    } else if (preview.has_value()) {
-        ImGui::Text(
-            "source %.3f -> target %.3f",
-            preview->source_transition_phase,
-            preview->target_transition_phase);
+        ImGui::Text("%s  p=%s",
+                    graph_.Node(active->target_node).name.c_str(),
+                    ParameterLabel(active->actual_target_parameter).c_str());
     } else {
-        ImGui::TextDisabled("unavailable");
+        ImGui::TextDisabled("pending");
     }
+
+    ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kSchedulingLabel);
+    ImGui::SameLine(value_column_x);
+    if (active.has_value()) {
+        ImGui::Text("transition active");
+    } else if (preview.has_value()) {
+        ImGui::TextDisabled("waiting for phase gate");
+    } else if (graph_desired_node_ == source_node) {
+        float sq_dist = 0.0f;
+        for (std::size_t i = 0; i < requested_target.size() && i < source_parameter.size(); ++i) {
+            float d = requested_target[i] - source_parameter[i];
+            sq_dist += d * d;
+        }
+        if (sq_dist < pmg::kSmallEpsilon * pmg::kSmallEpsilon) {
+            ImGui::TextDisabled("no self-edge (parameter unchanged)");
+        } else {
+            ImGui::TextDisabled("waiting for phase gate");
+        }
+    } else {
+        ImGui::TextDisabled("no valid transition");
+    }
+
+    ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kCompletedTransitionsLabel);
+    ImGui::SameLine(value_column_x);
+    ImGui::Text("%d", graph_controller_->CompletedTransitions());
 
     if (preview.has_value() || active.has_value()) {
         const float source_phase =

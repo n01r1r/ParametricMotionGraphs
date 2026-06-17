@@ -133,7 +133,7 @@ std::vector<float> BarycentricForVertices(
 }  // namespace
 
 ParameterSupport::ParameterSupport(std::vector<ParameterVector> vertices)
-    : vertices_(std::move(vertices)) {
+    : type_(Type::kSimplex), vertices_(std::move(vertices)) {
     if (vertices_.empty()) {
         throw std::runtime_error("ParameterSupport: vertices must not be empty");
     }
@@ -150,6 +150,34 @@ ParameterSupport::ParameterSupport(std::vector<ParameterVector> vertices)
         throw std::runtime_error("ParameterSupport: simplex needs dimension + 1 vertices");
     }
     (void)BarycentricForVertices(vertices_, vertices_.front());
+}
+
+ParameterSupport ParameterSupport::CreateTriangulated2D(
+    std::vector<ParameterVector> vertices,
+    std::vector<std::array<int, 3>> triangles) {
+    return ParameterSupport(std::move(vertices), std::move(triangles));
+}
+
+ParameterSupport::ParameterSupport(
+    std::vector<ParameterVector> vertices,
+    std::vector<std::array<int, 3>> triangles)
+    : type_(Type::kTriangulated2D),
+      vertices_(std::move(vertices)),
+      triangles_(std::move(triangles)) {
+    if (vertices_.empty() || vertices_.front().size() != 2) {
+        throw std::runtime_error("ParameterSupport: triangulated 2D requires 2D vertices");
+    }
+    if (triangles_.empty()) {
+        throw std::runtime_error("ParameterSupport: triangulated 2D requires triangles");
+    }
+}
+
+ParameterSupport::Type ParameterSupport::GetType() const {
+    return type_;
+}
+
+const std::vector<std::array<int, 3>>& ParameterSupport::Triangles() const {
+    return triangles_;
 }
 
 int ParameterSupport::Dimension() const {
@@ -172,6 +200,67 @@ std::vector<float> ParameterSupport::BarycentricWeights(
         throw std::runtime_error(
             "ParameterSupport::BarycentricWeights: parameter must be finite");
     }
+    if (type_ == Type::kTriangulated2D) {
+        ParameterVector p = Project(parameter);
+        int best_tri = -1;
+        std::vector<float> best_tri_weights;
+        float best_dist = std::numeric_limits<float>::infinity();
+
+        for (std::size_t i = 0; i < triangles_.size(); ++i) {
+            const auto& t = triangles_[i];
+            std::vector<ParameterVector> tri_vertices = { vertices_[t[0]], vertices_[t[1]], vertices_[t[2]] };
+            std::vector<float> w;
+            try {
+                w = BarycentricForVertices(tri_vertices, p);
+            } catch (...) {
+                continue;
+            }
+
+            bool inside = true;
+            for (float weight : w) {
+                if (weight < -kWeightTolerance) {
+                    inside = false;
+                    break;
+                }
+            }
+            if (inside) {
+                best_tri = static_cast<int>(i);
+                best_tri_weights = std::move(w);
+                break;
+            }
+
+            ParameterSupport tri(tri_vertices);
+            ParameterVector p_tri = tri.Project(p);
+            float dist = SquaredDistance(p, p_tri);
+            if (dist < best_dist) {
+                best_dist = dist;
+                best_tri = static_cast<int>(i);
+                best_tri_weights = std::move(w);
+            }
+        }
+
+        if (best_tri == -1) {
+            throw std::runtime_error("ParameterSupport::BarycentricWeights: no containing triangle found");
+        }
+
+        float sum = 0.0f;
+        for (float& w : best_tri_weights) {
+            w = std::max(0.0f, w);
+            sum += w;
+        }
+        if (sum > 0.0f) {
+            for (float& w : best_tri_weights) {
+                w /= sum;
+            }
+        }
+
+        std::vector<float> weights(vertices_.size(), 0.0f);
+        const auto& t = triangles_[best_tri];
+        weights[t[0]] += best_tri_weights[0];
+        weights[t[1]] += best_tri_weights[1];
+        weights[t[2]] += best_tri_weights[2];
+        return weights;
+    }
     return BarycentricForVertices(vertices_, parameter);
 }
 
@@ -180,6 +269,16 @@ bool ParameterSupport::Contains(
     float tolerance) const {
     if (tolerance < 0.0f) {
         throw std::runtime_error("ParameterSupport::Contains: tolerance must be nonnegative");
+    }
+    if (type_ == Type::kTriangulated2D) {
+        for (const auto& t : triangles_) {
+            std::vector<ParameterVector> tri_vertices = { vertices_[t[0]], vertices_[t[1]], vertices_[t[2]] };
+            ParameterSupport tri(tri_vertices);
+            if (tri.Contains(parameter, tolerance)) {
+                return true;
+            }
+        }
+        return false;
     }
     const std::vector<float> weights = BarycentricWeights(parameter);
     for (const float weight : weights) {
@@ -195,6 +294,23 @@ ParameterVector ParameterSupport::Project(const ParameterVector& parameter) cons
     if (!IsFiniteVector(parameter)) {
         throw std::runtime_error("ParameterSupport::Project: parameter must be finite");
     }
+
+    if (type_ == Type::kTriangulated2D) {
+        ParameterVector best_point;
+        float best_distance = std::numeric_limits<float>::infinity();
+        for (const auto& t : triangles_) {
+            std::vector<ParameterVector> tri_vertices = { vertices_[t[0]], vertices_[t[1]], vertices_[t[2]] };
+            ParameterSupport tri(tri_vertices);
+            ParameterVector candidate = tri.Project(parameter);
+            float dist = SquaredDistance(parameter, candidate);
+            if (dist < best_distance) {
+                best_distance = dist;
+                best_point = std::move(candidate);
+            }
+        }
+        return best_point;
+    }
+
     if (vertices_.size() > kMaxEnumeratedSimplexVertices) {
         throw std::runtime_error("ParameterSupport::Project: simplex dimension too large");
     }
@@ -240,6 +356,24 @@ ParameterVector ParameterSupport::Project(const ParameterVector& parameter) cons
 }
 
 ParameterVector ParameterSupport::SampleUniform(std::mt19937& rng) const {
+    if (type_ == Type::kTriangulated2D) {
+        std::vector<float> areas;
+        areas.reserve(triangles_.size());
+        for (const auto& t : triangles_) {
+            const ParameterVector& p0 = vertices_[t[0]];
+            const ParameterVector& p1 = vertices_[t[1]];
+            const ParameterVector& p2 = vertices_[t[2]];
+            float cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
+            areas.push_back(std::abs(cross) * 0.5f);
+        }
+        std::discrete_distribution<std::size_t> dist(areas.begin(), areas.end());
+        std::size_t tri_idx = dist(rng);
+        const auto& t = triangles_[tri_idx];
+        std::vector<ParameterVector> tri_vertices = { vertices_[t[0]], vertices_[t[1]], vertices_[t[2]] };
+        ParameterSupport tri(tri_vertices);
+        return tri.SampleUniform(rng);
+    }
+
     std::exponential_distribution<float> exponential(1.0f);
     std::vector<float> weights(vertices_.size(), 0.0f);
     float sum = 0.0f;

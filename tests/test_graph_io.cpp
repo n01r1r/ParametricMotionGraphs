@@ -453,6 +453,26 @@ int main() {
         assert(std::abs(weights[1] - (0.5f * (0.5f / 0.7f))) <
                1.0e-5f);
     }
+    {
+        // GraphIo_PreservesTriangulated2D
+        pmg::BuiltPmgArtifact artifact;
+        pmg::ParametricMotionSpace space("walk", 2);
+        std::vector<pmg::ParameterVector> vertices = {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}};
+        std::vector<std::array<int, 3>> triangles = {{0, 1, 2}};
+        space.SetParameterSupport(pmg::ParameterSupport::CreateTriangulated2D(vertices, triangles));
+        artifact.graph.AddNode("walk", std::move(space));
+
+        pmg::SavePmgArtifactText(artifact, path.string());
+        const pmg::BuiltPmgArtifact reloaded = pmg::LoadPmgArtifactText(path.string());
+        
+        const pmg::ParametricMotionSpace& reloaded_space = reloaded.graph.Node(0).motion_space;
+        assert(reloaded_space.HasExplicitParameterSupport());
+        const pmg::ParameterSupport& support = *reloaded_space.ExplicitSupport();
+        assert(support.GetType() == pmg::ParameterSupport::Type::kTriangulated2D);
+        assert(support.NumVertices() == 3);
+        assert(support.Triangles().size() == 1);
+        assert(support.Triangles()[0][0] == 0 && support.Triangles()[0][1] == 1 && support.Triangles()[0][2] == 2);
+    }
 
     std::filesystem::remove(path);
     return 0;
