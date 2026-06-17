@@ -214,6 +214,12 @@ if(PMG_BUILD_TESTS)
             --bvh-dir ${CMAKE_CURRENT_SOURCE_DIR}/BVH
             --output-csv ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b.csv
             --output-md ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b.md)
+    add_test(NAME cli_evaluate_cyclic_recuts
+        COMMAND pmg_cli --evaluate-cyclic-recuts
+            --bvh-dir ${CMAKE_CURRENT_SOURCE_DIR}/BVH
+            --output-cyclic-csv ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b_eval_cyclic.csv
+            --output-edge-csv ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b_eval_edges.csv
+            --output-md ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b_eval.md)
 
     # Paper application A: 30 seconds of random transitions through the PMG.
     # The worst frame-to-frame step must stay within 3x the median walking

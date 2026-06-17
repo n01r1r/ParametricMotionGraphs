@@ -101,6 +101,27 @@ OptimalTransition FindConfiguredTransition(
 
 }  // namespace
 
+const char* TransitionMetricTypeName(TransitionMetricType type) {
+    switch (type) {
+        case TransitionMetricType::kKovarDirectionalPointCloud:
+            return "kovar_directional_point_cloud";
+        case TransitionMetricType::kDynamicsWindow:
+            return "dynamics_window";
+    }
+    throw std::runtime_error("TransitionMetricTypeName: unknown transition metric type");
+}
+
+TransitionMetricType ParseTransitionMetricType(const std::string& name) {
+    if (name == "kovar" || name == "kovar_directional_point_cloud") {
+        return TransitionMetricType::kKovarDirectionalPointCloud;
+    }
+    if (name == "dynamics" || name == "dynamics_window") {
+        return TransitionMetricType::kDynamicsWindow;
+    }
+    throw std::runtime_error(
+        "ParseTransitionMetricType: unknown transition metric '" + name + "'");
+}
+
 PmgEdge PmgBuilder::BuildEdge(
     const Skeleton& skeleton,
     int source_node_index,

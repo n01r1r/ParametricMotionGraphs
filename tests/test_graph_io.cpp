@@ -106,6 +106,22 @@ pmg::BuiltPmgArtifact MakeArtifact() {
     edge.config.source_sample_count = 7;
     edge.config.target_sample_count = 11;
     edge.config.seed = 42;
+    edge.config.transition_metric_type = pmg::TransitionMetricType::kDynamicsWindow;
+    edge.config.transition_metric.position_weight = 2.0f;
+    edge.config.transition_metric.velocity_weight = 0.25f;
+    edge.config.transition_metric.acceleration_weight = 0.05f;
+    edge.config.transition_metric.root_motion_weight = 0.75f;
+    edge.config.transition_metric.foot_contact_weight = 3.0f;
+    edge.config.transition_metric.position_scale = 100.0f;
+    edge.config.transition_metric.velocity_scale = 200.0f;
+    edge.config.transition_metric.acceleration_scale = 300.0f;
+    edge.config.transition_metric.root_speed_scale = 40.0f;
+    edge.config.transition_metric.yaw_rate_scale = 5.0f;
+    edge.config.transition_metric.foot_mismatch_penalty = 7.0f;
+    edge.config.transition_metric.per_joint_weights = {1.0f};
+    edge.config.transition_metric.contact_joint_indices = {0};
+    edge.config.transition_metric.contact_settings =
+        pmg::ContactDetectionSettings{0.5f, 2.5f, 1};
     edge.report.edge_created = true;
     pmg::SourceSampleBuildReport report;
     report.source_parameter = {0.25f, 0.25f};
@@ -222,6 +238,32 @@ void WriteV6CalibrationFixture(const std::filesystem::path& path) {
            << "edges 0\n";
 }
 
+void WriteV9MetriclessFixture(const std::filesystem::path& path) {
+    std::ofstream output(path);
+    output << "PMG_GRAPH_V9\n"
+           << "runtime 3 30 \"BVH native units\"\n"
+           << "sources 0\n"
+           << "registrations 0\n"
+           << "edge_builds 1\n"
+           << "edge_build \"walk\" \"walk\" "
+           << "7 11 3 30 80 110 42 0.0001 1 "
+           << "5 2 2 0.7 0.95 0.05 0.3 0 "
+           << "1 \"\" 0\n"
+           << "skeleton 1\n"
+           << "joint \"Hips\" -1 0 0 0 0\n"
+           << "nodes 1\n"
+           << "node \"walk\" 1 1\n"
+           << "example 1 0\n"
+           << "clip \"clip\" 30 2\n"
+           << "frame 0 0 0 1 1 0 0 0\n"
+           << "frame 1 0 0 1 1 0 0 0\n"
+           << "warps 0\n"
+           << "calibration 0 0\n"
+           << "edges 1\n"
+           << "edge 0 0 1\n"
+           << "sample 1 0 1 0 1 1 0.8 0.1 12.5 0\n";
+}
+
 }  // namespace
 
 int main() {
@@ -254,7 +296,7 @@ int main() {
         std::ifstream input(path);
         std::string header;
         input >> header;
-        assert(header == "PMG_GRAPH_V9");
+        assert(header == "PMG_GRAPH_V10");
     }
     const pmg::BuiltPmgArtifact loaded =
         pmg::LoadPmgArtifactText(path.string());
@@ -265,6 +307,20 @@ int main() {
     assert(loaded.metadata.source_bvh_paths[0] == "a path/walk_a.bvh");
     assert(loaded.metadata.node_registrations[0].dtw_refine);
     assert(loaded.metadata.edge_builds[0].config.seed == 42);
+    assert(loaded.metadata.edge_builds[0].config.transition_metric_type ==
+           pmg::TransitionMetricType::kDynamicsWindow);
+    assert(std::abs(
+               loaded.metadata.edge_builds[0]
+                   .config.transition_metric.position_weight -
+               2.0f) < 1.0e-6f);
+    assert(std::abs(
+               loaded.metadata.edge_builds[0]
+                   .config.transition_metric.foot_mismatch_penalty -
+               7.0f) < 1.0e-6f);
+    assert(loaded.metadata.edge_builds[0]
+               .config.transition_metric.contact_settings.has_value());
+    assert(loaded.metadata.edge_builds[0]
+               .config.transition_metric.contact_joint_indices[0] == 0);
     assert(loaded.metadata.edge_builds[0].report.source_reports[0].bad_count == 1);
     assert(loaded.graph.Node(0).motion_space.HasExampleTimeWarps());
     assert(loaded.graph.Edge(0).samples[0].target_phase_samples.size() == 2);
@@ -361,6 +417,18 @@ int main() {
                1.0e-6f);
         assert(std::abs(transition->target_transition_phase - 0.1f) <
                1.0e-6f);
+    }
+
+    {
+        WriteV9MetriclessFixture(path);
+        const pmg::BuiltPmgArtifact v9 =
+            pmg::LoadPmgArtifactText(path.string());
+        assert(v9.metadata.edge_builds[0].config.transition_metric_type ==
+               pmg::TransitionMetricType::kKovarDirectionalPointCloud);
+        assert(v9.metadata.edge_builds[0]
+                   .config.transition_metric.contact_joint_indices.empty());
+        assert(std::abs(v9.graph.Edge(0).samples[0].transition_distance -
+                        12.5f) < 1.0e-6f);
     }
 
     {

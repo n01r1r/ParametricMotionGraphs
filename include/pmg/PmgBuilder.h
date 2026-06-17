@@ -13,6 +13,9 @@ enum class TransitionMetricType {
     kDynamicsWindow,
 };
 
+const char* TransitionMetricTypeName(TransitionMetricType type);
+TransitionMetricType ParseTransitionMetricType(const std::string& name);
+
 // Configuration for sampling-based edge construction (paper §3.2).
 struct PmgBuilderConfig {
     int source_sample_count = 50;

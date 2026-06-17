@@ -44,6 +44,8 @@ struct GraphSpecEdge {
     bool has_build_config = false;
     bool has_threshold_config = false;  // edge_config duplicate guard
     bool has_phase_range = false;       // edge_phase_range duplicate guard
+    bool has_metric_type = false;       // edge_metric duplicate guard
+    bool has_metric_config = false;     // edge_metric_config duplicate guard
     PmgBuilderConfig build_config;
 };
 
@@ -67,6 +69,14 @@ struct GraphSpec {
 //               <tgt_start> <tgt_end>   # transition-search sub-range (§6.3),
 //               each in [0,1] with start < end; pairs with edge_config to also
 //               set thresholds (otherwise default thresholds apply)
+//   edge_metric <source> <target> <kovar_directional_point_cloud|dynamics_window>
+//   edge_metric_config <source> <target>
+//               <position_weight> <velocity_weight> <acceleration_weight>
+//               <root_motion_weight> <foot_contact_weight>
+//               <position_scale> <velocity_scale> <acceleration_scale>
+//               <root_speed_scale> <yaw_rate_scale>
+//               <root_displacement_weight> <root_speed_weight>
+//               <root_yaw_rate_weight> <foot_mismatch_penalty>
 //   expect <node> corner_coverage full  # every axis-extreme corner of the
 //               node's parameter box must be sampled by an example (catches a
 //               declared N-D space that is really a lower-dimensional simplex)

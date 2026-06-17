@@ -270,5 +270,29 @@ int main() {
         assert(active.foot_cost > 0.0f);
     }
 
+    // Optimal dynamics transition carries the same scalar contract as the grid:
+    // OptimalTransition::distance is the selected cell's total_cost.
+    {
+        pmg::DistanceGridConfig grid_config;
+        grid_config.window_size = 3;
+        grid_config.source_frame_stride = 2;
+        grid_config.target_frame_stride = 2;
+        const pmg::TransitionMetricConfig metric_config =
+            PositionVelocityMetricConfig();
+        const pmg::OptimalTransition best =
+            pmg::MotionDistance::FindOptimalDynamicsTransitionForConvention(
+                skeleton, base, TranslateClip(base, 0.2f, 0.1f),
+                grid_config, metric_config,
+                pmg::TransitionWindowConvention::kKovarDirectional);
+        assert(best.valid);
+        const pmg::TransitionMetricResult selected =
+            pmg::MotionDistance::EvaluateDynamicsTransition(
+                skeleton, base, TranslateClip(base, 0.2f, 0.1f),
+                best.source_frame, best.target_frame, grid_config,
+                metric_config,
+                pmg::TransitionWindowConvention::kKovarDirectional);
+        assert(std::abs(best.distance - selected.total_cost) < 1.0e-6f);
+    }
+
     return 0;
 }
