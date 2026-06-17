@@ -80,7 +80,47 @@ float PercentileSorted(const std::vector<float>& sorted, float percentile) {
     return (1.0f - alpha) * sorted[lower] + alpha * sorted[upper];
 }
 
+OptimalTransition FindConfiguredTransition(
+    const Skeleton& skeleton,
+    const MotionClip& source_clip,
+    const MotionClip& target_clip,
+    const DistanceGridConfig& edge_grid,
+    const PmgBuilderConfig& config) {
+    switch (config.transition_metric_type) {
+        case TransitionMetricType::kKovarDirectionalPointCloud:
+            return MotionDistance::FindOptimalTransitionForConvention(
+                skeleton, source_clip, target_clip, edge_grid,
+                config.transition_convention);
+        case TransitionMetricType::kDynamicsWindow:
+            return MotionDistance::FindOptimalDynamicsTransitionForConvention(
+                skeleton, source_clip, target_clip, edge_grid,
+                config.transition_metric, config.transition_convention);
+    }
+    throw std::runtime_error("PmgBuilder::BuildEdge: unknown transition metric type");
+}
+
 }  // namespace
+
+const char* TransitionMetricTypeName(TransitionMetricType type) {
+    switch (type) {
+        case TransitionMetricType::kKovarDirectionalPointCloud:
+            return "kovar_directional_point_cloud";
+        case TransitionMetricType::kDynamicsWindow:
+            return "dynamics_window";
+    }
+    throw std::runtime_error("TransitionMetricTypeName: unknown transition metric type");
+}
+
+TransitionMetricType ParseTransitionMetricType(const std::string& name) {
+    if (name == "kovar" || name == "kovar_directional_point_cloud") {
+        return TransitionMetricType::kKovarDirectionalPointCloud;
+    }
+    if (name == "dynamics" || name == "dynamics_window") {
+        return TransitionMetricType::kDynamicsWindow;
+    }
+    throw std::runtime_error(
+        "ParseTransitionMetricType: unknown transition metric '" + name + "'");
+}
 
 PmgEdge PmgBuilder::BuildEdge(
     const Skeleton& skeleton,
@@ -159,9 +199,9 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
 
         for (std::size_t target_index = 0; target_index < target_samples.size(); ++target_index) {
             const OptimalTransition transition =
-                MotionDistance::FindOptimalTransitionForConvention(
+                FindConfiguredTransition(
                     skeleton, source_clip, target_clips[target_index],
-                    edge_grid, config.transition_convention);
+                    edge_grid, config);
             const float distance = transition.distance;
             distances.push_back(distance);
 

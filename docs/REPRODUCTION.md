@@ -119,7 +119,7 @@ reject_reason
   .\outputs\paper_core_walk\artifact.pmg
 ```
 
-The runtime requires a V4+ artifact with a skeleton. Current writes use V9.
+The runtime requires a V4+ artifact with a skeleton. Current writes use V10.
 Multidimensional calibration grid density is declared per node with
 `parameter_calibration <node> <samples_per_axis>`; omitted declarations use 9.
 

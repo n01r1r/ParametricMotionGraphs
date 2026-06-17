@@ -119,8 +119,9 @@ _Avoid_: state machine, blend graph.
 **BuiltPmgArtifact**:
 The complete offline output consumed online: Skeleton, registered
 ParametricMotionGraph, parameter calibrations, runtime sampling rate, source
-paths, registration settings, edge sampling configuration, seeds, and build
-reports. Serialized as PMG_GRAPH_V7 (V2-V6 stay readable).
+paths, registration settings, edge sampling configuration, transition metric
+kind/config, seeds, and build reports. Serialized as PMG_GRAPH_V10 (V2-V9 stay
+readable).
 _Avoid_: graph file, cached graph (those omit the complete runtime contract).
 
 **TransitionSample**:

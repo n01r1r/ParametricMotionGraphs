@@ -15,6 +15,7 @@
 | Windowed point cloud | Adapted | `MotionDistance::BuildPointCloud` | `test_motion_distance`, `test_distance_grid` |
 | Closed-form floor alignment, Eqs. 1-4 | Direct | `MotionDistance::AlignedPointCloudDistance`, `RigidTransform2D` | `test_motion_distance`, `test_rigid_transform` |
 | Frame-pair distance function | Direct | `MotionDistance::BuildDistanceGrid` | `test_distance_grid` |
+| Dynamics/contact transition score | Extension | `EvaluateDynamicsTransition`, opt-in `TransitionMetricType::kDynamicsWindow` | `test_motion_distance`, `test_pmg_builder` |
 | Candidate transition threshold | Adapted | `FindOptimalTransition`, PMG double thresholds in `PmgBuilder` | `test_distance_grid`, `test_pmg_builder` |
 | Root interpolation and joint slerp, Eqs. 5-6 | Direct | `BlendPose` | `test_pose_blend` |
 | Cubic C1 blend, Eq. 7 | Direct with reversed weight convention | `RuntimeController::CurrentPose` | `test_runtime_controller` |
@@ -38,6 +39,18 @@ representation differences:
 The source-start/target-end placement and raw weighted squared sum now match
 Kovar Section 3.1 exactly. Joint sampling and endpoint handling still make
 thresholds corpus/configuration specific.
+
+### Dynamics metric extension
+
+`TransitionMetricType::kDynamicsWindow` is default-off and does not replace the
+paper metric. It evaluates the same directional source/target windows but adds
+RMS-normalized position, velocity, acceleration, root-motion, and explicit
+foot-contact terms. The alignment is still estimated from weighted joint
+positions; positions receive yaw plus floor translation, while velocity,
+acceleration, and root deltas receive yaw rotation only. Contact penalties are
+inactive unless the caller supplies both contact settings and valid contact
+joint indices. Its thresholds require separate corpus/unit calibration and must
+not be compared with the raw Kovar squared-sum thresholds.
 
 ### Alignment formula map
 
@@ -156,7 +169,7 @@ Key files:
 | PMG lookup handles exact and interpolated queries | `test_edge_lookup` |
 | Registration preserves shared contact structure | `test_motion_registration`, `test_registered_blending` |
 | DTW refinement preserves contact anchors | `test_dtw_refine` |
-| V9 round-trip preserves calibration, transition distance D, and runtime behavior | `test_graph_io` |
+| V10 round-trip preserves calibration, transition distance D, metric contract, and runtime behavior | `test_graph_io` |
 | Runtime world placement remains continuous | `test_runtime_controller` |
 | Goal control maps world goals to achievable turn rates | `test_goal_directed_locomotion` |
 | Included BVH graph builds and streams | CTest CLI cases in `CMakeLists.txt` |

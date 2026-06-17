@@ -26,18 +26,20 @@ struct GraphPayloadFormat {
     bool quoted_names;               // V4+ quote node/clip/joint names
     bool has_transition_convention;  // V8+ store the edge transition-window convention
     bool has_transition_distance;    // V9+ store per-sample build-time distance D
+    bool has_transition_metric_config;  // V10+ store metric kind/config per edge build
 };
 
 std::optional<GraphPayloadFormat> FormatForHeader(const std::string& header) {
-    //                                       meta+skel warp  calib vector target quoted conv   dist
-    if (header == "PMG_GRAPH_V9") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true};
-    if (header == "PMG_GRAPH_V8") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  false};
-    if (header == "PMG_GRAPH_V7") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false, false};
-    if (header == "PMG_GRAPH_V6") return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false, false};
-    if (header == "PMG_GRAPH_V5") return GraphPayloadFormat{true,  true,  true,  false, false, true,  false, false};
-    if (header == "PMG_GRAPH_V4") return GraphPayloadFormat{true,  true,  false, false, false, true,  false, false};
-    if (header == "PMG_GRAPH_V3") return GraphPayloadFormat{false, true,  false, false, false, false, false, false};
-    if (header == "PMG_GRAPH_V2") return GraphPayloadFormat{false, false, false, false, false, false, false, false};
+    //                                       meta+skel warp  calib vector target quoted conv   dist   metric
+    if (header == "PMG_GRAPH_V10") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true};
+    if (header == "PMG_GRAPH_V9")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  false};
+    if (header == "PMG_GRAPH_V8")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  false, false};
+    if (header == "PMG_GRAPH_V7")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false, false, false};
+    if (header == "PMG_GRAPH_V6")  return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false, false, false};
+    if (header == "PMG_GRAPH_V5")  return GraphPayloadFormat{true,  true,  true,  false, false, true,  false, false, false};
+    if (header == "PMG_GRAPH_V4")  return GraphPayloadFormat{true,  true,  false, false, false, true,  false, false, false};
+    if (header == "PMG_GRAPH_V3")  return GraphPayloadFormat{false, true,  false, false, false, false, false, false, false};
+    if (header == "PMG_GRAPH_V2")  return GraphPayloadFormat{false, false, false, false, false, false, false, false, false};
     return std::nullopt;
 }
 
@@ -59,6 +61,46 @@ ParameterVector ReadParameter(std::istream& input) {
         throw std::runtime_error("LoadPmgArtifactText: failed to read parameter vector");
     }
     return parameter;
+}
+
+void WriteFloatVector(std::ostream& output, const std::vector<float>& values) {
+    output << values.size();
+    for (const float value : values) {
+        output << ' ' << value;
+    }
+}
+
+std::vector<float> ReadFloatVector(std::istream& input) {
+    std::size_t size = 0;
+    input >> size;
+    std::vector<float> values(size);
+    for (float& value : values) {
+        input >> value;
+    }
+    if (!input) {
+        throw std::runtime_error("LoadPmgArtifactText: failed to read float vector");
+    }
+    return values;
+}
+
+void WriteIntVector(std::ostream& output, const std::vector<int>& values) {
+    output << values.size();
+    for (const int value : values) {
+        output << ' ' << value;
+    }
+}
+
+std::vector<int> ReadIntVector(std::istream& input) {
+    std::size_t size = 0;
+    input >> size;
+    std::vector<int> values(size);
+    for (int& value : values) {
+        input >> value;
+    }
+    if (!input) {
+        throw std::runtime_error("LoadPmgArtifactText: failed to read int vector");
+    }
+    return values;
 }
 
 void WriteAabb(std::ostream& output, const ParameterAabb& box) {
@@ -146,6 +188,7 @@ std::vector<float> ReadPhaseList(std::istream& input) {
 
 void WriteBuilderConfig(std::ostream& output, const PmgBuilderConfig& config) {
     const DistanceGridConfig& grid = config.distance_grid;
+    const TransitionMetricConfig& metric = config.transition_metric;
     output << config.source_sample_count << ' ' << config.target_sample_count << ' '
            << config.generated_frame_count << ' '
            << config.generated_frames_per_second << ' '
@@ -157,7 +200,27 @@ void WriteBuilderConfig(std::ostream& output, const PmgBuilderConfig& config) {
            << grid.target_frame_stride << ' ' << grid.source_phase_start << ' '
            << grid.source_phase_end << ' ' << grid.target_phase_start << ' '
            << grid.target_phase_end << ' '
-           << static_cast<int>(config.transition_convention);
+           << static_cast<int>(config.transition_convention) << ' '
+           << static_cast<int>(config.transition_metric_type) << ' '
+           << metric.position_weight << ' ' << metric.velocity_weight << ' '
+           << metric.acceleration_weight << ' ' << metric.root_motion_weight << ' '
+           << metric.foot_contact_weight << ' '
+           << metric.position_scale << ' ' << metric.velocity_scale << ' '
+           << metric.acceleration_scale << ' ' << metric.root_speed_scale << ' '
+           << metric.yaw_rate_scale << ' '
+           << metric.root_displacement_weight << ' '
+           << metric.root_speed_weight << ' '
+           << metric.root_yaw_rate_weight << ' '
+           << metric.foot_mismatch_penalty << ' ';
+    WriteFloatVector(output, metric.per_joint_weights);
+    output << ' ';
+    WriteIntVector(output, metric.contact_joint_indices);
+    output << ' ' << static_cast<int>(metric.contact_settings.has_value());
+    if (metric.contact_settings.has_value()) {
+        output << ' ' << metric.contact_settings->height_threshold << ' '
+               << metric.contact_settings->speed_threshold << ' '
+               << metric.contact_settings->min_contact_frames;
+    }
 }
 
 PmgBuilderConfig ReadBuilderConfig(
@@ -184,6 +247,42 @@ PmgBuilderConfig ReadBuilderConfig(
         // reinterpret them.
         config.transition_convention =
             TransitionWindowConvention::kKovarDirectional;
+    }
+    if (format.has_transition_metric_config) {
+        int metric_type_value = 0;
+        TransitionMetricConfig& metric = config.transition_metric;
+        input >> metric_type_value
+              >> metric.position_weight >> metric.velocity_weight
+              >> metric.acceleration_weight >> metric.root_motion_weight
+              >> metric.foot_contact_weight
+              >> metric.position_scale >> metric.velocity_scale
+              >> metric.acceleration_scale >> metric.root_speed_scale
+              >> metric.yaw_rate_scale
+              >> metric.root_displacement_weight
+              >> metric.root_speed_weight
+              >> metric.root_yaw_rate_weight
+              >> metric.foot_mismatch_penalty;
+        if (metric_type_value < static_cast<int>(TransitionMetricType::kKovarDirectionalPointCloud) ||
+            metric_type_value > static_cast<int>(TransitionMetricType::kDynamicsWindow)) {
+            throw std::runtime_error(
+                "LoadPmgArtifactText: invalid transition metric type");
+        }
+        config.transition_metric_type =
+            static_cast<TransitionMetricType>(metric_type_value);
+        metric.per_joint_weights = ReadFloatVector(input);
+        metric.contact_joint_indices = ReadIntVector(input);
+        int has_contact_settings = 0;
+        input >> has_contact_settings;
+        if (has_contact_settings != 0) {
+            ContactDetectionSettings settings;
+            input >> settings.height_threshold >> settings.speed_threshold
+                  >> settings.min_contact_frames;
+            metric.contact_settings = settings;
+        }
+    } else {
+        config.transition_metric_type =
+            TransitionMetricType::kKovarDirectionalPointCloud;
+        config.transition_metric = TransitionMetricConfig{};
     }
     if (!input) {
         throw std::runtime_error(
@@ -780,7 +879,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V9\n";
+    output << "PMG_GRAPH_V10\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
@@ -798,7 +897,7 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     const std::optional<GraphPayloadFormat> format = FormatForHeader(header);
     if (!format) {
         throw std::runtime_error(
-            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V9");
+            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V10");
     }
 
     BuiltPmgArtifact artifact;

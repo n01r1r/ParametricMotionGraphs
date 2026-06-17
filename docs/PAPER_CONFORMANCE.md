@@ -262,8 +262,12 @@ Stable ids for the adaptations and gaps above.
   `LookupInterpolated` carries it through the same kNN source weighting into
   `InterpolatedTransition::distance` and `RuntimeTransitionDiagnostics`, so a
   streamed transition is tagged with the offline edge quality it was scheduled
-  from (observable against runtime pop via `--dump-transitions-csv`). Serialized
-  as `PMG_GRAPH_V9`; V2–V8 read back zero.
+  from (observable against runtime pop via `--dump-transitions-csv`).
+  V10 update: artifacts also store per-edge transition metric kind/config, so
+  `transition_distance` can be interpreted as either Kovar point-cloud distance
+  or opt-in dynamics total cost. Pre-V10 artifacts are interpreted as
+  `kKovarDirectionalPointCloud`.
+  V9 serialized scalar D; V2-V8 read back zero.
 - **Transition-quality classification is diagnostic, not a paper metric.**
   `TransitionQuality` measures three intervals before and after a scheduled
   transition by default; the CLI expands this to the runtime blend-frame count

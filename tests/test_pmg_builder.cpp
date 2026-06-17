@@ -163,10 +163,33 @@ int main() {
     // Deterministic given a fixed seed.
     {
         pmg::PmgBuilderConfig config = SmallConfig();
+        assert(config.transition_metric_type ==
+               pmg::TransitionMetricType::kKovarDirectionalPointCloud);
         config.good_transition_threshold = 1.0e9f;
         config.bad_transition_threshold = 2.0e9f;
         const pmg::PmgEdge first = pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, space, space, config);
         const pmg::PmgEdge second = pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, space, space, config);
+        assert(first.samples.size() == second.samples.size());
+        for (std::size_t i = 0; i < first.samples.size(); ++i) {
+            assert(SamplesEqual(first.samples[i], second.samples[i]));
+        }
+    }
+
+    // Opt-in dynamics metric uses a separate route but remains deterministic
+    // under the same sampling seed. Thresholds here are extension-specific and
+    // deliberately broad; old Kovar thresholds are not reused as claims.
+    {
+        pmg::PmgBuilderConfig config = SmallConfig();
+        config.transition_metric_type =
+            pmg::TransitionMetricType::kDynamicsWindow;
+        config.good_transition_threshold = 1.0e9f;
+        config.bad_transition_threshold = 2.0e9f;
+        config.transition_metric.root_motion_weight = 0.0f;
+        const pmg::PmgEdge first =
+            pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, space, space, config);
+        const pmg::PmgEdge second =
+            pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, space, space, config);
+        assert(!first.samples.empty());
         assert(first.samples.size() == second.samples.size());
         for (std::size_t i = 0; i < first.samples.size(); ++i) {
             assert(SamplesEqual(first.samples[i], second.samples[i]));

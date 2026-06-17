@@ -173,6 +173,8 @@ int DiagnoseGraphEdgeCommand(
     std::cout << "diagnose edge: " << source_node << " -> " << target_node << "\n";
     std::cout << "config: TGOOD=" << config.good_transition_threshold
               << " TBAD=" << config.bad_transition_threshold
+              << " metric="
+              << pmg::TransitionMetricTypeName(config.transition_metric_type)
               << " source_samples=" << config.source_sample_count
               << " target_samples=" << config.target_sample_count << "\n";
 
@@ -199,6 +201,42 @@ pmg::PmgBuilderConfig ParseBuilderConfigOptions(
             config.good_transition_threshold = std::stof(require_value("--tgood"));
         } else if (option == "--tbad") {
             config.bad_transition_threshold = std::stof(require_value("--tbad"));
+        } else if (option == "--transition-metric") {
+            config.transition_metric_type =
+                pmg::ParseTransitionMetricType(require_value("--transition-metric"));
+        } else if (option == "--position-weight") {
+            config.transition_metric.position_weight =
+                std::stof(require_value("--position-weight"));
+        } else if (option == "--velocity-weight") {
+            config.transition_metric.velocity_weight =
+                std::stof(require_value("--velocity-weight"));
+        } else if (option == "--acceleration-weight") {
+            config.transition_metric.acceleration_weight =
+                std::stof(require_value("--acceleration-weight"));
+        } else if (option == "--root-motion-weight") {
+            config.transition_metric.root_motion_weight =
+                std::stof(require_value("--root-motion-weight"));
+        } else if (option == "--foot-contact-weight") {
+            config.transition_metric.foot_contact_weight =
+                std::stof(require_value("--foot-contact-weight"));
+        } else if (option == "--position-scale") {
+            config.transition_metric.position_scale =
+                std::stof(require_value("--position-scale"));
+        } else if (option == "--velocity-scale") {
+            config.transition_metric.velocity_scale =
+                std::stof(require_value("--velocity-scale"));
+        } else if (option == "--acceleration-scale") {
+            config.transition_metric.acceleration_scale =
+                std::stof(require_value("--acceleration-scale"));
+        } else if (option == "--root-speed-scale") {
+            config.transition_metric.root_speed_scale =
+                std::stof(require_value("--root-speed-scale"));
+        } else if (option == "--yaw-rate-scale") {
+            config.transition_metric.yaw_rate_scale =
+                std::stof(require_value("--yaw-rate-scale"));
+        } else if (option == "--foot-mismatch-penalty") {
+            config.transition_metric.foot_mismatch_penalty =
+                std::stof(require_value("--foot-mismatch-penalty"));
         } else if (option == "--source-samples") {
             config.source_sample_count = std::stoi(require_value("--source-samples"));
         } else if (option == "--target-samples") {
@@ -394,7 +432,7 @@ void WriteArtifactReports(
     {
         std::ofstream config(output_directory / "config.json");
         config << "{\n"
-               << "  \"format\": \"PMG_GRAPH_V7\",\n"
+               << "  \"format\": \"PMG_GRAPH_V10\",\n"
                << "  \"units\": \"" << JsonEscape(artifact.metadata.units) << "\",\n"
                << "  \"generated_frame_count\": "
                << artifact.metadata.generated_frame_count << ",\n"
@@ -442,14 +480,48 @@ void WriteArtifactReports(
                 artifact.metadata.edge_builds[index];
             config << "    {\"source\": \"" << JsonEscape(edge.source_node)
                    << "\", \"target\": \"" << JsonEscape(edge.target_node)
-                   << "\", \"tgood\": "
+                   << "\", \"transition_metric\": \""
+                   << pmg::TransitionMetricTypeName(
+                          edge.config.transition_metric_type)
+                   << "\", \"distance_units\": "
+                   << "\"metric-specific normalized cost\""
+                   << ", \"tgood\": "
                    << edge.config.good_transition_threshold
                    << ", \"tbad\": " << edge.config.bad_transition_threshold
                    << ", \"source_samples\": "
                    << edge.config.source_sample_count
                    << ", \"target_samples\": "
                    << edge.config.target_sample_count
-                   << ", \"seed\": " << edge.config.seed << "}";
+                   << ", \"seed\": " << edge.config.seed
+                   << ", \"position_weight\": "
+                   << edge.config.transition_metric.position_weight
+                   << ", \"velocity_weight\": "
+                   << edge.config.transition_metric.velocity_weight
+                   << ", \"acceleration_weight\": "
+                   << edge.config.transition_metric.acceleration_weight
+                   << ", \"root_motion_weight\": "
+                   << edge.config.transition_metric.root_motion_weight
+                   << ", \"foot_contact_weight\": "
+                   << edge.config.transition_metric.foot_contact_weight
+                   << ", \"position_scale\": "
+                   << edge.config.transition_metric.position_scale
+                   << ", \"velocity_scale\": "
+                   << edge.config.transition_metric.velocity_scale
+                   << ", \"acceleration_scale\": "
+                   << edge.config.transition_metric.acceleration_scale
+                   << ", \"root_speed_scale\": "
+                   << edge.config.transition_metric.root_speed_scale
+                   << ", \"yaw_rate_scale\": "
+                   << edge.config.transition_metric.yaw_rate_scale
+                   << ", \"root_displacement_weight\": "
+                   << edge.config.transition_metric.root_displacement_weight
+                   << ", \"root_speed_weight\": "
+                   << edge.config.transition_metric.root_speed_weight
+                   << ", \"root_yaw_rate_weight\": "
+                   << edge.config.transition_metric.root_yaw_rate_weight
+                   << ", \"foot_mismatch_penalty\": "
+                   << edge.config.transition_metric.foot_mismatch_penalty
+                   << "}";
             config << (index + 1 == artifact.metadata.edge_builds.size()
                            ? "\n"
                            : ",\n");
@@ -555,6 +627,22 @@ void WriteArtifactReports(
                << "` (" << artifact_bytes << " bytes)\n"
                << "- Edge table: `tables/edge_samples.csv`\n"
                << "- Cyclic table: `tables/cyclic_samples.csv`\n\n"
+               << "## Transition Metric Contract\n\n"
+               << "`transition_distance` is the selected edge metric's "
+                  "stored scalar cost. Thresholds are corpus- and "
+                  "metric-specific; see `config.json` for metric kind, "
+                  "weights, and scales.\n\n";
+        for (const pmg::EdgeBuildMetadata& edge : artifact.metadata.edge_builds) {
+            report << "- " << edge.source_node << " -> " << edge.target_node
+                   << ": "
+                   << pmg::TransitionMetricTypeName(
+                          edge.config.transition_metric_type)
+                   << ", TGOOD="
+                   << edge.config.good_transition_threshold
+                   << ", TBAD=" << edge.config.bad_transition_threshold
+                   << "\n";
+        }
+        report << "\n"
                << "## Metrics\n\n"
                << "- Build time: " << build_seconds << " s\n"
                << "- Nodes / edges: " << artifact.graph.NumNodes() << " / "
@@ -590,10 +678,20 @@ void WriteArtifactReports(
 
 int BuildGraphCommand(const std::string& spec_path,
                       const std::string& output_path,
-                      const pmg::PmgBuilderConfig& config) {
-    const pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
+                      int argc,
+                      char** argv,
+                      int first_option_index) {
+    pmg::GraphSpec spec = pmg::LoadGraphSpec(spec_path);
     pmg::ArtifactBuildConfig artifact_config;
-    artifact_config.default_edge_config = config;
+    artifact_config.default_edge_config =
+        ParseBuilderConfigOptions(argc, argv, first_option_index);
+    for (pmg::GraphSpecEdge& edge : spec.edges) {
+        edge.build_config = ParseBuilderConfigOptions(
+            argc, argv, first_option_index,
+            edge.has_build_config ? edge.build_config
+                                  : artifact_config.default_edge_config);
+        edge.has_build_config = true;
+    }
     const auto build_start = std::chrono::steady_clock::now();
     const pmg::BuiltPmgArtifact artifact =
         pmg::BuildPmgArtifactFromSpec(spec, artifact_config);
@@ -608,7 +706,7 @@ int BuildGraphCommand(const std::string& spec_path,
     pmg::SavePmgArtifactText(artifact, output_path);
     WriteArtifactReports(artifact, artifact_path, build_seconds);
     std::cout << "wrote graph: " << output_path << "\n";
-    std::cout << "format=PMG_GRAPH_V7\n";
+    std::cout << "format=PMG_GRAPH_V10\n";
     std::cout << "nodes=" << artifact.graph.NumNodes()
               << " edges=" << artifact.graph.NumEdges() << "\n";
     for (const pmg::EdgeBuildMetadata& edge_build : artifact.metadata.edge_builds) {
@@ -663,9 +761,7 @@ namespace pmgcli {
 std::optional<int> TryRunGraphCommand(int argc, char** argv) {
     const std::string command = argc > 1 ? argv[1] : "";
     if (command == "--build-graph" && argc >= 4) {
-        const pmg::PmgBuilderConfig config =
-            ParseBuilderConfigOptions(argc, argv, 4);
-        return BuildGraphCommand(argv[2], argv[3], config);
+        return BuildGraphCommand(argv[2], argv[3], argc, argv, 4);
     }
     if (command == "--validate-graph-spec" && argc == 3) {
         return ValidateGraphSpecCommand(argv[2]);

@@ -1782,6 +1782,7 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     constexpr const char* kSourceParameterLabel = "SOURCE";
     constexpr const char* kReachableTargetLabel = "TARGET RANGE";
     constexpr const char* kTransitionPhasesLabel = "PHASES";
+    constexpr const char* kMetricContractLabel = "METRIC";
     constexpr const char* kMetricSupportLabel = "METRIC SUPPORT";
     constexpr const char* kRuntimeSupportLabel = "RUNTIME SUPPORT";
     constexpr const char* kAlignmentTransformLabel = "ALIGNMENT";
@@ -1790,6 +1791,7 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
         ImGui::CalcTextSize(kSourceParameterLabel).x,
         ImGui::CalcTextSize(kReachableTargetLabel).x,
         ImGui::CalcTextSize(kTransitionPhasesLabel).x,
+        ImGui::CalcTextSize(kMetricContractLabel).x,
         ImGui::CalcTextSize(kMetricSupportLabel).x,
         ImGui::CalcTextSize(kRuntimeSupportLabel).x,
         ImGui::CalcTextSize(kAlignmentTransformLabel).x,
@@ -1876,6 +1878,63 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
             draw_list, target_phase, origin.x, origin.y + 2.0f,
             width, 12.0f, IM_COL32(245, 180, 65, 255));
         ImGui::InvisibleButton("##transition_phases", ImVec2(width, 20.0f));
+    }
+
+    const pmg::EdgeBuildMetadata* metric_metadata = nullptr;
+    if (source_artifact_.has_value()) {
+        int metric_source_node = source_node;
+        int metric_target_node = graph_desired_node_;
+        if (active.has_value()) {
+            metric_source_node = active->source_node;
+            metric_target_node = active->target_node;
+        } else if (selected_edge != nullptr) {
+            metric_source_node = selected_edge->source_node;
+            metric_target_node = selected_edge->target_node;
+        }
+        const std::string& source_name = graph_.Node(metric_source_node).name;
+        const std::string& target_name = graph_.Node(metric_target_node).name;
+        for (const pmg::EdgeBuildMetadata& edge_build :
+             source_artifact_->metadata.edge_builds) {
+            if (edge_build.source_node == source_name &&
+                edge_build.target_node == target_name) {
+                metric_metadata = &edge_build;
+                break;
+            }
+        }
+    }
+
+    ImGui::TextColored(
+        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
+        kMetricContractLabel);
+    ImGui::SameLine(value_column_x);
+    if (metric_metadata != nullptr) {
+        float transition_distance = 0.0f;
+        bool has_distance = false;
+        if (active.has_value()) {
+            transition_distance = active->interpolated_transition_distance;
+            has_distance = true;
+        } else if (preview.has_value()) {
+            transition_distance = preview->transition_distance;
+            has_distance = true;
+        }
+        if (has_distance) {
+            ImGui::Text(
+                "%s  D %.3f  GOOD <= %.3f  BAD >= %.3f",
+                pmg::TransitionMetricTypeName(
+                    metric_metadata->config.transition_metric_type),
+                transition_distance,
+                metric_metadata->config.good_transition_threshold,
+                metric_metadata->config.bad_transition_threshold);
+        } else {
+            ImGui::Text(
+                "%s  GOOD <= %.3f  BAD >= %.3f",
+                pmg::TransitionMetricTypeName(
+                    metric_metadata->config.transition_metric_type),
+                metric_metadata->config.good_transition_threshold,
+                metric_metadata->config.bad_transition_threshold);
+        }
+    } else {
+        ImGui::TextDisabled("artifact metric metadata unavailable");
     }
 
     ImGui::TextColored(

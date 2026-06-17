@@ -1,6 +1,7 @@
 #include "pmg/GraphSpec.h"
 
 #include <cassert>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 
@@ -52,6 +53,11 @@ int main() {
          << "example walk 0 walk_a.bvh\n"
          << "example walk 1 walk_b.bvh\n"
          << "edge walk walk\n"
+         << "edge_metric walk walk dynamics_window\n"
+         << "edge_metric_config walk walk "
+         << "2 0.25 0.05 0.75 3 "
+         << "100 200 300 40 5 "
+         << "1 1 1 7\n"
          << "edge_config walk walk 10 20 2 3 99\n";
     spec.close();
 
@@ -63,6 +69,30 @@ int main() {
     assert(parsed.nodes[0].contact_joints.empty());
     assert(parsed.edges[0].has_build_config);
     assert(parsed.edges[0].build_config.seed == 99);
+    assert(parsed.edges[0].build_config.transition_metric_type ==
+           pmg::TransitionMetricType::kDynamicsWindow);
+    assert(std::abs(parsed.edges[0].build_config.transition_metric.position_weight -
+                    2.0f) < 1.0e-6f);
+    assert(std::abs(parsed.edges[0]
+                        .build_config.transition_metric.foot_mismatch_penalty -
+                    7.0f) < 1.0e-6f);
+
+    const std::filesystem::path invalid_edge_metric_spec_path =
+        directory / "invalid_edge_metric.txt";
+    {
+        std::ofstream invalid_edge_metric_spec(invalid_edge_metric_spec_path);
+        invalid_edge_metric_spec << "node walk 1\n"
+                                 << "example walk 0 walk_a.bvh\n"
+                                 << "edge walk walk\n"
+                                 << "edge_metric walk walk unknown_metric\n";
+    }
+    bool invalid_edge_metric_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(invalid_edge_metric_spec_path.string());
+    } catch (const std::runtime_error&) {
+        invalid_edge_metric_threw = true;
+    }
+    assert(invalid_edge_metric_threw);
 
     const std::filesystem::path multidimensional_spec_path =
         directory / "multidimensional.txt";
@@ -227,6 +257,8 @@ int main() {
     assert(artifact.graph.Node(0).motion_space.NumExamples() == 2);
     assert(!artifact.graph.Edge(0).samples.empty());
     assert(artifact.metadata.edge_builds[0].config.seed == 99);
+    assert(artifact.metadata.edge_builds[0].config.transition_metric_type ==
+           pmg::TransitionMetricType::kDynamicsWindow);
 
     const std::filesystem::path invalid_spec_path =
         directory / "invalid_graph.txt";

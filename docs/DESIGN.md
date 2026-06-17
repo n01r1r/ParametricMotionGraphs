@@ -17,14 +17,14 @@ GraphSpec
       -> optional DTW refinement
       -> PmgBuilder edge sampling
   -> BuiltPmgArtifact            (offline/online seam)
-      -> GraphIo V9
+      -> GraphIo V10
       -> RuntimeController
       -> GoalDirectedLocomotion
 ```
 
 `BuiltPmgArtifact` is the offline/online seam. It owns the Skeleton,
 ParametricMotionGraph, runtime frame configuration, registration metadata, edge
-sampling configuration, seeds, and build reports.
+sampling configuration, transition metric kind/config, seeds, and build reports.
 
 ## Offline pipeline
 
@@ -43,7 +43,7 @@ flowchart TD
     K --> L["Classify GOOD / NEUTRAL / BAD"]
     L --> M["Build and shrink reachable target AABBs"]
     M --> N["Store transition phases"]
-    N --> O["Serialize PMG_GRAPH_V9 artifact"]
+    N --> O["Serialize PMG_GRAPH_V10 artifact"]
     O --> P["Write JSON, CSV, and Markdown reports"]
 ```
 
@@ -54,7 +54,7 @@ flowchart TD
 - Parameter vector for every example.
 - Registration settings.
 - Parameter metrics and calibration samples per axis.
-- Edge thresholds, sample counts, and seed.
+- Edge thresholds, sample counts, seed, and transition metric kind/config.
 - Runtime sampling rate and transition-window settings.
 
 ### Fixed conventions
@@ -110,6 +110,29 @@ The edge build fails immediately when one sampled source has no GOOD target, an
 empty adjusted box, no retained GOOD target inside the box, or a sampled BAD
 target still inside the box.
 
+### Transition metric extension
+
+`PmgBuilderConfig::transition_metric_type` defaults to
+`kKovarDirectionalPointCloud`, preserving the existing Kovar directional
+point-cloud metric and its raw squared-sum thresholds. `kDynamicsWindow` is an
+opt-in repository extension for transition-quality experiments. It uses the
+same metric support convention, source `[i, i+k-1]` and target `[j-k+1, j]`,
+but computes a weighted total from RMS-normalized terms:
+
+- joint position error in native BVH units;
+- joint velocity error in native units/s;
+- joint acceleration error in native units/s^2, with zero acceleration at clip
+  endpoints;
+- root floor displacement, root speed profile, and root yaw-rate profile;
+- explicit foot-contact mismatch ratio.
+
+The planar alignment is estimated from weighted joint positions. Positions use
+the full yaw+translation transform; velocity, acceleration, and root deltas use
+yaw rotation only. Each term is divided by its configured scale before weighting,
+so thresholds for this metric are separate calibration artifacts. Foot-contact
+cost is exactly zero unless the caller supplies contact settings and valid
+contact joint indices; the metric never guesses contact joints from names.
+
 ### Artifact boundary
 
 ```text
@@ -130,11 +153,21 @@ BuiltPmgArtifact
     edge build reports
 ```
 
-V9 is the current writer format (adds the per-sample build-time transition
-distance D; V8 added the edge transition-window metric convention). V2–V8 remain
-readable with documented fallbacks: pre-V8 pin the legacy `kKovarDirectional`
-metric and pre-V9 read distance D back as zero. Graph runtime requires a V4+
-artifact with a non-empty Skeleton.
+`PMG_GRAPH_V10` is the current writer format. Its compatibility contract is:
+
+- V10 stores the per-edge transition metric kind/config that defines the unit
+  and threshold scale for `transition_distance`.
+- V9 stores the per-sample build-time transition distance `D`.
+- V8 stores the edge transition-window convention used to recover metric
+  support frames.
+- V2-V7 remain readable through explicit fallbacks: pre-V8 artifacts use the
+  legacy `kKovarDirectional` convention, pre-V9 samples read `D` as zero, and
+  pre-V10 edge distances are interpreted as `kKovarDirectionalPointCloud`.
+
+Graph runtime requires a V4+ artifact with a non-empty Skeleton. Viewer metric
+diagnostics are metadata-only: they display the stored edge metric contract and
+the cached transition distance selected by the runtime, and do not recompute
+point-cloud or dynamics-window distances per frame.
 
 ## Online pipeline
 

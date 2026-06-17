@@ -145,6 +145,16 @@ replacement through a separate spec/output directory first:
 5. Only then decide whether to replace anchors or keep the candidate as a
    limitation/corpus note.
 
+## Recut Search Follow-Up
+
+`--search-cyclic-recuts` now scans in-memory start/end frame windows for the
+current Group-B walk/jog BVHs and scores each candidate with the same local
+seam pose, root-speed, yaw-rate, and contact metrics used here. The first
+tracked search found strong local candidates for `walkCurve`, `walkMoreCurve`,
+`walkTightCurve`, and `jogCurve` without changing BVH files or runtime
+behavior. See
+[`CYCLIC_RECUT_SEARCH.md`](CYCLIC_RECUT_SEARCH.md).
+
 ## Checklist
 
 - [x] Diagnostic-only module added.

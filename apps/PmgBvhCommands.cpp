@@ -29,7 +29,6 @@
 #include <string>
 #include <vector>
 
-
 namespace {
 
 std::string LowercaseCopy(std::string text) {
@@ -113,7 +112,7 @@ std::vector<std::string> SplitCommaList(const std::string& text) {
     std::vector<std::string> items;
     std::istringstream stream(text);
     std::string item;
-    while (std::getline(stream, item, ',')) {
+    while (std::getline(stream, item)) {
         if (!item.empty()) {
             items.push_back(item);
         }
@@ -125,7 +124,12 @@ std::vector<int> ResolveJointList(
     const pmg::Skeleton& skeleton,
     const std::string& comma_names) {
     std::vector<int> indices;
-    for (const std::string& name : SplitCommaList(comma_names)) {
+    std::istringstream stream(comma_names);
+    std::string name;
+    while (std::getline(stream, name, ',')) {
+        if (name.empty()) {
+            continue;
+        }
         const std::optional<int> index = FindJointExact(skeleton, name);
         if (!index) {
             throw std::runtime_error("unknown joint '" + name + "'");
@@ -178,6 +182,213 @@ int InspectContacts(const std::string& path, const std::string& joints_csv) {
     return 0;
 }
 
+std::string TrimLeftCopy(const std::string& text) {
+    const std::size_t first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return "";
+    }
+    return text.substr(first);
+}
+
+bool StartsWithAfterTrim(const std::string& line, const std::string& prefix) {
+    const std::string trimmed = TrimLeftCopy(line);
+    return trimmed.rfind(prefix, 0) == 0;
+}
+
+std::vector<std::string> ReadTextLines(const std::filesystem::path& path) {
+    std::ifstream stream(path);
+    if (!stream) {
+        throw std::runtime_error("failed to open BVH for reading: " + path.string());
+    }
+
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(stream, line)) {
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+std::size_t FindFirstLineStartingWith(
+    const std::vector<std::string>& lines,
+    const std::string& prefix,
+    std::size_t start_index) {
+    for (std::size_t line_index = start_index; line_index < lines.size(); ++line_index) {
+        if (StartsWithAfterTrim(lines[line_index], prefix)) {
+            return line_index;
+        }
+    }
+
+    throw std::runtime_error("BVH recut: missing line starting with '" + prefix + "'");
+}
+
+std::size_t FindFrameTimeLine(
+    const std::vector<std::string>& lines,
+    std::size_t start_index) {
+    for (std::size_t line_index = start_index; line_index < lines.size(); ++line_index) {
+        const std::string trimmed = TrimLeftCopy(lines[line_index]);
+        if (trimmed.rfind("Frame Time:", 0) == 0) {
+            return line_index;
+        }
+        if (trimmed.rfind("Frame", 0) == 0 &&
+            trimmed.find("Time:") != std::string::npos) {
+            return line_index;
+        }
+    }
+
+    throw std::runtime_error("BVH recut: missing Frame Time line");
+}
+
+int ParseNonNegativeInt(const std::string& text, const char* label) {
+    std::size_t parsed_count = 0;
+    const int value = std::stoi(text, &parsed_count);
+    if (parsed_count != text.size()) {
+        throw std::runtime_error(std::string(label) + " must be an integer: " + text);
+    }
+    if (value < 0) {
+        throw std::runtime_error(std::string(label) + " must be non-negative");
+    }
+    return value;
+}
+
+// Raw BVH recut: copy the original hierarchy and channel rows verbatim, then
+// replace only the Frames count and keep the requested inclusive frame range.
+// This deliberately does not call ExtractFirstCycle or contact detection.
+void WriteRawBvhRecut(
+    const std::filesystem::path& input_path,
+    const std::filesystem::path& output_path,
+    int first_frame,
+    int last_frame) {
+    if (last_frame < first_frame) {
+        throw std::runtime_error("BVH recut: last_frame must be >= first_frame");
+    }
+
+    const std::vector<std::string> lines = ReadTextLines(input_path);
+    const std::size_t frames_line = FindFirstLineStartingWith(lines, "Frames:", 0);
+    const std::size_t frame_time_line = FindFrameTimeLine(lines, frames_line + 1);
+    const std::size_t motion_begin = frame_time_line + 1;
+
+    if (motion_begin >= lines.size()) {
+        throw std::runtime_error("BVH recut: no motion frame rows after Frame Time line");
+    }
+
+    const int available_frames = static_cast<int>(lines.size() - motion_begin);
+    if (first_frame >= available_frames || last_frame >= available_frames) {
+        std::ostringstream message;
+        message << "BVH recut: requested frame range ["
+                << first_frame << ", " << last_frame
+                << "] outside available frame rows [0, "
+                << (available_frames - 1) << "]";
+        throw std::runtime_error(message.str());
+    }
+
+    const int output_frame_count = last_frame - first_frame + 1;
+
+    const std::filesystem::path parent = output_path.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent);
+    }
+
+    std::ofstream output(output_path);
+    if (!output) {
+        throw std::runtime_error("failed to open BVH for writing: " + output_path.string());
+    }
+
+    for (std::size_t line_index = 0; line_index < frames_line; ++line_index) {
+        output << lines[line_index] << "\n";
+    }
+
+    output << "Frames: " << output_frame_count << "\n";
+
+    for (std::size_t line_index = frames_line + 1;
+         line_index <= frame_time_line;
+         ++line_index) {
+        output << lines[line_index] << "\n";
+    }
+
+    for (int frame_index = first_frame; frame_index <= last_frame; ++frame_index) {
+        output << lines[motion_begin + static_cast<std::size_t>(frame_index)] << "\n";
+    }
+
+    std::cout << "wrote recut BVH: " << output_path.string()
+              << " frames=[" << first_frame << ", " << last_frame << "]"
+              << " count=" << output_frame_count << "\n";
+}
+
+int ExportBvhRecut(int argc, char** argv) {
+    if (argc != 6) {
+        throw std::runtime_error(
+            "usage: pmg_cli --export-bvh-recut input.bvh output.bvh first_frame last_frame");
+    }
+
+    const std::filesystem::path input_path = argv[2];
+    const std::filesystem::path output_path = argv[3];
+    const int first_frame = ParseNonNegativeInt(argv[4], "first_frame");
+    const int last_frame = ParseNonNegativeInt(argv[5], "last_frame");
+
+    WriteRawBvhRecut(input_path, output_path, first_frame, last_frame);
+    return 0;
+}
+
+struct KnownCyclicRecut {
+    const char* input_filename;
+    const char* output_filename;
+    int first_frame;
+    int last_frame;
+};
+
+int ExportKnownCyclicRecuts(int argc, char** argv) {
+    if (argc != 6) {
+        throw std::runtime_error(
+            "usage: pmg_cli --export-known-cyclic-recuts --bvh-dir BVH --output-dir BVH/recut");
+    }
+
+    std::optional<std::filesystem::path> bvh_dir;
+    std::optional<std::filesystem::path> output_dir;
+
+    for (int arg_index = 2; arg_index < argc; arg_index += 2) {
+        const std::string key = argv[arg_index];
+        if (arg_index + 1 >= argc) {
+            throw std::runtime_error("missing value for option: " + key);
+        }
+
+        if (key == "--bvh-dir") {
+            bvh_dir = std::filesystem::path(argv[arg_index + 1]);
+            continue;
+        }
+        if (key == "--output-dir") {
+            output_dir = std::filesystem::path(argv[arg_index + 1]);
+            continue;
+        }
+
+        throw std::runtime_error("unknown --export-known-cyclic-recuts option: " + key);
+    }
+
+    if (!bvh_dir || !output_dir) {
+        throw std::runtime_error(
+            "--export-known-cyclic-recuts requires --bvh-dir and --output-dir");
+    }
+
+    constexpr KnownCyclicRecut kRecuts[] = {
+        {"walkCurve.bvh", "walkCurve_recut_086_119.bvh", 86, 119},
+        {"walkMoreCurve.bvh", "walkMoreCurve_recut_076_110.bvh", 76, 110},
+        {"walkTightCurve.bvh", "walkTightCurve_recut_058_095.bvh", 58, 95},
+        {"jogCurve.bvh", "jogCurve_recut_039_063.bvh", 39, 63},
+    };
+
+    std::filesystem::create_directories(*output_dir);
+
+    for (const KnownCyclicRecut& recut : kRecuts) {
+        WriteRawBvhRecut(
+            *bvh_dir / recut.input_filename,
+            *output_dir / recut.output_filename,
+            recut.first_frame,
+            recut.last_frame);
+    }
+
+    return 0;
+}
+
 }  // namespace
 
 namespace pmgcli {
@@ -192,6 +403,12 @@ std::optional<int> TryRunBvhCommand(int argc, char** argv) {
     }
     if (command == "--inspect-contacts" && argc == 4) {
         return InspectContacts(argv[2], argv[3]);
+    }
+    if (command == "--export-bvh-recut") {
+        return ExportBvhRecut(argc, argv);
+    }
+    if (command == "--export-known-cyclic-recuts") {
+        return ExportKnownCyclicRecuts(argc, argv);
     }
     return std::nullopt;
 }

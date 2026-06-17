@@ -491,6 +491,94 @@ GraphSpec LoadGraphSpec(const std::string& path) {
             continue;
         }
 
+        if (keyword == "edge_metric") {
+            std::string source_node;
+            std::string target_node;
+            std::string metric_name;
+            if (!(line >> source_node >> target_node >> metric_name)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": expected edge_metric <source> <target> <metric>");
+            }
+            (void)FindSpecNode(spec, source_node);
+            (void)FindSpecNode(spec, target_node);
+            auto edge_it = std::find_if(
+                spec.edges.begin(), spec.edges.end(),
+                [&](const GraphSpecEdge& edge) {
+                    return edge.source_node == source_node &&
+                           edge.target_node == target_node;
+                });
+            if (edge_it == spec.edges.end()) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": edge_metric requires a preceding matching edge");
+            }
+            if (edge_it->has_metric_type) {
+                throw std::runtime_error("LoadGraphSpec line " +
+                                         std::to_string(line_number) +
+                                         ": duplicate edge_metric");
+            }
+            edge_it->has_build_config = true;
+            edge_it->has_metric_type = true;
+            edge_it->build_config.transition_metric_type =
+                ParseTransitionMetricType(metric_name);
+            continue;
+        }
+
+        if (keyword == "edge_metric_config") {
+            std::string source_node;
+            std::string target_node;
+            TransitionMetricConfig metric_config;
+            if (!(line >> source_node >> target_node
+                  >> metric_config.position_weight
+                  >> metric_config.velocity_weight
+                  >> metric_config.acceleration_weight
+                  >> metric_config.root_motion_weight
+                  >> metric_config.foot_contact_weight
+                  >> metric_config.position_scale
+                  >> metric_config.velocity_scale
+                  >> metric_config.acceleration_scale
+                  >> metric_config.root_speed_scale
+                  >> metric_config.yaw_rate_scale
+                  >> metric_config.root_displacement_weight
+                  >> metric_config.root_speed_weight
+                  >> metric_config.root_yaw_rate_weight
+                  >> metric_config.foot_mismatch_penalty)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": expected edge_metric_config <source> <target> "
+                    "<position_weight> <velocity_weight> "
+                    "<acceleration_weight> <root_motion_weight> "
+                    "<foot_contact_weight> <position_scale> <velocity_scale> "
+                    "<acceleration_scale> <root_speed_scale> "
+                    "<yaw_rate_scale> <root_displacement_weight> "
+                    "<root_speed_weight> <root_yaw_rate_weight> "
+                    "<foot_mismatch_penalty>");
+            }
+            (void)FindSpecNode(spec, source_node);
+            (void)FindSpecNode(spec, target_node);
+            auto edge_it = std::find_if(
+                spec.edges.begin(), spec.edges.end(),
+                [&](const GraphSpecEdge& edge) {
+                    return edge.source_node == source_node &&
+                           edge.target_node == target_node;
+                });
+            if (edge_it == spec.edges.end()) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": edge_metric_config requires a preceding matching edge");
+            }
+            if (edge_it->has_metric_config) {
+                throw std::runtime_error("LoadGraphSpec line " +
+                                         std::to_string(line_number) +
+                                         ": duplicate edge_metric_config");
+            }
+            edge_it->has_build_config = true;
+            edge_it->has_metric_config = true;
+            edge_it->build_config.transition_metric = metric_config;
+            continue;
+        }
+
         if (keyword == "expect") {
             std::string node_name;
             std::string property;
