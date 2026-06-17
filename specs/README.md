@@ -16,6 +16,7 @@ walk_2d -> walk_2d
 
 This matches the current corpus. It does **not** claim a full rectangular 2-D locomotion family because the `(tight turn, jog)` corner is missing.
 The spec declares `parameter_support walk_2d simplex`, so loading validates the three authored examples as a non-collinear triangle.
+In the viewer, use Graph -> Coverage to see that triangle overlaid on the node's AABB; the missing corner is marked as unsampled. Use Graph -> Runtime -> Transition to compare the requested target parameter with the actual transition parameter available from the edge lookup.
 
 ### `demo_walk_self_edge_minimal.pmg_spec`
 

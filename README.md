@@ -19,6 +19,12 @@ Currently, the stable demo can be run from `specs/demo_walk_2d_triangle.pmg_spec
 ## Architecture notes
 
 - `PmgViewerWorkspace` owns the ImGui/OpenGL adapter state for the viewer.
+- The viewer's Graph/Coverage tab draws the authored parameter samples and, for
+  the sparse 2-D demo, the triangle support formed by the three clips. Red
+  corner rings mark missing AABB corners such as tight-turn jog.
+- The Graph/Runtime transition panel reports requested vs actual target
+  parameters. Requested is the live runtime target; actual is the reachable
+  transition parameter selected or clamped by the current edge lookup.
 - Graph runtime installation goes through shared private lifecycle helpers so
   loaded artifacts and sandbox graphs reset controller, steering, target, and
   trace state consistently.

@@ -1193,6 +1193,22 @@ void PmgViewerWorkspace::DrawParameterCoverage() {
     draw_list->AddRect(to_screen(x_lo, y_lo), to_screen(x_hi, y_hi),
                        IM_COL32(70, 110, 160, 200));
 
+    // Authored 2-D simplex support. This is only a visualization of the
+    // sampled triangle; runtime still requests against the node's parameter
+    // coordinates and transition boxes.
+    if (dimension == 2 && examples.size() == 3) {
+        for (int index = 0; index < 3; ++index) {
+            const pmg::ParameterVector& start =
+                examples[static_cast<std::size_t>(index)].parameter;
+            const pmg::ParameterVector& end =
+                examples[static_cast<std::size_t>((index + 1) % 3)].parameter;
+            draw_list->AddLine(
+                to_screen(start[0], start[1]),
+                to_screen(end[0], end[1]),
+                IM_COL32(80, 205, 255, 210), 2.0f);
+        }
+    }
+
     // Mark every box corner of the displayed axes; red ring where unsampled.
     if (dimension >= 1) {
         const float corner_x[2] = {x_lo, x_hi};
@@ -1730,7 +1746,8 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     const int source_node = graph_controller_->CurrentNode();
     const pmg::ParameterVector& source_parameter =
         graph_controller_->CurrentParameter();
-    const pmg::ParameterVector requested_target{graph_desired_parameter_};
+    const pmg::ParameterVector requested_target =
+        DesiredParameterForNode(graph_desired_node_);
 
     const pmg::PmgEdge* selected_edge = nullptr;
     for (const int edge_index : graph_.OutgoingEdgeIndices(source_node)) {
@@ -1754,6 +1771,8 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     ImGui::TextDisabled("Transition");
 
     constexpr const char* kSourceParameterLabel = "SOURCE";
+    constexpr const char* kRequestedTargetLabel = "REQUESTED";
+    constexpr const char* kActualTargetLabel = "ACTUAL";
     constexpr const char* kReachableTargetLabel = "TARGET RANGE";
     constexpr const char* kTransitionPhasesLabel = "PHASES";
     constexpr const char* kMetricContractLabel = "METRIC";
@@ -1763,6 +1782,8 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     constexpr const char* kRuntimeBlendWindowLabel = "BLEND";
     const float widest_label_width = std::max({
         ImGui::CalcTextSize(kSourceParameterLabel).x,
+        ImGui::CalcTextSize(kRequestedTargetLabel).x,
+        ImGui::CalcTextSize(kActualTargetLabel).x,
         ImGui::CalcTextSize(kReachableTargetLabel).x,
         ImGui::CalcTextSize(kTransitionPhasesLabel).x,
         ImGui::CalcTextSize(kMetricContractLabel).x,
@@ -1780,10 +1801,42 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
         kSourceParameterLabel);
     ImGui::SameLine(value_column_x);
     if (!source_parameter.empty()) {
+        const std::string source_label = ParameterLabel(source_parameter);
         ImGui::Text(
-            "%s  p=%.3f",
+            "%s  p=%s",
             graph_.Node(source_node).name.c_str(),
-            source_parameter.front());
+            source_label.c_str());
+    }
+
+    ImGui::TextColored(
+        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
+        kRequestedTargetLabel);
+    ImGui::SameLine(value_column_x);
+    const std::string requested_label = ParameterLabel(requested_target);
+    ImGui::Text(
+        "%s  p=%s",
+        graph_.Node(graph_desired_node_).name.c_str(),
+        requested_label.c_str());
+
+    ImGui::TextColored(
+        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
+        kActualTargetLabel);
+    ImGui::SameLine(value_column_x);
+    if (active.has_value()) {
+        const std::string actual_label =
+            ParameterLabel(active->actual_target_parameter);
+        ImGui::Text(
+            "%s  p=%s",
+            graph_.Node(active->target_node).name.c_str(),
+            actual_label.c_str());
+    } else if (preview.has_value()) {
+        const std::string actual_label =
+            ParameterLabel(preview->target_parameter_box.Clamp(requested_target));
+        ImGui::Text("%s  p=%s (preview)",
+                    graph_.Node(graph_desired_node_).name.c_str(),
+                    actual_label.c_str());
+    } else {
+        ImGui::TextDisabled("waiting for transition lookup");
     }
 
     ImGui::TextColored(
