@@ -1,6 +1,7 @@
 #include "PmgCommandModules.h"
 
 #include "pmg/AlignmentStrategy.h"
+#include "pmg/BvhLoader.h"
 #include "pmg/CyclicContinuity.h"
 #include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
@@ -468,12 +469,39 @@ struct CyclicAuditOptions {
     float frames_per_second = 30.0f;
 };
 
+struct CyclicRecutSearchOptions {
+    std::string bvh_dir = "BVH";
+    std::string output_csv;
+    std::string output_md;
+    std::vector<std::string> clip_files{
+        "walkCurve.bvh",
+        "walkMoreCurve.bvh",
+        "walkTightCurve.bvh",
+        "jogCurve.bvh",
+    };
+    std::string cycle_joint = "LeftAnkle";
+    std::string contact_joints_csv = "LeftAnkle,RightAnkle";
+    int min_contact_frames = 3;
+    int min_window_frames = 18;
+    int max_window_frames = 45;
+    int top_per_clip = 5;
+};
+
 struct CyclicAuditRow {
     std::string node;
     std::string sample_type;
     pmg::ParameterVector parameter;
     std::string source_clip;
     int num_frames = 0;
+    pmg::CyclicContinuityRecord record;
+};
+
+struct CyclicRecutCandidate {
+    std::string clip_file;
+    int start_frame = 0;
+    int end_frame = 0;
+    int num_frames = 0;
+    float score = 0.0f;
     pmg::CyclicContinuityRecord record;
 };
 
@@ -577,6 +605,88 @@ pmg::CyclicContinuityContext CyclicContextForNode(
     return context;
 }
 
+pmg::MotionClip CropClipInclusive(
+    const pmg::MotionClip& source,
+    int start_frame,
+    int end_frame) {
+    if (start_frame < 0 || end_frame < start_frame ||
+        end_frame >= source.NumFrames()) {
+        throw std::runtime_error("CropClipInclusive: invalid frame range");
+    }
+
+    pmg::MotionClip cropped;
+    cropped.name = source.name + "_recut_" + std::to_string(start_frame) +
+                   "_" + std::to_string(end_frame);
+    cropped.frames_per_second = source.frames_per_second;
+    cropped.frames.assign(
+        source.frames.begin() + start_frame,
+        source.frames.begin() + end_frame + 1);
+    return cropped;
+}
+
+float ThresholdNormalizedRecutScore(
+    const pmg::CyclicContinuityRecord& record,
+    const pmg::CyclicContinuityConfig& config) {
+    const float contact_score =
+        record.has_contact_evidence && !record.contact_state_matches
+            ? 1.0f + record.max_contact_drift / config.contact_drift_threshold
+            : record.max_contact_drift / config.contact_drift_threshold;
+    return std::max({
+        record.seam_step_ratio / config.pose_seam_ratio_threshold,
+        record.root_speed_ratio / config.root_speed_ratio_threshold,
+        record.yaw_rate_ratio / config.yaw_rate_ratio_threshold,
+        contact_score,
+    });
+}
+
+std::vector<int> ResolveContactJointIndices(
+    const pmg::Skeleton& skeleton,
+    const std::vector<std::string>& joint_names,
+    const char* context) {
+    std::vector<int> joint_indices;
+    joint_indices.reserve(joint_names.size());
+    for (const std::string& joint_name : joint_names) {
+        const int joint_index = ResolveJointIndex(skeleton, joint_name);
+        if (joint_index < 0) {
+            throw std::runtime_error(
+                std::string(context) + ": unknown joint '" + joint_name + "'");
+        }
+        joint_indices.push_back(joint_index);
+    }
+    return joint_indices;
+}
+
+pmg::CyclicContinuityContext CyclicContextForRawClip(
+    const pmg::Skeleton& skeleton,
+    const pmg::MotionClip& clip,
+    const CyclicRecutSearchOptions& options) {
+    const std::vector<std::string> contact_joint_names =
+        SplitCommaList(options.contact_joints_csv);
+    const std::vector<int> contact_joints = ResolveContactJointIndices(
+        skeleton, contact_joint_names, "--search-cyclic-recuts");
+
+    pmg::CyclicContinuityContext context;
+    for (std::size_t joint = 0; joint < contact_joint_names.size(); ++joint) {
+        std::string lower_name = contact_joint_names[joint];
+        std::transform(
+            lower_name.begin(), lower_name.end(), lower_name.begin(),
+            [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+        if (lower_name.find("left") != std::string::npos) {
+            context.left_foot_joint = contact_joints[joint];
+        } else if (lower_name.find("right") != std::string::npos) {
+            context.right_foot_joint = contact_joints[joint];
+        }
+    }
+
+    pmg::ContactDetectionSettings settings =
+        pmg::EstimateContactSettings(skeleton, clip, contact_joints);
+    settings.min_contact_frames = options.min_contact_frames;
+    context.contact_settings = settings;
+    return context;
+}
+
 std::vector<pmg::ParameterVector> GeneratedAuditParameters(
     const pmg::ParametricMotionSpace& space) {
     const int dimension = space.ParameterDimension();
@@ -640,6 +750,149 @@ std::vector<pmg::ParameterVector> GeneratedAuditParameters(
     }
     samples.push_back(center);
     return samples;
+}
+
+void WriteCyclicRecutSearchCsv(
+    const std::string& path,
+    const std::vector<CyclicRecutCandidate>& candidates) {
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error("--search-cyclic-recuts: cannot write CSV");
+    }
+
+    csv << "clip,start_frame,end_frame,num_frames,score,"
+           "cycle_delta_dx,cycle_delta_dz,cycle_delta_yaw,"
+           "seam_step,median_step,seam_step_ratio,"
+           "pre_root_speed,seam_root_speed,post_root_speed,root_speed_ratio,"
+           "pre_yaw_rate,seam_yaw_rate,post_yaw_rate,yaw_rate_ratio,"
+           "left_foot_drift,right_foot_drift,max_contact_drift,"
+           "has_contact_evidence,contact_state_matches,classification\n";
+    for (const CyclicRecutCandidate& candidate : candidates) {
+        const pmg::CyclicContinuityRecord& r = candidate.record;
+        csv << EscapeCsvCell(candidate.clip_file) << ','
+            << candidate.start_frame << ',' << candidate.end_frame << ','
+            << candidate.num_frames << ',' << candidate.score << ','
+            << r.cycle_delta.dx << ',' << r.cycle_delta.dz << ','
+            << r.cycle_delta.yaw << ',' << r.seam_step << ','
+            << r.median_step << ',' << r.seam_step_ratio << ','
+            << r.pre_root_speed << ',' << r.seam_root_speed << ','
+            << r.post_root_speed << ',' << r.root_speed_ratio << ','
+            << r.pre_yaw_rate << ',' << r.seam_yaw_rate << ','
+            << r.post_yaw_rate << ',' << r.yaw_rate_ratio << ','
+            << r.left_foot_drift << ',' << r.right_foot_drift << ','
+            << r.max_contact_drift << ','
+            << (r.has_contact_evidence ? 1 : 0) << ','
+            << (r.contact_state_matches ? 1 : 0) << ','
+            << pmg::CyclicContinuityClassificationName(r.classification)
+            << '\n';
+    }
+}
+
+std::vector<CyclicRecutCandidate> BestRecutCandidates(
+    const std::vector<CyclicRecutCandidate>& candidates,
+    const std::string& clip_file,
+    int limit) {
+    std::vector<CyclicRecutCandidate> filtered;
+    for (const CyclicRecutCandidate& candidate : candidates) {
+        if (candidate.clip_file == clip_file) {
+            filtered.push_back(candidate);
+        }
+    }
+    std::sort(
+        filtered.begin(), filtered.end(),
+        [](const CyclicRecutCandidate& left,
+           const CyclicRecutCandidate& right) {
+            if (left.score != right.score) {
+                return left.score < right.score;
+            }
+            return left.num_frames < right.num_frames;
+        });
+    if (static_cast<int>(filtered.size()) > limit) {
+        filtered.resize(static_cast<std::size_t>(limit));
+    }
+    return filtered;
+}
+
+void WriteCyclicRecutSearchMarkdown(
+    const std::string& path,
+    const CyclicRecutSearchOptions& options,
+    const std::string& command_line,
+    const std::vector<CyclicRecutCandidate>& candidates) {
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    std::ofstream md(path);
+    if (!md) {
+        throw std::runtime_error(
+            "--search-cyclic-recuts: cannot write markdown");
+    }
+
+    md << "# Cyclic Recut Search Report\n\n";
+    md << "- Commit: `" << CurrentGitCommit() << "`\n";
+    md << "- Command: `" << command_line << "`\n";
+    md << "- BVH directory: `" << options.bvh_dir << "`\n";
+    md << "- Cycle joint: `" << options.cycle_joint << "`\n";
+    md << "- Contact joints: `" << options.contact_joints_csv << "`\n";
+    md << "- Candidate frame count: " << options.min_window_frames << "-"
+       << options.max_window_frames << " inclusive\n";
+    md << "- Score: max of threshold-normalized seam pose, root-speed, "
+          "yaw-rate, and contact evidence metrics from CyclicContinuity; "
+          "lower is better.\n\n";
+
+    md << "## Recommended Recut\n\n";
+    md << "| Clip | Start | End | Frames | Score | Seam ratio | Root ratio | "
+          "Yaw ratio | Contact drift | Contact match | Classification |\n";
+    md << "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|\n";
+    for (const std::string& clip_file : options.clip_files) {
+        const std::vector<CyclicRecutCandidate> best =
+            BestRecutCandidates(candidates, clip_file, 1);
+        if (best.empty()) {
+            md << "| `" << clip_file
+               << "` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | "
+                  "n/a | insufficient_candidates |\n";
+            continue;
+        }
+        const CyclicRecutCandidate& candidate = best.front();
+        const pmg::CyclicContinuityRecord& r = candidate.record;
+        md << "| `" << clip_file << "` | " << candidate.start_frame << " | "
+           << candidate.end_frame << " | " << candidate.num_frames << " | "
+           << candidate.score << " | " << r.seam_step_ratio << " | "
+           << r.root_speed_ratio << " | " << r.yaw_rate_ratio << " | "
+           << r.max_contact_drift << " | "
+           << (r.contact_state_matches ? "yes" : "no") << " | "
+           << pmg::CyclicContinuityClassificationName(r.classification)
+           << " |\n";
+    }
+
+    md << "\n## Top Candidates By Clip\n\n";
+    for (const std::string& clip_file : options.clip_files) {
+        md << "### `" << clip_file << "`\n\n";
+        md << "| Rank | Start | End | Frames | Score | Seam ratio | Root ratio | "
+              "Yaw ratio | Contact drift | Classification |\n";
+        md << "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n";
+        const std::vector<CyclicRecutCandidate> best =
+            BestRecutCandidates(candidates, clip_file, options.top_per_clip);
+        for (std::size_t index = 0; index < best.size(); ++index) {
+            const CyclicRecutCandidate& candidate = best[index];
+            const pmg::CyclicContinuityRecord& r = candidate.record;
+            md << "| " << (index + 1) << " | " << candidate.start_frame
+               << " | " << candidate.end_frame << " | "
+               << candidate.num_frames << " | " << candidate.score << " | "
+               << r.seam_step_ratio << " | " << r.root_speed_ratio << " | "
+               << r.yaw_rate_ratio << " | " << r.max_contact_drift << " | "
+               << pmg::CyclicContinuityClassificationName(r.classification)
+               << " |\n";
+        }
+        md << '\n';
+    }
+
+    md << "## Interpretation\n\n";
+    md << "This report recommends cut points only. It does not edit BVH files, "
+          "specs, PMG artifact construction, graph edges, transition "
+          "thresholds, or runtime scheduling. A recommended window still needs "
+          "visual review plus a separate artifact/runtime comparison before it "
+          "can replace a tracked anchor.\n";
 }
 
 void WriteCyclicAuditCsv(
@@ -853,6 +1106,83 @@ int CyclicAuditCommand(
     std::cout << "cyclic_audit_rows=" << rows.size() << "\n";
     std::cout << "cyclic_audit_csv=" << options.output_csv << "\n";
     std::cout << "cyclic_audit_md=" << options.output_md << "\n";
+    return 0;
+}
+
+int CyclicRecutSearchCommand(
+    const CyclicRecutSearchOptions& options,
+    const std::string& command_line) {
+    if (options.output_csv.empty()) {
+        throw std::runtime_error(
+            "--search-cyclic-recuts requires --output-csv");
+    }
+    if (options.output_md.empty()) {
+        throw std::runtime_error(
+            "--search-cyclic-recuts requires --output-md");
+    }
+    if (options.min_window_frames < 3) {
+        throw std::runtime_error(
+            "--min-window-frames must be at least 3");
+    }
+    if (options.max_window_frames < options.min_window_frames) {
+        throw std::runtime_error(
+            "--max-window-frames must be >= --min-window-frames");
+    }
+    if (options.top_per_clip <= 0) {
+        throw std::runtime_error("--top-per-clip must be positive");
+    }
+
+    std::vector<CyclicRecutCandidate> candidates;
+    const pmg::CyclicContinuityConfig config;
+
+    for (const std::string& clip_file : options.clip_files) {
+        const std::filesystem::path bvh_path =
+            std::filesystem::path(options.bvh_dir) / clip_file;
+        const pmg::BvhData bvh = pmg::BvhLoader::Load(bvh_path.string());
+        if (ResolveJointIndex(bvh.skeleton, options.cycle_joint) < 0) {
+            throw std::runtime_error(
+                "--search-cyclic-recuts: unknown cycle joint '" +
+                options.cycle_joint + "' in " + clip_file);
+        }
+
+        const pmg::CyclicContinuityContext context =
+            CyclicContextForRawClip(bvh.skeleton, bvh.clip, options);
+
+        const int max_window =
+            std::min(options.max_window_frames, bvh.clip.NumFrames());
+        for (int start_frame = 0; start_frame < bvh.clip.NumFrames();
+             ++start_frame) {
+            for (int num_frames = options.min_window_frames;
+                 num_frames <= max_window; ++num_frames) {
+                const int end_frame = start_frame + num_frames - 1;
+                if (end_frame >= bvh.clip.NumFrames()) {
+                    break;
+                }
+
+                const pmg::MotionClip recut =
+                    CropClipInclusive(bvh.clip, start_frame, end_frame);
+                CyclicRecutCandidate candidate;
+                candidate.clip_file = clip_file;
+                candidate.start_frame = start_frame;
+                candidate.end_frame = end_frame;
+                candidate.num_frames = num_frames;
+                candidate.record =
+                    pmg::MeasureCyclicContinuity(
+                        bvh.skeleton, recut, context, config);
+                candidate.score =
+                    ThresholdNormalizedRecutScore(candidate.record, config);
+                candidates.push_back(std::move(candidate));
+            }
+        }
+    }
+
+    WriteCyclicRecutSearchCsv(options.output_csv, candidates);
+    WriteCyclicRecutSearchMarkdown(
+        options.output_md, options, command_line, candidates);
+
+    std::cout << "cyclic_recut_candidates=" << candidates.size() << "\n";
+    std::cout << "cyclic_recut_csv=" << options.output_csv << "\n";
+    std::cout << "cyclic_recut_md=" << options.output_md << "\n";
     return 0;
 }
 
@@ -1233,6 +1563,55 @@ CyclicAuditOptions ParseCyclicAuditOptions(int argc, char** argv) {
     return options;
 }
 
+CyclicRecutSearchOptions ParseCyclicRecutSearchOptions(int argc, char** argv) {
+    CyclicRecutSearchOptions options;
+    for (int index = 2; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(
+                    std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--bvh-dir") {
+            options.bvh_dir = require_value("--bvh-dir");
+        } else if (option == "--clips") {
+            options.clip_files = SplitCommaList(require_value("--clips"));
+        } else if (option == "--cycle-joint") {
+            options.cycle_joint = require_value("--cycle-joint");
+        } else if (option == "--contact-joints") {
+            options.contact_joints_csv = require_value("--contact-joints");
+        } else if (option == "--min-contact-frames") {
+            options.min_contact_frames =
+                std::stoi(require_value("--min-contact-frames"));
+        } else if (option == "--min-window-frames") {
+            options.min_window_frames =
+                std::stoi(require_value("--min-window-frames"));
+        } else if (option == "--max-window-frames") {
+            options.max_window_frames =
+                std::stoi(require_value("--max-window-frames"));
+        } else if (option == "--top-per-clip") {
+            options.top_per_clip = std::stoi(require_value("--top-per-clip"));
+        } else if (option == "--output-csv") {
+            options.output_csv = require_value("--output-csv");
+        } else if (option == "--output-md") {
+            options.output_md = require_value("--output-md");
+        } else {
+            throw std::runtime_error(
+                "unknown search-cyclic-recuts option '" + option + "'");
+        }
+    }
+    if (options.clip_files.empty()) {
+        throw std::runtime_error("--clips must name at least one BVH file");
+    }
+    if (options.min_contact_frames <= 0) {
+        throw std::runtime_error("--min-contact-frames must be positive");
+    }
+    return options;
+}
+
 }  // namespace
 
 namespace pmgcli {
@@ -1248,6 +1627,11 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
     if (command == "--audit-cyclic-continuity" && argc >= 3) {
         return CyclicAuditCommand(
             ParseCyclicAuditOptions(argc, argv),
+            CommandLineString(argc, argv));
+    }
+    if (command == "--search-cyclic-recuts") {
+        return CyclicRecutSearchCommand(
+            ParseCyclicRecutSearchOptions(argc, argv),
             CommandLineString(argc, argv));
     }
     return std::nullopt;

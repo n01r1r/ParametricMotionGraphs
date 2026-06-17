@@ -205,6 +205,16 @@ if(PMG_BUILD_TESTS)
         COMMAND pmg_cli --validate-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_jog_topology.pmg_spec)
 
+    # Corpus-curation diagnostic only: scan raw Group-B walk/jog BVHs for
+    # better cyclic cut points using the same CyclicContinuity metrics. Writes
+    # ignored test artifacts; does not mutate BVHs, specs, graph build, or
+    # runtime behavior.
+    add_test(NAME cli_search_cyclic_recuts
+        COMMAND pmg_cli --search-cyclic-recuts
+            --bvh-dir ${CMAKE_CURRENT_SOURCE_DIR}/BVH
+            --output-csv ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b.csv
+            --output-md ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts/cyclic_recuts/group_b.md)
+
     # Paper application A: 30 seconds of random transitions through the PMG.
     # The worst frame-to-frame step must stay within 3x the median walking
     # step (popping shows up as 5-20x spikes), and transitions must actually

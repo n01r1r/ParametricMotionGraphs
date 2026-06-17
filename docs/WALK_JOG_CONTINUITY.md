@@ -28,6 +28,12 @@ displays both the same warning and a per-sample Runtime-tab table after loading
 or building a graph. This is a feedback loop only; it leaves BVH clips, specs,
 registration, edge thresholds, and runtime scheduling unchanged.
 
+Update 2026-06-17: a diagnostic-only recut search now scans raw Group-B
+walk/jog BVHs for better loop start/end frames using the same
+`CyclicContinuity` metrics. It recommends strong local candidates for the four
+current anchors, but no BVH/spec/runtime behavior has been changed. See
+[`docs/experiments/CYCLIC_RECUT_SEARCH.md`](experiments/CYCLIC_RECUT_SEARCH.md).
+
 The remaining walk interruption was caused by viewer request policy, not
 world-space root placement.
 
