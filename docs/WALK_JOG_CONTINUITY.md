@@ -23,9 +23,10 @@ primary culprit. See
 
 Update 2026-06-17: artifact build/load now exposes this diagnostic directly.
 `pmg_cli --build-graph` emits a cyclic continuity warning, build reports store
-cyclic strong/weak counts, and the viewer displays the same warning after
-loading or building a graph. This is a feedback loop only; it leaves BVH clips,
-specs, registration, edge thresholds, and runtime scheduling unchanged.
+cyclic strong/weak counts plus `tables/cyclic_samples.csv`, and the viewer
+displays both the same warning and a per-sample Runtime-tab table after loading
+or building a graph. This is a feedback loop only; it leaves BVH clips, specs,
+registration, edge thresholds, and runtime scheduling unchanged.
 
 The remaining walk interruption was caused by viewer request policy, not
 world-space root placement.

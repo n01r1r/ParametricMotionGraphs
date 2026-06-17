@@ -8,6 +8,7 @@
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
 #include "pmg/ContactDetection.h"
+#include "pmg/CyclicContinuity.h"
 #include "pmg/GoalDirectedLocomotion.h"
 #include "pmg/GraphIo.h"
 #include "pmg/MotionClip.h"
@@ -190,6 +191,7 @@ private:
     int selected_file_index_ = -1;
     char clip_filter_[64] = "";  // case-insensitive substring filter for the clip list
     std::string status_message_ = "No clip loaded.";
+    pmg::CyclicContinuityGraphSummary graph_cyclic_summary_;
     std::string graph_cyclic_warning_;
 
     // Spec library (multi-node graph authoring source) and the artifact most

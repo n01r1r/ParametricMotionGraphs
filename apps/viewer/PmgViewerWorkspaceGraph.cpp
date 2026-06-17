@@ -59,6 +59,19 @@ std::string FrameList(const std::vector<int>& frames) {
     return output.str();
 }
 
+std::string ParameterLabel(const pmg::ParameterVector& parameter) {
+    std::ostringstream output;
+    output << '[';
+    for (std::size_t axis = 0; axis < parameter.size(); ++axis) {
+        if (axis > 0) {
+            output << ", ";
+        }
+        output << parameter[axis];
+    }
+    output << ']';
+    return output.str();
+}
+
 std::string MotionSpaceClipSummary(
     const pmg::ParametricMotionSpace& motion_space) {
     constexpr int kMaxVisibleClipNames = 3;
@@ -247,8 +260,10 @@ void PmgViewerWorkspace::AdoptArtifact(
     graph_open_runtime_tab_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
     playing_ = true;
-    graph_cyclic_warning_ = pmg::FormatCyclicContinuityWarning(
-        pmg::SummarizeArtifactCyclicContinuity(adopted));
+    graph_cyclic_summary_ =
+        pmg::SummarizeArtifactCyclicContinuity(adopted);
+    graph_cyclic_warning_ =
+        pmg::FormatCyclicContinuityWarning(graph_cyclic_summary_);
     graph_status_ = status_label;
     if (!graph_cyclic_warning_.empty()) {
         graph_status_ += " | " + graph_cyclic_warning_;
@@ -332,6 +347,7 @@ void PmgViewerWorkspace::BuildGraphRuntime() {
     graph_ready_ = false;
     graph_origin_ = GraphOrigin::None;
     graph_controller_.reset();
+    graph_cyclic_summary_ = {};
     graph_cyclic_warning_.clear();
     // The sandbox self-edge graph has no backing artifact; drop any retained one
     // so "Save artifact" cannot write stale metadata from a prior build/load.
@@ -388,6 +404,7 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     graph_ready_ = false;
     graph_controller_.reset();
     source_artifact_.reset();
+    graph_cyclic_summary_ = {};
     graph_cyclic_warning_.clear();
     steering_.reset();
     goto_active_ = false;
@@ -1533,6 +1550,54 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
             ImVec4(1.0f, 0.78f, 0.35f, 1.0f),
             "%s",
             graph_cyclic_warning_.c_str());
+    }
+    if (!graph_cyclic_summary_.samples.empty() &&
+        ImGui::CollapsingHeader("Cyclic continuity")) {
+        ImGui::TextDisabled(
+            "Strong %d / %d | pose %d | root %d | yaw %d | contact %d",
+            graph_cyclic_summary_.strong_count,
+            graph_cyclic_summary_.cyclic_sample_count,
+            graph_cyclic_summary_.weak_pose_seam_count,
+            graph_cyclic_summary_.weak_root_speed_count,
+            graph_cyclic_summary_.weak_yaw_rate_count,
+            graph_cyclic_summary_.weak_contact_count);
+        if (ImGui::BeginTable(
+                "cyclic_continuity_table", 7,
+                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                    ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Node");
+            ImGui::TableSetupColumn("Param");
+            ImGui::TableSetupColumn("Clip");
+            ImGui::TableSetupColumn("Class");
+            ImGui::TableSetupColumn("Seam");
+            ImGui::TableSetupColumn("Root");
+            ImGui::TableSetupColumn("Yaw");
+            ImGui::TableHeadersRow();
+            for (const pmg::CyclicContinuitySampleSummary& sample :
+                 graph_cyclic_summary_.samples) {
+                const pmg::CyclicContinuityRecord& record = sample.record;
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(sample.node_name.c_str());
+                ImGui::TableSetColumnIndex(1);
+                const std::string parameter = ParameterLabel(sample.parameter);
+                ImGui::TextUnformatted(parameter.c_str());
+                ImGui::TableSetColumnIndex(2);
+                const std::string clip = ShortClipLabel(sample.clip_name);
+                ImGui::TextUnformatted(clip.c_str());
+                ImGui::TableSetColumnIndex(3);
+                ImGui::TextUnformatted(
+                    pmg::CyclicContinuityClassificationName(
+                        record.classification));
+                ImGui::TableSetColumnIndex(4);
+                ImGui::Text("%.2f", record.seam_step_ratio);
+                ImGui::TableSetColumnIndex(5);
+                ImGui::Text("%.2f", record.root_speed_ratio);
+                ImGui::TableSetColumnIndex(6);
+                ImGui::Text("%.2f", record.yaw_rate_ratio);
+            }
+            ImGui::EndTable();
+        }
     }
     if (source_artifact_.has_value()) {
         ImGui::SetNextItemWidth(200.0f);

@@ -123,13 +123,27 @@ separate offline command:
   artifact contains weak cyclic samples;
 - generated `metrics.json` records cyclic strong/weak sample counts;
 - generated `report.md` records the same warning at build time;
+- generated `tables/cyclic_samples.csv` records per-node/per-sample seam,
+  speed, yaw, contact, and classification fields;
 - the viewer reports the warning when a `.pmg_spec` build or artifact load
-  installs a graph.
+  installs a graph, with a collapsible per-sample table in the Runtime tab.
 
 This is an invertible diagnostic change. It does not modify BVH files, graph
 specs, registration, edge thresholds, runtime scheduling, or transition
 blending. Reverting the warning/report API and viewer/CLI call sites restores
 the prior behavior without artifact migration.
+
+## Corpus Curation Loop
+
+Do not edit tracked BVH files in place. Evaluate any candidate recut or anchor
+replacement through a separate spec/output directory first:
+
+1. Build the candidate artifact and inspect `tables/cyclic_samples.csv`.
+2. Run `--audit-cyclic-continuity` for authored and generated samples.
+3. Compare runtime pop/transition diagnostics against the current baseline.
+4. Check that turn-rate/travel-speed semantics are not changed silently.
+5. Only then decide whether to replace anchors or keep the candidate as a
+   limitation/corpus note.
 
 ## Checklist
 

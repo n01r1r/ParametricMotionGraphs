@@ -223,6 +223,34 @@ std::string JsonEscape(const std::string& text) {
     return escaped;
 }
 
+std::string CsvEscape(const std::string& text) {
+    if (text.find_first_of(",\"\n") == std::string::npos) {
+        return text;
+    }
+    std::string escaped = "\"";
+    for (const char character : text) {
+        if (character == '"') {
+            escaped += "\"\"";
+        } else {
+            escaped.push_back(character);
+        }
+    }
+    escaped += '"';
+    return escaped;
+}
+
+std::string ParameterCell(const pmg::ParameterVector& parameter) {
+    std::ostringstream output;
+    for (std::size_t dimension = 0; dimension < parameter.size();
+         ++dimension) {
+        if (dimension > 0) {
+            output << ' ';
+        }
+        output << parameter[dimension];
+    }
+    return output.str();
+}
+
 bool BoxesDiffer(const pmg::ParameterAabb& before,
                  const pmg::ParameterAabb& after) {
     return before.min_corner != after.min_corner ||
@@ -493,6 +521,26 @@ void WriteArtifactReports(
         }
     }
     {
+        std::ofstream table(tables_directory / "cyclic_samples.csv");
+        table << "node,parameter,clip,classification,seam_step_ratio,"
+                 "root_speed_ratio,yaw_rate_ratio,max_contact_drift,"
+                 "contact_state_matches\n";
+        for (const pmg::CyclicContinuitySampleSummary& sample :
+             cyclic_summary.samples) {
+            const pmg::CyclicContinuityRecord& record = sample.record;
+            table << CsvEscape(sample.node_name) << ','
+                  << CsvEscape(ParameterCell(sample.parameter)) << ','
+                  << CsvEscape(sample.clip_name) << ','
+                  << pmg::CyclicContinuityClassificationName(
+                         record.classification)
+                  << ',' << record.seam_step_ratio << ','
+                  << record.root_speed_ratio << ','
+                  << record.yaw_rate_ratio << ','
+                  << record.max_contact_drift << ','
+                  << static_cast<int>(record.contact_state_matches) << "\n";
+        }
+    }
+    {
         std::ofstream report(output_directory / "report.md");
         report << "# PMG Paper-Core Build Report\n\n"
                << "## Purpose\n\n"
@@ -505,7 +553,8 @@ void WriteArtifactReports(
                << "## Outputs\n\n"
                << "- Artifact: `" << artifact_path.filename().string()
                << "` (" << artifact_bytes << " bytes)\n"
-               << "- Edge table: `tables/edge_samples.csv`\n\n"
+               << "- Edge table: `tables/edge_samples.csv`\n"
+               << "- Cyclic table: `tables/cyclic_samples.csv`\n\n"
                << "## Metrics\n\n"
                << "- Build time: " << build_seconds << " s\n"
                << "- Nodes / edges: " << artifact.graph.NumNodes() << " / "
