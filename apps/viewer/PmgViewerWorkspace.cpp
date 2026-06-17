@@ -1628,7 +1628,8 @@ void PmgViewerWorkspace::BuildDistanceGridSection() {
         ImGui::EndCombo();
     }
 
-    // Shared GOOD/BAD thresholds -- also drive the graph edge build.
+    // Shared GOOD/BAD thresholds for the heatmap and sandbox graph builds.
+    // .pmg_spec builds keep their per-edge edge_config/edge_phase_range values.
     ImGui::InputFloat("TGOOD", &tgood_, 1.0f, 10.0f, "%.3f");
     ImGui::InputFloat("TBAD", &tbad_, 1.0f, 10.0f, "%.3f");
     tgood_ = std::max(0.0f, tgood_);

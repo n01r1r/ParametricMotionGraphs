@@ -375,6 +375,7 @@ void PmgViewerWorkspace::BuildGraphRuntime() {
         config.generated_frames_per_second = graph_fps_;
         config.good_transition_threshold = tgood_;
         config.bad_transition_threshold = tbad_;
+        config.distance_grid = heatmap_config_;
 
         pmg::PmgEdge edge = pmg::PmgBuilder::BuildEdge(
             pmg_skeleton_, node, node, pmg_space_, pmg_space_, config);
@@ -556,6 +557,7 @@ void PmgViewerWorkspace::BuildAuthoredGraph() {
             config.generated_frames_per_second = graph_fps_;
             config.good_transition_threshold = authored.tgood;
             config.bad_transition_threshold = authored.tbad;
+            config.distance_grid = heatmap_config_;
 
             pmg::PmgEdge edge = pmg::PmgBuilder::BuildEdge(
                 first_skeleton, authored.source_node, authored.target_node,
@@ -1302,7 +1304,8 @@ void PmgViewerWorkspace::BuildGraphSection() {
 void PmgViewerWorkspace::BuildGraphSpecTab() {
     ImGui::TextUnformatted("Build saveable graph from .pmg_spec");
     ImGui::TextDisabled(
-        "Spec owns nodes, edges, thresholds, registration, and metadata.");
+        "Spec owns nodes, edges, thresholds, phase ranges, registration, and "
+        "metadata.");
     if (spec_files_.empty()) {
         ImGui::TextDisabled("No .pmg_spec files found in the spec directory.");
         return;
@@ -1335,6 +1338,11 @@ void PmgViewerWorkspace::BuildGraphQuickTab() {
     ImGui::TextUnformatted("Quick self-edge diagnostic");
     ImGui::TextDisabled(
         "Build one node from current motion space. Scratch only; not saveable.");
+    ImGui::TextDisabled(
+        "Uses current thresholds and Distance Grid phase range [%.2f, %.2f] "
+        "-> [%.2f, %.2f].",
+        heatmap_config_.source_phase_start, heatmap_config_.source_phase_end,
+        heatmap_config_.target_phase_start, heatmap_config_.target_phase_end);
 
     ImGui::SetNextItemWidth(180.0f);
     ImGui::InputFloat("GOOD threshold##quick", &tgood_, 1.0f, 10.0f, "%.3f");
@@ -1432,6 +1440,10 @@ void PmgViewerWorkspace::BuildGraphAuthorTab() {
     ImGui::TextUnformatted("2. Connect nodes");
     ImGui::TextDisabled(
         "Thresholds apply to each new edge; raw-sum units are corpus-specific.");
+    ImGui::TextDisabled(
+        "Build uses Distance Grid phase range [%.2f, %.2f] -> [%.2f, %.2f].",
+        heatmap_config_.source_phase_start, heatmap_config_.source_phase_end,
+        heatmap_config_.target_phase_start, heatmap_config_.target_phase_end);
     ImGui::SetNextItemWidth(180.0f);
     ImGui::InputFloat("GOOD threshold##author", &tgood_, 1.0f, 10.0f, "%.3f");
     ImGui::SetNextItemWidth(180.0f);

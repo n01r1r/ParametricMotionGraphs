@@ -303,6 +303,13 @@ blend support already reported by `RuntimeController`. This makes the
 directional-metric/centered-blend policy explicit without duplicating transition
 selection or alignment logic.
 
+Viewer graph construction has two explicit authority paths. `.pmg_spec` builds
+are saveable artifacts and keep the spec's nodes, edges, thresholds,
+`edge_phase_range`, registration, and metadata authoritative. Quick self-edge
+and in-GUI authored graphs are sandbox diagnostics: they use the current viewer
+thresholds and Distance Grid phase range, so arbitrary loaded BVH experiments
+can change with those controls and are not presented as shipped-spec evidence.
+
 ## Failure boundaries
 
 The implementation throws close to the invalid input for: missing or malformed
