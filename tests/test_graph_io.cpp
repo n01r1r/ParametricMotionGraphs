@@ -54,6 +54,7 @@ pmg::ParametricMotionGraph MakeGraph(bool registered) {
             {{0.2f, 1.4f}, {0.2f, 0.4f, 0.4f}},
         };
         space.SetParameterCalibration(calibration);
+        space.SetParameterSupport(pmg::ParameterSupport({{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}}));
     }
 
     pmg::ParametricMotionGraph graph;
@@ -296,7 +297,7 @@ int main() {
         std::ifstream input(path);
         std::string header;
         input >> header;
-        assert(header == "PMG_GRAPH_V10");
+        assert(header == "PMG_GRAPH_V11");
     }
     const pmg::BuiltPmgArtifact loaded =
         pmg::LoadPmgArtifactText(path.string());
@@ -350,6 +351,9 @@ int main() {
         assert(std::abs(calibration.samples[3].blend_weights[1] - 0.4f) <
                1.0e-6f);
     }
+
+    assert(loaded.graph.Node(0).motion_space.HasExplicitParameterSupport());
+    assert(std::abs(loaded.graph.Node(0).motion_space.ProjectToSupport({1.0f, 1.0f})[0] - 0.5f) < 1e-4f);
 
     const pmg::ParametricMotionSpace& original_space =
         original.graph.Node(0).motion_space;

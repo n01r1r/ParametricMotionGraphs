@@ -933,7 +933,7 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     const std::optional<GraphPayloadFormat> format = FormatForHeader(header);
     if (!format) {
         throw std::runtime_error(
-            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V10");
+            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V11");
     }
 
     BuiltPmgArtifact artifact;

@@ -14,9 +14,9 @@ Use this for the smooth sparse parametric locomotion viewer demo. It places wide
 walk_2d -> walk_2d
 ```
 
-This matches the current corpus. It does **not** claim a full rectangular 2-D locomotion family because the `(tight turn, jog)` corner is missing.
+The primary demo uses a sparse 2D simplex support over three authored locomotion anchors. It does not claim full rectangular turn/speed control because the tight-jog corner clip is missing.
 The spec declares `parameter_support walk_2d simplex`, so loading validates the three authored examples as a non-collinear triangle.
-In the viewer, use Graph -> Coverage to see that triangle overlaid on the node's AABB; the missing corner is marked as unsampled. Use Graph -> Runtime -> Transition to compare the requested target parameter with the actual transition parameter available from the edge lookup.
+In the viewer, use Graph -> Coverage to see that triangle overlaid on the node's domain; the missing corner is marked as unsampled. Use Graph -> Runtime -> Transition to compare the requested target parameter with the actual transition parameter available from the edge lookup.
 
 ### `demo_walk_self_edge_minimal.pmg_spec`
 

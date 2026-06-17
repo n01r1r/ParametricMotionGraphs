@@ -1,13 +1,12 @@
-# Canonical sparse 2-D AABB interpolation demo.
+# The primary demo uses a sparse 2D simplex support over three authored locomotion anchors. It does not claim full rectangular turn/speed control because the tight-jog corner clip is missing.
 # Demonstrates:
 # - a 2-D ParametricMotionSpace with measured metric calibration;
 # - the minimum three non-collinear examples needed for local 2-D lookup;
-# - interpolation and runtime requests over the implementation's rectangular AABB.
-# This demonstrates sparse 2-D AABB interpolation machinery, not convex-hull support enforcement.
+# - interpolation and runtime requests over the authored simplex.
+# This demonstrates simplex support enforcement.
 # Does not demonstrate:
-# - projection or clamping to the authored triangle;
 # - full rectangular motion coverage or a tight-turn jog endpoint;
-# - independent turn and speed control across the whole AABB;
+# - independent turn and speed control across the whole domain;
 # - a robust production locomotion family.
 #
 # Axis 0: authored turn class (0 = wide, 1 = tight).
@@ -29,7 +28,7 @@ expect walk_2d spanned_axes 2
 # corner_coverage full is deliberately NOT claimed: the (1,1) tight-jog corner
 # is unsampled because the corpus has only one jog clip (jogCurve). A complete
 # rectangular 2-D family would add a tight-turn jog BVH. Until then, requests
-# outside the authored triangle remain valid AABB requests and may synthesize
+# outside the authored triangle are projected onto the valid simplex and synthesize
 # sparse three-example blends.
 edge walk_2d walk_2d
 # Explicit default advancing phase range. This does not enforce triangular

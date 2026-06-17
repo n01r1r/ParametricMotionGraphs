@@ -202,8 +202,8 @@ ParameterVector ParameterSupport::Project(const ParameterVector& parameter) cons
     ParameterVector best_point;
     float best_distance = std::numeric_limits<float>::infinity();
 
-    // ponytail: enumerate simplex faces; replace with an active-set solver if
-    // parameter spaces ever exceed small authored PMG dimensions.
+    // TODO: Enumerate simplex faces for now; replace with an active-set solver if
+    // authored parameter spaces ever exceed small PMG dimensions.
     const std::size_t face_count = std::size_t{1} << vertices_.size();
     for (std::size_t mask = 1; mask < face_count; ++mask) {
         std::vector<ParameterVector> face_vertices;

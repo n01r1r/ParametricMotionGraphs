@@ -165,7 +165,8 @@ private:
 };
 
 // Offline multidimensional calibration. Samples a deterministic regular grid
-// over the authored parameter domain, generates each uncalibrated blend, and
+// over the authored parameter domain (projected to explicit support if present),
+// generates each uncalibrated blend, and
 // records the resulting metric vector and full example-weight vector.
 // metrics.size() must equal the space parameter dimension.
 ParameterCalibration CalibrateParameterMetrics(
