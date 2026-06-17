@@ -25,6 +25,7 @@ add_library(pmg_core
     src/MotionSpacePreparation.cpp
     src/ParametricMotionGraph.cpp
     src/ParametricMotionSpace.cpp
+    src/ParameterSupport.cpp
     src/PmgArtifact.cpp
     src/PmgBuilder.cpp
     src/PoseBlend.cpp
@@ -71,6 +72,10 @@ if(PMG_BUILD_TESTS)
     add_executable(test_parametric_motion_space tests/test_parametric_motion_space.cpp)
     target_link_libraries(test_parametric_motion_space PRIVATE pmg_core)
     add_test(NAME test_parametric_motion_space COMMAND test_parametric_motion_space)
+
+    add_executable(test_parameter_support tests/test_parameter_support.cpp)
+    target_link_libraries(test_parameter_support PRIVATE pmg_core)
+    add_test(NAME test_parameter_support COMMAND test_parameter_support)
 
     add_executable(test_bvh_loader tests/test_bvh_loader.cpp)
     target_link_libraries(test_bvh_loader PRIVATE pmg_core)
