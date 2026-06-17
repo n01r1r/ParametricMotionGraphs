@@ -461,6 +461,57 @@ int main() {
         assert(transitioned);
     }
 
+    // Simplex support and reachable transition box must both constrain runtime
+    // target selection.
+    {
+        int simplex_node = -1;
+        pmg::ParametricMotionSpace space("simplex_box", 2);
+        space.AddExample({0.0f, 0.0f}, MakeWalkClip(0.0f));
+        space.AddExample({1.0f, 0.0f}, MakeWalkClip(1.0f));
+        space.AddExample({0.0f, 1.0f}, MakeWalkClip(1.0f));
+        space.SetParameterSupport(pmg::ParameterSupport(space.ExampleParameters()));
+
+        pmg::ParametricMotionGraph simplex_graph;
+        simplex_node = simplex_graph.AddNode("simplex_box", space);
+
+        pmg::PmgEdge edge;
+        edge.source_node = simplex_node;
+        edge.target_node = simplex_node;
+        edge.samples.push_back({
+            {0.5f, 0.0f},
+            {{0.0f, 0.7f}, {0.4f, 1.0f}},
+            0.5f,
+            0.5f,
+        });
+        simplex_graph.AddEdge(std::move(edge));
+
+        pmg::RootOnlyAlignment alignment;
+        pmg::RuntimeController c(simplex_graph, alignment, {});
+        c.Start(simplex_node, {0.5f, 0.0f}, kFramesPerSecond);
+
+        pmg::RuntimeControlRequest req;
+        req.desired_node = simplex_node;
+        req.desired_parameter = {1.0f, 1.0f};
+
+        bool transitioned = false;
+        for (int step = 0; step < 120; ++step) {
+            c.Update(delta_seconds, req);
+            if (c.IsTransitioning()) {
+                const auto diagnostics = c.ActiveTransitionDiagnostics();
+                assert(diagnostics.has_value());
+                assert(diagnostics->reachable_target_box.Contains(
+                    diagnostics->actual_target_parameter));
+                assert(space.ContainsSupportedParameter(
+                    diagnostics->actual_target_parameter));
+                assert(std::abs(diagnostics->actual_target_parameter[0] - 0.3f) < 1.0e-5f);
+                assert(std::abs(diagnostics->actual_target_parameter[1] - 0.7f) < 1.0e-5f);
+                transitioned = true;
+                break;
+            }
+        }
+        assert(transitioned);
+    }
+
     // Triangulated 2D support: request inside and outside
     {
         int tri_node = -1;

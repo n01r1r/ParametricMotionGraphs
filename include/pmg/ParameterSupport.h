@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pmg/ParameterVector.h"
+#include "pmg/TransitionTypes.h"
 
 #include <array>
 #include <random>
@@ -37,6 +38,8 @@ public:
     std::vector<float> BarycentricWeights(const ParameterVector& parameter) const;
     bool Contains(const ParameterVector& parameter, float tolerance = 1.0e-5f) const;
     ParameterVector Project(const ParameterVector& parameter) const;
+    // Closest supported parameter that also lies in the reachable transition box.
+    ParameterVector ProjectInside(const ParameterVector& parameter, const ParameterAabb& box) const;
     ParameterVector SampleUniform(std::mt19937& rng) const;
 
 private:

@@ -330,17 +330,6 @@ void RuntimeController::TryScheduleTransition(
         return;
     }
 
-    if (request.desired_node == current_node_) {
-        float sq_dist = 0.0f;
-        for (std::size_t i = 0; i < request.desired_parameter.size() && i < current_parameter_.size(); ++i) {
-            const float d = request.desired_parameter[i] - current_parameter_[i];
-            sq_dist += d * d;
-        }
-        if (sq_dist < kSmallEpsilon * kSmallEpsilon) {
-            return;
-        }
-    }
-
     for (const int edge_index : graph_.OutgoingEdgeIndices(current_node_)) {
         const PmgEdge& edge = graph_.Edge(edge_index);
         if (edge.target_node != request.desired_node) {
@@ -388,14 +377,13 @@ void RuntimeController::TryScheduleTransition(
             continue;
         }
 
-        ParameterVector p = target_node.motion_space.ProjectToSupport(request.desired_parameter);
-        p = transition->target_parameter_box.Clamp(p);
-        p = target_node.motion_space.ProjectToSupport(p);
-
-        // exact projection to support ∩ reachable_box is future work.
-        // The current guarantee is: actual_target_parameter is inside authored support,
-        // not necessarily: actual_target_parameter remains inside reachable AABB after the second projection.
-        const ParameterVector target_parameter = p;
+        ParameterVector target_parameter =
+            transition->target_parameter_box.Clamp(request.desired_parameter);
+        if (target_node.motion_space.HasExplicitParameterSupport()) {
+            target_parameter = target_node.motion_space.ExplicitSupport()->ProjectInside(
+                request.desired_parameter,
+                transition->target_parameter_box);
+        }
 
         next_clip_ = target_node.motion_space.GenerateClip(
             target_parameter,

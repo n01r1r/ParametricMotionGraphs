@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 #include <stdexcept>
 
 namespace pmg {
@@ -11,6 +12,10 @@ namespace {
 constexpr float kPivotTolerance = 1.0e-8f;
 constexpr float kWeightTolerance = 1.0e-5f;
 constexpr int kMaxEnumeratedSimplexVertices = 20;
+
+std::vector<float> BarycentricForVertices(
+    const std::vector<ParameterVector>& vertices,
+    const ParameterVector& parameter);
 
 bool IsFiniteVector(const ParameterVector& values) {
     for (const float value : values) {
@@ -52,6 +57,90 @@ ParameterVector Combine(
         }
     }
     return point;
+}
+
+bool IsInsideBox(const ParameterVector& parameter, const ParameterAabb& box) {
+    if (box.IsEmpty()) {
+        return false;
+    }
+    RequireSameParameterDimension(box.min_corner, parameter, "ParameterSupport::IsInsideBox");
+    RequireSameParameterDimension(box.max_corner, parameter, "ParameterSupport::IsInsideBox");
+    for (std::size_t axis = 0; axis < parameter.size(); ++axis) {
+        if (parameter[axis] < box.min_corner[axis] - kWeightTolerance ||
+            parameter[axis] > box.max_corner[axis] + kWeightTolerance) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void ConsiderCandidate(
+    const ParameterVector& parameter,
+    const ParameterAabb& box,
+    const std::vector<ParameterVector>& face_vertices,
+    ParameterVector candidate,
+    ParameterVector& best_point,
+    float& best_distance) {
+    try {
+        const std::vector<float> weights =
+            BarycentricForVertices(face_vertices, candidate);
+        if (std::any_of(weights.begin(), weights.end(), [](float weight) {
+                return weight < -kWeightTolerance;
+            })) {
+            return;
+        }
+        candidate = Combine(face_vertices, weights);
+    } catch (const std::runtime_error&) {
+        return;
+    }
+
+    if (!IsInsideBox(candidate, box)) {
+        return;
+    }
+    const float distance = SquaredDistance(parameter, candidate);
+    if (distance < best_distance) {
+        best_distance = distance;
+        best_point = candidate;
+    }
+}
+
+void Consider2DLineBoxIntersections(
+    const ParameterVector& parameter,
+    const ParameterAabb& box,
+    const std::vector<ParameterVector>& face_vertices,
+    ParameterVector& best_point,
+    float& best_distance) {
+    if (face_vertices.size() != 2 || parameter.size() != 2) {
+        return;
+    }
+
+    const ParameterVector& start = face_vertices[0];
+    const ParameterVector& end = face_vertices[1];
+    const float dx = end[0] - start[0];
+    const float dy = end[1] - start[1];
+
+    auto consider_t = [&](float t) {
+        if (t < -kWeightTolerance || t > 1.0f + kWeightTolerance) {
+            return;
+        }
+        t = std::clamp(t, 0.0f, 1.0f);
+        ConsiderCandidate(
+            parameter,
+            box,
+            face_vertices,
+            {start[0] + t * dx, start[1] + t * dy},
+            best_point,
+            best_distance);
+    };
+
+    if (std::abs(dx) > kPivotTolerance) {
+        consider_t((box.min_corner[0] - start[0]) / dx);
+        consider_t((box.max_corner[0] - start[0]) / dx);
+    }
+    if (std::abs(dy) > kPivotTolerance) {
+        consider_t((box.min_corner[1] - start[1]) / dy);
+        consider_t((box.max_corner[1] - start[1]) / dy);
+    }
 }
 
 std::vector<float> SolveLinearSystem(
@@ -167,8 +256,39 @@ ParameterSupport::ParameterSupport(
     if (vertices_.empty() || vertices_.front().size() != 2) {
         throw std::runtime_error("ParameterSupport: triangulated 2D requires 2D vertices");
     }
+    for (const ParameterVector& vertex : vertices_) {
+        RequireSameParameterDimension(vertices_.front(), vertex, "ParameterSupport");
+        if (!IsFiniteVector(vertex)) {
+            throw std::runtime_error("ParameterSupport: vertices must be finite");
+        }
+    }
     if (triangles_.empty()) {
         throw std::runtime_error("ParameterSupport: triangulated 2D requires triangles");
+    }
+    std::set<std::array<int, 3>> unique_triangles;
+    for (std::array<int, 3> triangle : triangles_) {
+        for (const int vertex_index : triangle) {
+            if (vertex_index < 0 || vertex_index >= static_cast<int>(vertices_.size())) {
+                throw std::runtime_error("ParameterSupport: triangle index out of bounds");
+            }
+        }
+        if (triangle[0] == triangle[1] || triangle[1] == triangle[2] ||
+            triangle[2] == triangle[0]) {
+            throw std::runtime_error("ParameterSupport: triangle has duplicate vertices");
+        }
+        const ParameterVector& p0 = vertices_[static_cast<std::size_t>(triangle[0])];
+        const ParameterVector& p1 = vertices_[static_cast<std::size_t>(triangle[1])];
+        const ParameterVector& p2 = vertices_[static_cast<std::size_t>(triangle[2])];
+        const float signed_area_twice =
+            (p1[0] - p0[0]) * (p2[1] - p0[1]) -
+            (p1[1] - p0[1]) * (p2[0] - p0[0]);
+        if (std::abs(signed_area_twice) <= kWeightTolerance) {
+            throw std::runtime_error("ParameterSupport: triangle area must be positive");
+        }
+        std::sort(triangle.begin(), triangle.end());
+        if (!unique_triangles.insert(triangle).second) {
+            throw std::runtime_error("ParameterSupport: duplicate triangle");
+        }
     }
 }
 
@@ -351,6 +471,103 @@ ParameterVector ParameterSupport::Project(const ParameterVector& parameter) cons
 
     if (best_point.empty()) {
         throw std::runtime_error("ParameterSupport::Project: no valid simplex face");
+    }
+    return best_point;
+}
+
+ParameterVector ParameterSupport::ProjectInside(
+    const ParameterVector& parameter,
+    const ParameterAabb& box) const {
+    RequireSameParameterDimension(vertices_.front(), parameter, "ParameterSupport::ProjectInside");
+    RequireSameParameterDimension(box.min_corner, parameter, "ParameterSupport::ProjectInside");
+    RequireSameParameterDimension(box.max_corner, parameter, "ParameterSupport::ProjectInside");
+    if (box.IsEmpty()) {
+        throw std::runtime_error("ParameterSupport::ProjectInside: empty box");
+    }
+    if (!IsFiniteVector(parameter)) {
+        throw std::runtime_error("ParameterSupport::ProjectInside: parameter must be finite");
+    }
+
+    ParameterVector best_point;
+    float best_distance = std::numeric_limits<float>::infinity();
+
+    if (type_ == Type::kTriangulated2D) {
+        for (const std::array<int, 3>& triangle : triangles_) {
+            std::vector<ParameterVector> tri_vertices = {
+                vertices_[static_cast<std::size_t>(triangle[0])],
+                vertices_[static_cast<std::size_t>(triangle[1])],
+                vertices_[static_cast<std::size_t>(triangle[2])]};
+            const ParameterSupport tri(tri_vertices);
+            ParameterVector candidate;
+            try {
+                candidate = tri.ProjectInside(parameter, box);
+            } catch (const std::runtime_error&) {
+                continue;
+            }
+            const float distance = SquaredDistance(parameter, candidate);
+            if (distance < best_distance) {
+                best_distance = distance;
+                best_point = candidate;
+            }
+        }
+        if (best_point.empty()) {
+            throw std::runtime_error("ParameterSupport::ProjectInside: no point in support and box");
+        }
+        return best_point;
+    }
+
+    if (vertices_.size() > kMaxEnumeratedSimplexVertices) {
+        throw std::runtime_error("ParameterSupport::ProjectInside: simplex dimension too large");
+    }
+
+    const std::size_t face_count = std::size_t{1} << vertices_.size();
+    for (std::size_t mask = 1; mask < face_count; ++mask) {
+        std::vector<ParameterVector> face_vertices;
+        for (std::size_t vertex = 0; vertex < vertices_.size(); ++vertex) {
+            if ((mask & (std::size_t{1} << vertex)) != 0) {
+                face_vertices.push_back(vertices_[vertex]);
+            }
+        }
+
+        ParameterVector candidate;
+        try {
+            const std::vector<float> weights =
+                BarycentricForVertices(face_vertices, parameter);
+            if (std::any_of(weights.begin(), weights.end(), [](float weight) {
+                    return weight < -kWeightTolerance;
+                })) {
+                continue;
+            }
+            candidate = box.Clamp(Combine(face_vertices, weights));
+            const std::vector<float> clamped_weights =
+                BarycentricForVertices(face_vertices, candidate);
+            if (std::any_of(clamped_weights.begin(), clamped_weights.end(), [](float weight) {
+                    return weight < -kWeightTolerance;
+                })) {
+                continue;
+            }
+            candidate = Combine(face_vertices, clamped_weights);
+        } catch (const std::runtime_error&) {
+            continue;
+        }
+
+        ConsiderCandidate(
+            parameter,
+            box,
+            face_vertices,
+            candidate,
+            best_point,
+            best_distance);
+        Consider2DLineBoxIntersections(
+            parameter,
+            box,
+            face_vertices,
+            best_point,
+            best_distance);
+    }
+
+    if (best_point.empty()) {
+        throw std::runtime_error("ParameterSupport::ProjectInside: no point in support and box");
     }
     return best_point;
 }

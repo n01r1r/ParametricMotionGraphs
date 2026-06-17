@@ -44,6 +44,15 @@ int main() {
     AssertVectorNear(triangle.Project({0.75f, 0.75f}), {0.5f, 0.5f});
     AssertVectorNear(triangle.Project({-0.2f, 0.4f}), {0.0f, 0.4f});
 
+    pmg::ParameterAabb upper_left_box;
+    upper_left_box.min_corner = {0.0f, 0.7f};
+    upper_left_box.max_corner = {0.4f, 1.0f};
+    const pmg::ParameterVector constrained =
+        triangle.ProjectInside({1.0f, 1.0f}, upper_left_box);
+    assert(triangle.Contains(constrained));
+    assert(upper_left_box.Contains(constrained));
+    AssertVectorNear(constrained, {0.3f, 0.7f});
+
     std::mt19937 first_rng(7);
     std::mt19937 second_rng(7);
     const pmg::ParameterVector first_sample = triangle.SampleUniform(first_rng);
@@ -70,6 +79,27 @@ int main() {
         degenerate_threw = true;
     }
     assert(degenerate_threw);
+
+    bool invalid_triangle_index_threw = false;
+    try {
+        (void)pmg::ParameterSupport::CreateTriangulated2D(
+            {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}},
+            {{0, 1, 3}});
+    } catch (const std::runtime_error&) {
+        invalid_triangle_index_threw = true;
+    }
+    assert(invalid_triangle_index_threw);
+
+    bool duplicate_triangle_threw = false;
+    try {
+        (void)pmg::ParameterSupport::CreateTriangulated2D(
+            {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}},
+            {{0, 1, 2}, {2, 1, 0}});
+    } catch (const std::runtime_error&) {
+        duplicate_triangle_threw = true;
+    }
+    assert(duplicate_triangle_threw);
+
     // Triangulated 2D tests
     const pmg::ParameterSupport triangulated = pmg::ParameterSupport::CreateTriangulated2D(
         {
@@ -107,14 +137,7 @@ int main() {
     assert(w_triangle1[0] == 0.0f && w_triangle1[3] == 0.0f);
 
     // Triangulated2D_InteriorAnchorParticipates
-    const std::vector<float> w_near_interior = triangulated.BarycentricWeights({0.1f, 0.5f}); // between {0,0}, {0,1}, {0.15,0.75} i.e. tri {1, 3, 4} wait, we don't have {1, 3, 4}.
-    // Actually the triangles are:
-    // {0, 1, 4}: (-0.3,0), (0,0), (0.15,0.75)
-    // {1, 2, 4}: (0,0), (1,0), (0.15,0.75)
-    // {2, 3, 4}: (1,0), (0,1), (0.15,0.75)
-    // {3, 0, 4}: (0,1), (-0.3,0), (0.15,0.75)
-    // Point (0.1f, 0.5f) is in {3, 0, 4} or {0, 1, 4}?
-    // Let's just check the interior anchor has weight > 0
+    const std::vector<float> w_near_interior = triangulated.BarycentricWeights({0.1f, 0.5f});
     assert(w_near_interior[4] > 0.0f);
 
     return 0;

@@ -24,8 +24,9 @@ It can be run from `specs/demo_walk_2d_triangulated.pmg_spec` using a single sel
   the sparse 2-D demo, the triangulated support formed by the clips. Red
   corner rings mark missing domain corners such as tight-turn jog.
 - The Graph/Runtime transition panel reports requested vs actual target
-  parameters. Requested is the live runtime target; actual is the reachable
-  transition parameter selected or clamped by the current edge lookup. The UI also distinguishes `REQUESTED RAW` and `REQUESTED PROJECTED`.
+  parameters. Requested is the live runtime target; actual is projected into
+  the authored support and the current edge's reachable transition box. The UI
+  also distinguishes `REQUESTED RAW` and `REQUESTED PROJECTED`.
 - Graph runtime installation goes through shared private lifecycle helpers so
   loaded artifacts and sandbox graphs reset controller, steering, target, and
   trace state consistently.

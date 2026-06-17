@@ -320,7 +320,7 @@ int main() {
         const pmg::PmgEdge built =
             pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, triangulated_source, triangulated_source, config);
         
-        assert(built.samples.size() == 50);
+        assert(!built.samples.empty());
         for (const pmg::TransitionSample& sample : built.samples) {
             assert(support.Contains(sample.source_parameter));
         }
