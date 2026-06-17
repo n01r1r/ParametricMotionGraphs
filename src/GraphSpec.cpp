@@ -3,6 +3,7 @@
 #include "pmg/MotionSpacePreparation.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -67,6 +68,58 @@ ParameterMetric ParseParameterMetric(
     throw std::runtime_error(
         "LoadGraphSpec line " + std::to_string(line_number) +
         ": unknown parameter metric '" + metric_name + "'");
+}
+
+bool HasFullSimplexRank(const std::vector<const ParameterVector*>& params,
+                        int dimension) {
+    constexpr float kRankEpsilon = 1.0e-6f;
+    std::vector<std::vector<float>> matrix(
+        static_cast<std::size_t>(dimension),
+        std::vector<float>(static_cast<std::size_t>(dimension), 0.0f));
+    for (int column = 0; column < dimension; ++column) {
+        for (int row = 0; row < dimension; ++row) {
+            matrix[static_cast<std::size_t>(row)][static_cast<std::size_t>(column)] =
+                (*params[static_cast<std::size_t>(column + 1)])[row] -
+                (*params.front())[row];
+        }
+    }
+
+    int rank = 0;
+    for (int column = 0; column < dimension; ++column) {
+        int pivot = rank;
+        for (int row = rank + 1; row < dimension; ++row) {
+            if (std::fabs(matrix[static_cast<std::size_t>(row)]
+                                [static_cast<std::size_t>(column)]) >
+                std::fabs(matrix[static_cast<std::size_t>(pivot)]
+                                [static_cast<std::size_t>(column)])) {
+                pivot = row;
+            }
+        }
+        if (std::fabs(matrix[static_cast<std::size_t>(pivot)]
+                            [static_cast<std::size_t>(column)]) <= kRankEpsilon) {
+            continue;
+        }
+        std::swap(matrix[static_cast<std::size_t>(rank)],
+                  matrix[static_cast<std::size_t>(pivot)]);
+        const float pivot_value =
+            matrix[static_cast<std::size_t>(rank)]
+                  [static_cast<std::size_t>(column)];
+        for (int row = rank + 1; row < dimension; ++row) {
+            const float scale =
+                matrix[static_cast<std::size_t>(row)]
+                      [static_cast<std::size_t>(column)] /
+                pivot_value;
+            for (int col = column; col < dimension; ++col) {
+                matrix[static_cast<std::size_t>(row)]
+                      [static_cast<std::size_t>(col)] -=
+                    scale *
+                    matrix[static_cast<std::size_t>(rank)]
+                          [static_cast<std::size_t>(col)];
+            }
+        }
+        ++rank;
+    }
+    return rank == dimension;
 }
 
 // Checks each node's declared `expect` clauses against its parsed examples so a
@@ -152,6 +205,34 @@ void ValidateNodeExpectations(const GraphSpec& spec) {
                         "parameter box has no example");
                 }
             }
+        }
+    }
+}
+
+void ValidateParameterSupport(const GraphSpec& spec) {
+    for (const GraphSpecNode& node : spec.nodes) {
+        if (!node.parameter_support_simplex) {
+            continue;
+        }
+        std::vector<const ParameterVector*> params;
+        for (const GraphSpecExample& example : spec.examples) {
+            if (example.node_name == node.name) {
+                params.push_back(&example.parameter);
+            }
+        }
+        const int expected_count = node.parameter_dimension + 1;
+        if (static_cast<int>(params.size()) != expected_count) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' declares simplex parameter_support but has " +
+                std::to_string(params.size()) + " examples; expected " +
+                std::to_string(expected_count));
+        }
+        if (!HasFullSimplexRank(params, node.parameter_dimension)) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' declares simplex parameter_support but its examples are "
+                "not affinely independent");
         }
     }
 }
@@ -381,6 +462,39 @@ GraphSpec LoadGraphSpec(const std::string& path) {
             }
             node_it->has_calibration_sampling_config = true;
             node_it->calibration_samples_per_axis = samples_per_axis;
+            continue;
+        }
+
+        if (keyword == "parameter_support") {
+            std::string node_name;
+            std::string support_shape;
+            if (!(line >> node_name >> support_shape)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": expected parameter_support <node> simplex");
+            }
+            auto node_it = std::find_if(
+                spec.nodes.begin(), spec.nodes.end(),
+                [&](const GraphSpecNode& node) {
+                    return node.name == node_name;
+                });
+            if (node_it == spec.nodes.end()) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": parameter_support references unknown node '" +
+                    node_name + "'");
+            }
+            if (support_shape != "simplex") {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": parameter_support only supports 'simplex'");
+            }
+            if (node_it->parameter_support_simplex) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": duplicate parameter_support for node '" + node_name + "'");
+            }
+            node_it->parameter_support_simplex = true;
             continue;
         }
 
@@ -655,6 +769,7 @@ GraphSpec LoadGraphSpec(const std::string& path) {
         }
     }
     ValidateNodeExpectations(spec);
+    ValidateParameterSupport(spec);
     return spec;
 }
 

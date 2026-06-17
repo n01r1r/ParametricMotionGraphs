@@ -193,8 +193,21 @@ int main() {
     assert(full_corner.nodes[0].has_expect_spanned_axes);
     assert(full_corner.nodes[0].expect_spanned_axes == 2);
 
-    // The same node missing the (1,1) corner is a degenerate simplex and fails
-    // the corner_coverage full claim.
+    const std::filesystem::path simplex_spec_path = directory / "simplex.txt";
+    {
+        std::ofstream simplex_spec(simplex_spec_path);
+        simplex_spec << "node g 2\n"
+                     << "parameter_support g simplex\n"
+                     << "example g 0 0 walk_a.bvh\n"
+                     << "example g 1 0 walk_a.bvh\n"
+                     << "example g 0 1 walk_a.bvh\n";
+    }
+    const pmg::GraphSpec simplex =
+        pmg::LoadGraphSpec(simplex_spec_path.string());
+    assert(simplex.nodes[0].parameter_support_simplex);
+
+    // The same node missing the (1,1) corner is a valid triangle, but fails the
+    // rectangular corner_coverage full claim.
     const std::filesystem::path missing_corner_spec_path =
         directory / "missing_corner.txt";
     {
@@ -231,6 +244,24 @@ int main() {
         collinear_threw = true;
     }
     assert(collinear_threw);
+
+    const std::filesystem::path collinear_simplex_spec_path =
+        directory / "collinear_simplex.txt";
+    {
+        std::ofstream collinear_simplex_spec(collinear_simplex_spec_path);
+        collinear_simplex_spec << "node g 2\n"
+                               << "parameter_support g simplex\n"
+                               << "example g 0 0 walk_a.bvh\n"
+                               << "example g 1 0 walk_a.bvh\n"
+                               << "example g 2 0 walk_a.bvh\n";
+    }
+    bool collinear_simplex_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(collinear_simplex_spec_path.string());
+    } catch (const std::runtime_error&) {
+        collinear_simplex_threw = true;
+    }
+    assert(collinear_simplex_threw);
 
     pmg::PmgBuilderConfig config;
     config.source_sample_count = 1;

@@ -28,6 +28,7 @@ struct GraphSpecNode {
     bool expect_corner_coverage_full = false;
     bool has_expect_spanned_axes = false;
     int expect_spanned_axes = 0;
+    bool parameter_support_simplex = false;
 };
 
 struct GraphSpecExample {
@@ -61,6 +62,9 @@ struct GraphSpec {
 //   parameter_metric <node> <turn_rate|travel_speed|none>  # legacy 1-D form
 //   parameter_metrics <node> <metric0> ... <metricN-1>
 //   parameter_calibration <node> <samples_per_axis>
+//   parameter_support <node> simplex  # exactly N+1 affinely independent
+//               examples define the authored support for an N-D node; runtime
+//               lookup still uses the implementation's current AABB behavior
 //   example <node_name> <p0> ... <pN-1> <path/to/file.bvh>
 //   edge <source_node> <target_node>
 //   edge_config <source> <target> <tgood> <tbad> <source_samples>
