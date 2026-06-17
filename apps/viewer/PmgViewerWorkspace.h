@@ -142,6 +142,11 @@ private:
     void RecomputeHeatmap();
     void SaveHeatmapCsv();
     void BuildGraphRuntime();
+    void ResetGraphRuntimeSession(bool discard_source_artifact);
+    void ResetGraphRuntimeSelection();
+    void StartGraphRuntimeController(
+        const pmg::RuntimeControllerConfig& config,
+        const std::string& status_label, GraphOrigin origin);
     // Path B: in-GUI multi-node graph authoring. Snapshot the current motion
     // space as a node, then (re)build the whole immutable graph from the
     // viewer-side authoring model. Both build paths funnel through

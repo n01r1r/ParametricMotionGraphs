@@ -15,6 +15,16 @@ BVH clips
   -> optional OpenGL viewer
 ```
 Currently, the stable demo can be run from `specs/demo_walk_2d_triangle.pmg_spec` which uses 3 locomotion anchors in 2D parametric motion space, and a single self-edge.
+
+## Architecture notes
+
+- `PmgViewerWorkspace` owns the ImGui/OpenGL adapter state for the viewer.
+- Graph runtime installation goes through shared private lifecycle helpers so
+  loaded artifacts and sandbox graphs reset controller, steering, target, and
+  trace state consistently.
+- `RuntimeController` and `GoalDirectedLocomotion` remain the core PMG runtime
+  modules; the viewer adapts their state into `RenderScene` diagnostics.
+
 ## Build
 ```
 cmake -S . -B build -DPMG_BUILD_VIEWER=ON -DPMG_BUILD_TESTS=ON

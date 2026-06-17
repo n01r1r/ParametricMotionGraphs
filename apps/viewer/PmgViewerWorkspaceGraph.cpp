@@ -180,6 +180,51 @@ pmg::ParameterVector PmgViewerWorkspace::DesiredParameterForNode(int node) const
     return desired;
 }
 
+void PmgViewerWorkspace::ResetGraphRuntimeSession(
+    bool discard_source_artifact) {
+    graph_ready_ = false;
+    graph_origin_ = GraphOrigin::None;
+    graph_controller_.reset();
+    graph_alignment_.reset();
+    graph_cyclic_summary_ = {};
+    graph_cyclic_warning_.clear();
+    steering_.reset();
+    goto_active_ = false;
+    goto_desired_parameter_.clear();
+    goto_status_.clear();
+    if (discard_source_artifact) {
+        source_artifact_.reset();
+    }
+}
+
+void PmgViewerWorkspace::ResetGraphRuntimeSelection() {
+    graph_desired_node_ = 0;
+    selected_graph_node_ = 0;
+    selected_graph_edge_ = graph_.NumEdges() > 0 ? 0 : -1;
+    // Fresh graph: discard drag offsets so an equal node count cannot inherit a
+    // prior graph's positions (size == NumNodes skips the on-demand reset).
+    graph_node_offsets_.clear();
+    graph_drag_node_ = -1;
+}
+
+void PmgViewerWorkspace::StartGraphRuntimeController(
+    const pmg::RuntimeControllerConfig& config,
+    const std::string& status_label, GraphOrigin origin) {
+    graph_runtime_config_ = config;
+    graph_alignment_.emplace(
+        pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
+    graph_controller_.emplace(
+        graph_, *graph_alignment_, graph_runtime_config_);
+    graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
+
+    graph_ready_ = true;
+    ResetRuntimeTrace();
+    graph_origin_ = origin;
+    graph_open_runtime_tab_ = true;
+    mode_ = ViewerPlaybackMode::GraphRuntime;
+    graph_status_ = status_label;
+}
+
 void PmgViewerWorkspace::AdoptArtifact(
     pmg::BuiltPmgArtifact artifact, const std::string& status_label,
     GraphOrigin origin) {
@@ -198,9 +243,7 @@ void PmgViewerWorkspace::AdoptArtifact(
     // holds the other axes at their midpoint (see DesiredParameterForNode). The
     // 1-D steering UI degrades gracefully for dim > 1.
 
-    steering_.reset();
-    graph_controller_.reset();
-    graph_alignment_.reset();
+    ResetGraphRuntimeSession(false);
 
     // Retain the whole artifact so "Save artifact" is lossless; the live members
     // below are copies derived from it (load is rare and user-driven).
@@ -238,27 +281,10 @@ void PmgViewerWorkspace::AdoptArtifact(
     const float gmin = pmg_parameter_min_.empty() ? 0.0f : pmg_parameter_min_.front();
     const float gmax = pmg_parameter_max_.empty() ? 1.0f : pmg_parameter_max_.front();
     graph_desired_parameter_ = 0.5f * (gmin + gmax);
-    graph_desired_node_ = 0;
-    selected_graph_node_ = 0;
-    selected_graph_edge_ = graph_.NumEdges() > 0 ? 0 : -1;
-    // Drop drag offsets from any previous graph; a new graph with the same node
-    // count would otherwise inherit stale positions (size == NumNodes skips the
-    // on-demand reset in DrawGraphCanvas).
-    graph_node_offsets_.clear();
-    graph_drag_node_ = -1;
-
-    graph_runtime_config_ =
-        pmg::RuntimeControllerConfigFromArtifact(adopted);
-    graph_alignment_.emplace(
-        pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
-    graph_controller_.emplace(
-        graph_, *graph_alignment_, graph_runtime_config_);
-    graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
-    graph_ready_ = true;
-    ResetRuntimeTrace();
-    graph_origin_ = origin;
-    graph_open_runtime_tab_ = true;
-    mode_ = ViewerPlaybackMode::GraphRuntime;
+    ResetGraphRuntimeSelection();
+    StartGraphRuntimeController(
+        pmg::RuntimeControllerConfigFromArtifact(adopted),
+        status_label, origin);
     playing_ = true;
     graph_cyclic_summary_ =
         pmg::SummarizeArtifactCyclicContinuity(adopted);
@@ -344,18 +370,9 @@ const char* PmgViewerWorkspace::GraphPersistenceLabel() const {
 }
 
 void PmgViewerWorkspace::BuildGraphRuntime() {
-    graph_ready_ = false;
-    graph_origin_ = GraphOrigin::None;
-    graph_controller_.reset();
-    graph_cyclic_summary_ = {};
-    graph_cyclic_warning_.clear();
     // The sandbox self-edge graph has no backing artifact; drop any retained one
     // so "Save artifact" cannot write stale metadata from a prior build/load.
-    source_artifact_.reset();
-    // A new graph invalidates the achieved-turn-rate table and any active goto.
-    steering_.reset();
-    goto_active_ = false;
-    goto_status_.clear();
+    ResetGraphRuntimeSession(true);
 
     if (!pmg_space_ready_ || pmg_examples_.empty()) {
         graph_status_ = "Add at least one clip to the parametric space first.";
@@ -402,14 +419,7 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     // Shared install path for the single-node and authored sandbox builds.
     // Sandbox graphs have no backing artifact, so drop any retained one (no
     // stale "Save artifact") and clear the runtime overlays (steering/goto).
-    graph_ready_ = false;
-    graph_controller_.reset();
-    source_artifact_.reset();
-    graph_cyclic_summary_ = {};
-    graph_cyclic_warning_.clear();
-    steering_.reset();
-    goto_active_ = false;
-    goto_status_.clear();
+    ResetGraphRuntimeSession(true);
 
     graph_ = std::move(built);
 
@@ -425,27 +435,12 @@ void PmgViewerWorkspace::InstallSandboxGraph(
             pmg_parameter_max_.empty() ? 1.0f : pmg_parameter_max_.front();
         graph_desired_parameter_ = std::clamp(graph_desired_parameter_, gmin, gmax);
     }
-    graph_desired_node_ = 0;
-    selected_graph_node_ = 0;
-    selected_graph_edge_ = graph_.NumEdges() > 0 ? 0 : -1;
-    // Fresh graph: discard drag offsets so an equal node count cannot inherit a
-    // prior graph's positions (size == NumNodes skips the on-demand reset).
-    graph_node_offsets_.clear();
-    graph_drag_node_ = -1;
+    ResetGraphRuntimeSelection();
 
     // Runtime alignment holds a reference to pmg_skeleton_, so build it first.
-    graph_runtime_config_.transition_blend_frames = std::max(1, blend_frames);
-    graph_alignment_.emplace(
-        pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
-    graph_controller_.emplace(graph_, *graph_alignment_, graph_runtime_config_);
-    graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
-
-    graph_ready_ = true;
-    ResetRuntimeTrace();
-    graph_origin_ = origin;
-    graph_open_runtime_tab_ = true;
-    mode_ = ViewerPlaybackMode::GraphRuntime;
-    graph_status_ = status_label;
+    pmg::RuntimeControllerConfig runtime_config = graph_runtime_config_;
+    runtime_config.transition_blend_frames = std::max(1, blend_frames);
+    StartGraphRuntimeController(runtime_config, status_label, origin);
 }
 
 void PmgViewerWorkspace::AddAuthoredNode() {
