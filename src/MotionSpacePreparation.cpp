@@ -4,6 +4,7 @@
 #include "pmg/MotionRegistration.h"
 #include "pmg/SkeletonCompatibility.h"
 
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -19,6 +20,16 @@ int FindJointIndex(const Skeleton& skeleton, const std::string& name, const std:
         }
     }
     throw std::runtime_error(context + ": unknown joint '" + name + "'");
+}
+
+bool IsExplicitRecutBvhPath(const std::string& path) {
+    // Files produced by `pmg_cli --export-known-cyclic-recuts` are already
+    // cropped to the intended cycle window. Running ExtractFirstCycle again on
+    // those short clips can fail because a valid one-cycle clip may contain only
+    // one detected strike for the cycle joint. Keep registration/contact metadata
+    // active, but do not perform a second contact-based cycle extraction.
+    const std::string filename = std::filesystem::path(path).filename().string();
+    return filename.find("_recut_") != std::string::npos;
 }
 
 NodeRegistrationMetadata ResolveRegistration(const GraphSpecNode& node,
@@ -82,7 +93,10 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
             }
 
             MotionClip clip = std::move(bvh.clip);
-            if (!stages.registration.cycle_joint.empty()) {
+            const bool should_extract_first_cycle =
+                !stages.registration.cycle_joint.empty() &&
+                !IsExplicitRecutBvhPath(example.bvh_path);
+            if (should_extract_first_cycle) {
                 const int cycle_joint =
                     FindJointIndex(*reference_skeleton, stages.registration.cycle_joint,
                                    "PrepareMotionSpaces cycle joint");

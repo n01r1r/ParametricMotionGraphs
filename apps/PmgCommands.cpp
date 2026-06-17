@@ -21,6 +21,8 @@ void PrintUsage() {
               << "  pmg_cli --build-graph graph_spec.txt out.pmg [--tgood X --tbad Y]\n"
               << "  pmg_cli --inspect-graph graph.pmg\n"
               << "  pmg_cli --inspect-contacts path/to/file.bvh LeftAnkle,RightAnkle\n"
+              << "  pmg_cli --export-bvh-recut input.bvh output.bvh first_frame last_frame\n"
+              << "  pmg_cli --export-known-cyclic-recuts --bvh-dir BVH --output-dir BVH/recut\n"
               << "  pmg_cli --space-sweep graph_spec.txt node [--contact-joints a,b]\n"
               << "      [--cycle-joint name] [--sweep-steps N] [--min-contacts N]\n"
               << "      [--max-foot-slide X] [--max-adjacent-step X] [--assert-no-regression]\n"
