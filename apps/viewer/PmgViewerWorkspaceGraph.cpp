@@ -188,10 +188,8 @@ void PmgViewerWorkspace::ResetGraphRuntimeSession(
     graph_alignment_.reset();
     graph_cyclic_summary_ = {};
     graph_cyclic_warning_.clear();
-    steering_.reset();
-    goto_active_ = false;
-    goto_desired_parameter_.clear();
-    goto_status_.clear();
+    goto_target_ = {0.0f, 0.0f};
+    ResetSteeringState();
     if (discard_source_artifact) {
         source_artifact_.reset();
     }
@@ -1005,16 +1003,7 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
             selected_graph_node_ = clicked_node;
             selected_graph_edge_ = -1;
             if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                graph_desired_node_ = clicked_node;
-                const pmg::ParametricMotionSpace& target_space =
-                    graph_.Node(clicked_node).motion_space;
-                if (target_space.ParameterDimension() == 1) {
-                    graph_desired_parameter_ = std::clamp(
-                        graph_desired_parameter_,
-                        target_space.MinParameter().front(),
-                        target_space.MaxParameter().front());
-                }
-                goto_active_ = false;
+                SetDesiredRuntimeNode(clicked_node);
             }
         } else {
             float best_distance = 12.0f;
@@ -1638,16 +1627,7 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
         if (selected_graph_node_ != graph_desired_node_) {
             ImGui::SameLine();
             if (ImGui::Button("Set runtime target")) {
-                graph_desired_node_ = selected_graph_node_;
-                const pmg::ParametricMotionSpace& selected_space =
-                    graph_.Node(graph_desired_node_).motion_space;
-                if (selected_space.ParameterDimension() == 1) {
-                    graph_desired_parameter_ = std::clamp(
-                        graph_desired_parameter_,
-                        selected_space.MinParameter().front(),
-                        selected_space.MaxParameter().front());
-                }
-                goto_active_ = false;
+                SetDesiredRuntimeNode(selected_graph_node_);
             }
         }
     } else if (selected_graph_edge_ >= 0 &&
@@ -1734,8 +1714,7 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
             goto_target_.x, goto_target_.y, std::sqrt(dx * dx + dz * dz));
         ImGui::SameLine();
         if (ImGui::Button("Clear target")) {
-            goto_active_ = false;
-            goto_status_ = "Target cleared.";
+            ResetGotoState("Target cleared.");
         }
     }
     if (!goto_status_.empty()) {

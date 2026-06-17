@@ -484,12 +484,54 @@ void PmgViewerWorkspace::RecordTransitionMarker(
 
 // --- Goto steering (viewer port of CLI --goto) ------------------------------
 
+void PmgViewerWorkspace::ResetGotoState(const std::string& status) {
+    goto_active_ = false;
+    goto_desired_parameter_.clear();
+    goto_status_ = status;
+}
+
+void PmgViewerWorkspace::ResetSteeringState(const std::string& status) {
+    steering_.reset();
+    ResetGotoState(status);
+}
+
+void PmgViewerWorkspace::SetDesiredRuntimeNode(int node) {
+    if (node < 0 || node >= graph_.NumNodes()) {
+        return;
+    }
+    graph_desired_node_ = node;
+    const pmg::ParametricMotionSpace& target_space =
+        graph_.Node(graph_desired_node_).motion_space;
+    if (target_space.ParameterDimension() == 1) {
+        graph_desired_parameter_ = std::clamp(
+            graph_desired_parameter_,
+            target_space.MinParameter().front(),
+            target_space.MaxParameter().front());
+    }
+    ResetGotoState();
+}
+
+void PmgViewerWorkspace::PlaceGotoTarget(const glm::vec2& target) {
+    goto_target_ = target;
+    if (!steering_.has_value()) {
+        CalibrateSteering();  // one-time; a few seconds of offline streaming
+    }
+    if (!steering_.has_value()) {
+        return;
+    }
+    steering_->Reset();
+    goto_desired_parameter_.clear();
+    goto_active_ = true;
+    playing_ = true;
+    goto_status_ = "Walking to target.";
+}
+
 // Achieved world turn rate when streaming the graph at one held parameter.
 // Differs from the example clips' own turn rates: each self-transition plays
 // only the target-phase -> source-gate slice per cycle, so the net heading
 // advance per hop is that slice's heading change (including sway).
 void PmgViewerWorkspace::CalibrateSteering() {
-    steering_.reset();
+    ResetSteeringState();
     if (!graph_ready_ || pmg_examples_.empty()) {
         goto_status_ = "Build a graph first.";
         return;
@@ -505,8 +547,8 @@ void PmgViewerWorkspace::CalibrateSteering() {
                        std::to_string(calibration.LowestRate()) + " .. " +
                        std::to_string(calibration.HighestRate()) + " rad/s.";
     } catch (const std::exception& error) {
-        steering_.reset();
-        goto_status_ = std::string("Calibration failed: ") + error.what();
+        ResetSteeringState(
+            std::string("Calibration failed: ") + error.what());
     }
 }
 
@@ -515,8 +557,7 @@ void PmgViewerWorkspace::UpdateGotoSteering(const pmg::Pose& pose) {
     const float dz = goto_target_.y - pose.root_position.z;
     const float distance = std::sqrt(dx * dx + dz * dz);
     if (distance <= goto_tolerance_) {
-        goto_active_ = false;
-        goto_status_ = "Target reached.";
+        ResetGotoState("Target reached.");
         return;
     }
     pmg::GoalRequest goal;
@@ -571,20 +612,9 @@ bool PmgViewerWorkspace::HandleGroundClick(const glm::vec3& ray_origin,
     }
     const glm::vec3 hit = ray_origin + t * ray_direction;
     // The scene is rendered at display scale; steering runs in native units.
-    goto_target_ = glm::vec2(hit.x, hit.z) / std::max(display_scale_, kEpsilon);
-
-    if (!steering_.has_value()) {
-        CalibrateSteering();  // one-time; a few seconds of offline streaming
-    }
-    if (steering_.has_value()) {
-        steering_->Reset();
-    }
-    goto_active_ = steering_.has_value();
-    if (goto_active_) {
-        playing_ = true;
-        goto_status_ = "Walking to target.";
-    }
-    return true;
+    PlaceGotoTarget(
+        glm::vec2(hit.x, hit.z) / std::max(display_scale_, kEpsilon));
+    return steering_.has_value();
 }
 
 void PmgViewerWorkspace::Update(float delta_seconds) {

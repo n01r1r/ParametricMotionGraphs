@@ -179,6 +179,10 @@ private:
     // Goto steering delegates to the same core module as the CLI.
     void CalibrateSteering();
     void UpdateGotoSteering(const pmg::Pose& pose);
+    void ResetGotoState(const std::string& status = {});
+    void ResetSteeringState(const std::string& status = {});
+    void SetDesiredRuntimeNode(int node);
+    void PlaceGotoTarget(const glm::vec2& target);
     void UpdateRootMotionDiagnostics(const pmg::Pose& pose, float delta_seconds);
 
     // SliderFloat plus tick marks at the example parameters, so the user can
