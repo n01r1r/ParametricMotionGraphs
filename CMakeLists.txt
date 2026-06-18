@@ -29,6 +29,7 @@ add_library(pmg_core
     src/PmgArtifact.cpp
     src/PmgBuilder.cpp
     src/PoseBlend.cpp
+    src/RootCanonicalization.cpp
     src/RuntimeController.cpp
     src/SkeletonCompatibility.cpp
     src/TimeWarp.cpp
@@ -136,6 +137,10 @@ if(PMG_BUILD_TESTS)
     add_executable(test_motion_space_preparation tests/test_motion_space_preparation.cpp)
     target_link_libraries(test_motion_space_preparation PRIVATE pmg_core)
     add_test(NAME test_motion_space_preparation COMMAND test_motion_space_preparation)
+
+    add_executable(test_root_canonicalization tests/test_root_canonicalization.cpp)
+    target_link_libraries(test_root_canonicalization PRIVATE pmg_core)
+    add_test(NAME test_root_canonicalization COMMAND test_root_canonicalization)
 
     add_executable(test_time_warp tests/test_time_warp.cpp)
     target_link_libraries(test_time_warp PRIVATE pmg_core)

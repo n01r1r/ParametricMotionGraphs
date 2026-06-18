@@ -13,6 +13,7 @@
 #include "pmg/MotionSpacePreparation.h"
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/RuntimeController.h"
+#include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
 #include "pmg/legacy/FrameCountClipGeneration.h"
 
@@ -24,6 +25,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -1400,6 +1402,289 @@ int CyclicAuditCommand(
     return 0;
 }
 
+struct RootCanonicalizationAuditOptions {
+    std::string spec_path;
+    std::string output_csv;
+    std::string output_md;
+};
+
+struct RootCanonicalizationAuditRow {
+    std::string node_name;
+    std::string bvh_path;
+    pmg::ParameterVector parameter;
+    pmg::RootStartSummary raw;
+    pmg::RootStartSummary normalized;
+    bool start_is_origin = false;
+    bool heading_is_canonical = false;
+    bool displacement_preserved = false;
+    std::string verdict;
+};
+
+constexpr float kRootOriginTolerance = 1.0e-4f;
+constexpr float kRootHeadingTolerance = 1.0e-4f;
+constexpr float kDisplacementTolerance = 1.0e-3f;
+
+float HorizontalDistance(const pmg::Vec3& value) {
+    return std::sqrt(value.x * value.x + value.z * value.z);
+}
+
+std::string ParameterCsv(const pmg::ParameterVector& parameter) {
+    std::ostringstream out;
+    out << '"';
+    for (std::size_t i = 0; i < parameter.size(); ++i) {
+        if (i > 0) {
+            out << ' ';
+        }
+        out << parameter[i];
+    }
+    out << '"';
+    return out.str();
+}
+
+std::string ParameterMd(const pmg::ParameterVector& parameter) {
+    std::ostringstream out;
+    out << '(';
+    for (std::size_t i = 0; i < parameter.size(); ++i) {
+        if (i > 0) {
+            out << ", ";
+        }
+        out << parameter[i];
+    }
+    out << ')';
+    return out.str();
+}
+
+std::string Vec3Csv(const pmg::Vec3& v) {
+    std::ostringstream out;
+    out << '"' << v.x << ' ' << v.y << ' ' << v.z << '"';
+    return out.str();
+}
+
+std::string BoundsCsv(const pmg::Vec3& min_value, const pmg::Vec3& max_value) {
+    std::ostringstream out;
+    out << '"' << min_value.x << ' ' << min_value.y << ' ' << min_value.z
+        << " .. " << max_value.x << ' ' << max_value.y << ' ' << max_value.z
+        << '"';
+    return out.str();
+}
+
+std::string RootAuditVerdict(
+    const pmg::RootStartSummary& raw,
+    const pmg::RootStartSummary& normalized,
+    bool start_is_origin,
+    bool heading_is_canonical,
+    bool displacement_preserved) {
+    if (!start_is_origin) {
+        return "FAIL_NOT_CANONICALIZED";
+    }
+    if (!heading_is_canonical) {
+        return "FAIL_HEADING_NOT_CANONICALIZED";
+    }
+    if (!displacement_preserved) {
+        return "FAIL_NOT_CANONICALIZED";
+    }
+    const bool raw_has_offset =
+        HorizontalDistance(raw.first_root_position) > kRootOriginTolerance ||
+        std::abs(raw.first_heading_yaw) > kRootHeadingTolerance;
+    return raw_has_offset ? "WARN_RAW_OFFSET_ONLY" : "PASS_CANONICALIZED";
+}
+
+std::vector<RootCanonicalizationAuditRow> BuildRootCanonicalizationAudit(
+    const pmg::GraphSpec& spec,
+    const pmg::PreparedMotionSpaces& prepared) {
+    std::vector<RootCanonicalizationAuditRow> rows;
+    for (const pmg::GraphSpecNode& node : spec.nodes) {
+        const pmg::PreparedMotionSpace& prepared_node = prepared.Node(node.name);
+        std::size_t node_example_index = 0;
+        for (const pmg::GraphSpecExample& example : spec.examples) {
+            if (example.node_name != node.name) {
+                continue;
+            }
+            if (node_example_index >= prepared_node.production.Examples().size()) {
+                throw std::runtime_error(
+                    "--audit-root-canonicalization: prepared example count mismatch");
+            }
+            const pmg::BvhData raw_bvh = pmg::BvhLoader::Load(example.bvh_path);
+            const pmg::MotionClip raw_canonical =
+                pmg::CanonicalizeRootOrigin(raw_bvh.clip);
+            const pmg::MotionClip& normalized_clip =
+                prepared_node.production.Examples()[node_example_index].clip;
+            RootCanonicalizationAuditRow row;
+            row.node_name = node.name;
+            row.bvh_path = example.bvh_path;
+            row.parameter = example.parameter;
+            row.raw = pmg::SummarizeRootStart(raw_bvh.clip);
+            row.normalized = pmg::SummarizeRootStart(normalized_clip);
+            row.start_is_origin =
+                HorizontalDistance(row.normalized.first_root_position) <=
+                kRootOriginTolerance;
+            row.heading_is_canonical =
+                std::abs(row.normalized.first_heading_yaw) <=
+                kRootHeadingTolerance;
+            const pmg::RootStartSummary expected =
+                pmg::SummarizeRootStart(raw_canonical);
+            const pmg::Vec3 displacement_delta =
+                row.normalized.final_relative_displacement -
+                expected.final_relative_displacement;
+            row.displacement_preserved =
+                HorizontalDistance(displacement_delta) <= kDisplacementTolerance;
+            row.verdict = RootAuditVerdict(
+                row.raw, row.normalized, row.start_is_origin,
+                row.heading_is_canonical, row.displacement_preserved);
+            rows.push_back(std::move(row));
+            ++node_example_index;
+        }
+    }
+    return rows;
+}
+
+void WriteRootCanonicalizationCsv(
+    const std::string& path,
+    const std::vector<RootCanonicalizationAuditRow>& rows) {
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error("--audit-root-canonicalization: cannot write CSV");
+    }
+    csv << std::setprecision(9)
+        << "node,bvh,parameter,raw_first_root,raw_first_x,raw_first_z,"
+           "raw_first_yaw,normalized_first_root,normalized_first_x,"
+           "normalized_first_z,normalized_first_yaw,final_relative_dx,"
+           "final_relative_dz,final_relative_heading,normalized_bounds,"
+           "start_is_origin,heading_is_canonical,verdict\n";
+    for (const RootCanonicalizationAuditRow& row : rows) {
+        csv << row.node_name << ',' << row.bvh_path << ','
+            << ParameterCsv(row.parameter) << ',' << Vec3Csv(row.raw.first_root_position)
+            << ',' << row.raw.first_root_position.x << ','
+            << row.raw.first_root_position.z << ',' << row.raw.first_heading_yaw
+            << ',' << Vec3Csv(row.normalized.first_root_position) << ','
+            << row.normalized.first_root_position.x << ','
+            << row.normalized.first_root_position.z << ','
+            << row.normalized.first_heading_yaw << ','
+            << row.normalized.final_relative_displacement.x << ','
+            << row.normalized.final_relative_displacement.z << ','
+            << row.normalized.final_relative_heading << ','
+            << BoundsCsv(row.normalized.normalized_bounds_min,
+                         row.normalized.normalized_bounds_max)
+            << ',' << (row.start_is_origin ? "true" : "false")
+            << ',' << (row.heading_is_canonical ? "true" : "false")
+            << ',' << row.verdict << "\n";
+    }
+}
+
+void WriteRootCanonicalizationMarkdown(
+    const std::string& path,
+    const RootCanonicalizationAuditOptions& options,
+    const std::vector<RootCanonicalizationAuditRow>& rows) {
+    std::ofstream md(path);
+    if (!md) {
+        throw std::runtime_error("--audit-root-canonicalization: cannot write markdown");
+    }
+    const bool all_origin = std::all_of(rows.begin(), rows.end(), [](const auto& row) {
+        return row.start_is_origin;
+    });
+    const bool all_heading = std::all_of(rows.begin(), rows.end(), [](const auto& row) {
+        return row.heading_is_canonical;
+    });
+    const bool raw_starts_differ = [&]() {
+        if (rows.size() < 2) {
+            return false;
+        }
+        const pmg::Vec3 first = rows.front().raw.first_root_position;
+        const float yaw = rows.front().raw.first_heading_yaw;
+        for (const auto& row : rows) {
+            if (HorizontalDistance(row.raw.first_root_position - first) >
+                    kRootOriginTolerance ||
+                std::abs(row.raw.first_heading_yaw - yaw) >
+                    kRootHeadingTolerance) {
+                return true;
+            }
+        }
+        return false;
+    }();
+    std::string recommendation = "PASS_NO_CANONICALIZATION_CHANGE_NEEDED";
+    if (!all_origin) {
+        recommendation = "NEED_LOAD_TIME_CANONICALIZATION";
+    } else if (!all_heading) {
+        recommendation = "NEED_HEADING_CANONICALIZATION";
+    }
+
+    md << "# Root Canonicalization Audit\n\n";
+    md << "- Spec: `" << options.spec_path << "`\n";
+    md << "- Raw BVH starts differ: " << (raw_starts_differ ? "yes" : "no") << "\n";
+    md << "- Prepared normalized starts align: " << (all_origin ? "yes" : "no") << "\n";
+    md << "- Heading normalization consistent: " << (all_heading ? "yes" : "no") << "\n";
+    md << "- Final recommendation: `" << recommendation << "`\n\n";
+    md << "| Node | BVH | Parameter | Raw start x/z | Raw yaw | Normalized start x/z | Normalized yaw | Final dx/dz | Bounds x/z | Verdict |\n";
+    md << "|---|---|---|---:|---:|---:|---:|---:|---:|---|\n";
+    for (const RootCanonicalizationAuditRow& row : rows) {
+        md << "| " << row.node_name << " | "
+           << std::filesystem::path(row.bvh_path).filename().string() << " | "
+           << ParameterMd(row.parameter) << " | "
+           << row.raw.first_root_position.x << ", " << row.raw.first_root_position.z
+           << " | " << row.raw.first_heading_yaw << " | "
+           << row.normalized.first_root_position.x << ", "
+           << row.normalized.first_root_position.z << " | "
+           << row.normalized.first_heading_yaw << " | "
+           << row.normalized.final_relative_displacement.x << ", "
+           << row.normalized.final_relative_displacement.z << " | "
+           << row.normalized.normalized_bounds_min.x << ".."
+           << row.normalized.normalized_bounds_max.x << ", "
+           << row.normalized.normalized_bounds_min.z << ".."
+           << row.normalized.normalized_bounds_max.z << " | `"
+           << row.verdict << "` |\n";
+    }
+}
+
+RootCanonicalizationAuditOptions ParseRootCanonicalizationAuditOptions(
+    int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error("--audit-root-canonicalization needs <spec>");
+    }
+    RootCanonicalizationAuditOptions options;
+    options.spec_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--output-csv") {
+            options.output_csv = require_value("--output-csv");
+        } else if (option == "--output-md") {
+            options.output_md = require_value("--output-md");
+        } else {
+            throw std::runtime_error(
+                "unknown audit-root-canonicalization option '" + option + "'");
+        }
+    }
+    if (options.output_csv.empty()) {
+        throw std::runtime_error(
+            "--audit-root-canonicalization requires --output-csv");
+    }
+    if (options.output_md.empty()) {
+        throw std::runtime_error(
+            "--audit-root-canonicalization requires --output-md");
+    }
+    return options;
+}
+
+int RootCanonicalizationAuditCommand(
+    const RootCanonicalizationAuditOptions& options) {
+    const pmg::GraphSpec spec = pmg::LoadGraphSpec(options.spec_path);
+    const pmg::PreparedMotionSpaces prepared = pmg::PrepareMotionSpaces(spec);
+    const std::vector<RootCanonicalizationAuditRow> rows =
+        BuildRootCanonicalizationAudit(spec, prepared);
+    WriteRootCanonicalizationCsv(options.output_csv, rows);
+    WriteRootCanonicalizationMarkdown(options.output_md, options, rows);
+    std::cout << "root_canonicalization_rows=" << rows.size() << "\n";
+    std::cout << "root_canonicalization_csv=" << options.output_csv << "\n";
+    std::cout << "root_canonicalization_md=" << options.output_md << "\n";
+    return 0;
+}
+
 int CyclicRecutSearchCommand(
     const CyclicRecutSearchOptions& options,
     const std::string& command_line) {
@@ -2317,6 +2602,10 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
         return CyclicAuditCommand(
             ParseCyclicAuditOptions(argc, argv),
             CommandLineString(argc, argv));
+    }
+    if (command == "--audit-root-canonicalization" && argc >= 3) {
+        return RootCanonicalizationAuditCommand(
+            ParseRootCanonicalizationAuditOptions(argc, argv));
     }
     if (command == "--search-cyclic-recuts") {
         return CyclicRecutSearchCommand(

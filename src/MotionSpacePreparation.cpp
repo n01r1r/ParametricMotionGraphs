@@ -2,6 +2,7 @@
 
 #include "pmg/BvhLoader.h"
 #include "pmg/MotionRegistration.h"
+#include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
 
 #include <filesystem>
@@ -105,6 +106,7 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
                 clip = ExtractFirstCycle(*reference_skeleton, clip, cycle_joint, cycle_settings);
             }
 
+            clip = CanonicalizeRootOrigin(clip);
             authored.AddExample(example.parameter, std::move(clip));
             prepared.source_bvh_paths.push_back(example.bvh_path);
         }

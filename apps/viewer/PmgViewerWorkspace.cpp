@@ -17,6 +17,7 @@
 
 #include "pmg/ForwardKinematics.h"
 #include "pmg/MathTypes.h"
+#include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
 
 #ifndef PMG_BVH_DIRECTORY
@@ -336,9 +337,69 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
         scene_.marker_lines.push_back({base, top});
     }
 
+    AppendRootCanonicalizationMarkers(pose);
     AppendPathPreview();
 
     scene_.focus_point = centroid;
+}
+
+void PmgViewerWorkspace::AppendRootCanonicalizationMarkers(
+    const pmg::Pose& current_pose) {
+    if (!GraphRuntimeActive() || !show_root_canonicalization_markers_) {
+        return;
+    }
+    constexpr glm::vec3 kRawColor(0.95f, 0.25f, 0.18f);
+    constexpr glm::vec3 kNormalizedColor(0.18f, 0.80f, 0.35f);
+    constexpr glm::vec3 kTrajectoryColor(0.95f, 0.75f, 0.18f);
+    constexpr glm::vec3 kRuntimeColor(0.20f, 0.65f, 1.00f);
+    const float y = 0.12f * display_scale_;
+    const float point_radius = 0.06f * display_scale_;
+    const float line_radius = 0.018f * display_scale_;
+    const glm::vec3 canonical_origin(0.0f, y, 0.0f);
+
+    scene_.diagnostic_points.push_back(
+        {canonical_origin, kNormalizedColor, point_radius * 1.4f});
+    for (const RootCanonicalizationMarker& marker :
+         root_canonicalization_markers_) {
+        const glm::vec3 raw(marker.raw_start.x * display_scale_, y,
+                            marker.raw_start.z * display_scale_);
+        scene_.diagnostic_points.push_back({raw, kRawColor, point_radius});
+        scene_.diagnostic_lines.push_back({
+            raw + glm::vec3(-point_radius, 0.0f, 0.0f),
+            raw + glm::vec3(point_radius, 0.0f, 0.0f),
+            kRawColor,
+            line_radius,
+        });
+        scene_.diagnostic_lines.push_back({
+            raw + glm::vec3(0.0f, 0.0f, -point_radius),
+            raw + glm::vec3(0.0f, 0.0f, point_radius),
+            kRawColor,
+            line_radius,
+        });
+        if (!show_anchor_root_trajectories_) {
+            continue;
+        }
+        for (std::size_t i = 1; i < marker.normalized_trajectory.size(); ++i) {
+            const pmg::Vec3& previous = marker.normalized_trajectory[i - 1];
+            const pmg::Vec3& current = marker.normalized_trajectory[i];
+            scene_.diagnostic_lines.push_back({
+                glm::vec3(previous.x * display_scale_, y,
+                          previous.z * display_scale_),
+                glm::vec3(current.x * display_scale_, y,
+                          current.z * display_scale_),
+                kTrajectoryColor,
+                line_radius,
+            });
+        }
+    }
+
+    scene_.diagnostic_points.push_back({
+        glm::vec3(current_pose.root_position.x * display_scale_,
+                  0.22f * display_scale_,
+                  current_pose.root_position.z * display_scale_),
+        kRuntimeColor,
+        point_radius * 1.5f,
+    });
 }
 
 std::vector<glm::vec3> PmgViewerWorkspace::PoseWorldPositions(

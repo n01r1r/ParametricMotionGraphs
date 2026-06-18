@@ -104,6 +104,8 @@ private:
     void RecordRuntimeTracePoint(const pmg::Pose& pose);
     void RecordTransitionMarker(
         const pmg::RuntimeTransitionDiagnostics& transition);
+    void RebuildRootCanonicalizationMarkers();
+    void AppendRootCanonicalizationMarkers(const pmg::Pose& current_pose);
 
     void AddCurrentClipToSpace(const pmg::ParameterVector& parameter);
     void RebuildPmgSpace();
@@ -289,7 +291,8 @@ private:
     // cached and rendered live; only Recompute / param changes rebuild it.
     int heatmap_target_index_ = -1;
     pmg::MotionClip heatmap_target_clip_;
-    pmg::DistanceGridConfig heatmap_config_{5, 2, 2, 0.70f, 0.95f, 0.05f, 0.30f, {}};
+    pmg::DistanceGridConfig heatmap_config_{
+        5, 2, 2, 0, 0, 0.70f, 0.95f, 0.05f, 0.30f, {}};
     // GOOD/BAD raw-sum thresholds. One source of truth for heatmap
     // classification and sandbox graph builds. Spec builds keep their
     // per-edge thresholds from .pmg_spec authoritative.
@@ -321,8 +324,16 @@ private:
     };
     std::vector<glm::vec2> graph_path_points_;
     std::vector<TransitionTraceMarker> graph_transition_markers_;
+    struct RootCanonicalizationMarker {
+        std::string label;
+        pmg::Vec3 raw_start;
+        std::vector<pmg::Vec3> normalized_trajectory;
+    };
+    std::vector<RootCanonicalizationMarker> root_canonicalization_markers_;
     bool show_graph_path_trail_ = true;
     bool show_graph_transition_markers_ = true;
+    bool show_root_canonicalization_markers_ = false;
+    bool show_anchor_root_trajectories_ = false;
     GraphOrigin graph_origin_ = GraphOrigin::None;
     bool graph_open_runtime_tab_ = false;
     float graph_desired_parameter_ = 0.0f;

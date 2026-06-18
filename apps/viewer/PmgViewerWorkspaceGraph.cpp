@@ -16,6 +16,7 @@
 #include "pmg/GraphSpec.h"
 #include "pmg/MathTypes.h"
 #include "pmg/CyclicContinuity.h"
+#include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
 
 namespace pmgviewer {
@@ -250,6 +251,32 @@ void PmgViewerWorkspace::StartGraphRuntimeController(
     graph_status_ = status_label;
 }
 
+void PmgViewerWorkspace::RebuildRootCanonicalizationMarkers() {
+    root_canonicalization_markers_.clear();
+    if (!source_artifact_.has_value()) {
+        return;
+    }
+    const pmg::BuiltPmgArtifact& artifact = *source_artifact_;
+    for (const std::string& bvh_path : artifact.metadata.source_bvh_paths) {
+        try {
+            const pmg::BvhData raw = pmg::BvhLoader::Load(bvh_path);
+            const pmg::MotionClip canonical =
+                pmg::CanonicalizeRootOrigin(raw.clip);
+            RootCanonicalizationMarker marker;
+            marker.label = std::filesystem::path(bvh_path).stem().string();
+            marker.raw_start = raw.clip.frames.front().root_position;
+            marker.normalized_trajectory.reserve(canonical.frames.size());
+            for (const pmg::Pose& pose : canonical.frames) {
+                marker.normalized_trajectory.push_back(pose.root_position);
+            }
+            root_canonicalization_markers_.push_back(std::move(marker));
+        } catch (const std::exception&) {
+            // Diagnostic-only overlay: unavailable raw BVH path should not
+            // prevent artifact playback.
+        }
+    }
+}
+
 void PmgViewerWorkspace::AdoptArtifact(
     pmg::BuiltPmgArtifact artifact, const std::string& status_label,
     GraphOrigin origin) {
@@ -288,6 +315,7 @@ void PmgViewerWorkspace::AdoptArtifact(
 
     pmg_skeleton_ = adopted.skeleton;
     graph_ = adopted.graph;
+    RebuildRootCanonicalizationMarkers();
     graph_fps_ = adopted.metadata.frames_per_second;
     pmg_space_ = graph_.Node(0).motion_space;
     pmg_examples_.clear();
@@ -1808,6 +1836,11 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
     ImGui::SameLine();
     ImGui::Checkbox(
         "Transition markers", &show_graph_transition_markers_);
+    ImGui::Checkbox("Show root canonicalization markers",
+                    &show_root_canonicalization_markers_);
+    ImGui::SameLine();
+    ImGui::Checkbox("Show anchor root trajectories",
+                    &show_anchor_root_trajectories_);
     ImGui::SameLine();
     if (ImGui::Button("Clear trace")) {
         ResetRuntimeTrace();
