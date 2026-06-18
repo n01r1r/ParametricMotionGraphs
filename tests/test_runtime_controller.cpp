@@ -137,7 +137,7 @@ int main() {
 
     const float source_phase_gate =
         graph.Edge(0).LookupInterpolated(
-            {0.5f}, {0.5f})->source_transition_phase;
+            {0.5f}, {0.8f})->source_transition_phase;
 
     // Paper-core path: recompute the Kovar-derived joint point-cloud alignment
     // per transition instead of using the root-only debug adapter.
@@ -146,12 +146,28 @@ int main() {
     // centered pre-roll into the previous cycle tail (kWrapCyclicSelfEdges).
     pmg::RuntimeControllerConfig walk_config;
     walk_config.cyclic_nodes.assign(graph.NumNodes(), true);
+
+    {
+        pmg::RuntimeController idle_controller(graph, alignment, walk_config);
+        idle_controller.Start(node, {0.5f}, kFramesPerSecond);
+
+        pmg::RuntimeControlRequest idle_request;
+        idle_request.desired_node = node;
+        idle_request.desired_parameter = {0.5f};
+
+        const float delta_seconds = 1.0f / kFramesPerSecond;
+        for (int step = 0; step < 120; ++step) {
+            idle_controller.Update(delta_seconds, idle_request);
+        }
+        assert(idle_controller.CompletedTransitions() == 0);
+    }
+
     pmg::RuntimeController controller(graph, alignment, walk_config);
     controller.Start(node, {0.5f}, kFramesPerSecond);
 
     pmg::RuntimeControlRequest request;
     request.desired_node = node;
-    request.desired_parameter = {0.5f};
+    request.desired_parameter = {0.8f};
 
     const float delta_seconds = 1.0f / kFramesPerSecond;
     std::vector<pmg::Vec3> world_positions;
@@ -229,8 +245,8 @@ int main() {
         facing_yaws.push_back(WorldFacingYaw(pose));
     }
 
-    // At least a couple of self-transitions occurred over the run.
-    assert(controller.CompletedTransitions() >= 2);
+    // Same node with a changed effective parameter schedules a self-transition.
+    assert(controller.CompletedTransitions() >= 1);
     assert(observed_transition_diagnostics);
 
     // PMG centered blend (§5.2.1): the blend window is centered on the stored
@@ -315,7 +331,7 @@ int main() {
 
         pmg::RuntimeControlRequest boundary_request;
         boundary_request.desired_node = boundary_node;
-        boundary_request.desired_parameter = {0.5f};
+        boundary_request.desired_parameter = {0.8f};
 
         std::vector<pmg::Vec3> boundary_positions;
         boundary_positions.push_back(
@@ -384,7 +400,7 @@ int main() {
             c.Start(wrap_node, {0.5f}, kFramesPerSecond);
             pmg::RuntimeControlRequest req;
             req.desired_node = wrap_node;
-            req.desired_parameter = {0.5f};
+            req.desired_parameter = {0.8f};
             for (int step = 0; step < 120; ++step) {
                 c.Update(delta_seconds, req);
                 if (c.IsTransitioning()) {
@@ -459,6 +475,44 @@ int main() {
             }
         }
         assert(transitioned);
+    }
+
+    // Outside request that projects to the current supported parameter is a
+    // same-node no-op.
+    {
+        int simplex_node = -1;
+        pmg::ParametricMotionSpace space("simplex_noop", 2);
+        space.AddExample({0.0f, 0.0f}, MakeWalkClip(0.0f));
+        space.AddExample({1.0f, 0.0f}, MakeWalkClip(1.0f));
+        space.AddExample({0.0f, 1.0f}, MakeWalkClip(1.0f));
+        space.SetParameterSupport(pmg::ParameterSupport(space.ExampleParameters()));
+
+        pmg::ParametricMotionGraph simplex_graph;
+        simplex_node = simplex_graph.AddNode("simplex_noop", space);
+
+        pmg::PmgEdge edge;
+        edge.source_node = simplex_node;
+        edge.target_node = simplex_node;
+        edge.samples.push_back({
+            {0.5f, 0.5f},
+            {{0.0f, 0.0f}, {1.0f, 1.0f}},
+            0.5f,
+            0.5f,
+        });
+        simplex_graph.AddEdge(std::move(edge));
+
+        pmg::RootOnlyAlignment alignment;
+        pmg::RuntimeController c(simplex_graph, alignment, {});
+        c.Start(simplex_node, {0.5f, 0.5f}, kFramesPerSecond);
+
+        pmg::RuntimeControlRequest req;
+        req.desired_node = simplex_node;
+        req.desired_parameter = {1.0f, 1.0f};
+
+        for (int step = 0; step < 120; ++step) {
+            c.Update(delta_seconds, req);
+        }
+        assert(c.CompletedTransitions() == 0);
     }
 
     // Simplex support and reachable transition box must both constrain runtime

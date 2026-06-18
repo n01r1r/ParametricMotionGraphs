@@ -1923,6 +1923,8 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     pmg::ParameterVector projected_target = requested_target;
     if (graph_.Node(graph_desired_node_).motion_space.HasExplicitParameterSupport()) {
         projected_target = graph_.Node(graph_desired_node_).motion_space.ProjectToSupport(requested_target);
+    } else {
+        projected_target = graph_.Node(graph_desired_node_).motion_space.ClampToDomain(requested_target);
     }
     ImGui::Text("%s  p=%s",
                 graph_.Node(graph_desired_node_).name.c_str(),
@@ -1945,12 +1947,9 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     } else if (preview.has_value()) {
         ImGui::TextDisabled("waiting for phase gate");
     } else if (graph_desired_node_ == source_node) {
-        float sq_dist = 0.0f;
-        for (std::size_t i = 0; i < requested_target.size() && i < source_parameter.size(); ++i) {
-            float d = requested_target[i] - source_parameter[i];
-            sq_dist += d * d;
-        }
-        if (sq_dist < pmg::kSmallEpsilon * pmg::kSmallEpsilon) {
+        if (projected_target.size() == source_parameter.size() &&
+            pmg::SquaredDistance(projected_target, source_parameter) <
+                pmg::kSmallEpsilon * pmg::kSmallEpsilon) {
             ImGui::TextDisabled("no self-edge (parameter unchanged)");
         } else {
             ImGui::TextDisabled("waiting for phase gate");

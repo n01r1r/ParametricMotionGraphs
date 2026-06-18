@@ -330,6 +330,25 @@ void RuntimeController::TryScheduleTransition(
         return;
     }
 
+    if (request.desired_node == current_node_) {
+        const PmgNode& target_node = graph_.Node(request.desired_node);
+        if (static_cast<int>(request.desired_parameter.size()) !=
+            target_node.motion_space.ParameterDimension()) {
+            return;
+        }
+
+        const ParameterVector effective_target_parameter =
+            target_node.motion_space.HasExplicitParameterSupport()
+                ? target_node.motion_space.ProjectToSupport(
+                      request.desired_parameter)
+                : target_node.motion_space.ClampToDomain(
+                      request.desired_parameter);
+        if (SquaredDistance(effective_target_parameter, current_parameter_) <
+            kSmallEpsilon * kSmallEpsilon) {
+            return;
+        }
+    }
+
     for (const int edge_index : graph_.OutgoingEdgeIndices(current_node_)) {
         const PmgEdge& edge = graph_.Edge(edge_index);
         if (edge.target_node != request.desired_node) {
