@@ -1,13 +1,12 @@
-# Canonical sparse 2-D AABB interpolation demo.
+# The primary demo uses a sparse 2D simplex support over three authored locomotion anchors. It does not claim full rectangular turn/speed control because the tight-jog corner clip is missing.
 # Demonstrates:
 # - a 2-D ParametricMotionSpace with measured metric calibration;
 # - the minimum three non-collinear examples needed for local 2-D lookup;
-# - interpolation and runtime requests over the implementation's rectangular AABB.
-# This demonstrates sparse 2-D AABB interpolation machinery, not convex-hull support enforcement.
+# - interpolation and runtime requests over the authored simplex.
+# This demonstrates simplex support enforcement.
 # Does not demonstrate:
-# - projection or clamping to the authored triangle;
 # - full rectangular motion coverage or a tight-turn jog endpoint;
-# - independent turn and speed control across the whole AABB;
+# - independent turn and speed control across the whole domain;
 # - a robust production locomotion family.
 #
 # Axis 0: authored turn class (0 = wide, 1 = tight).
@@ -18,15 +17,18 @@ node walk_2d 2
 registration walk_2d - - 3 0
 parameter_metrics walk_2d turn_rate travel_speed
 parameter_calibration walk_2d 5
+parameter_support walk_2d simplex
 example walk_2d 0.0 0.0 ../BVH/walkCurve.bvh
 example walk_2d 1.0 0.0 ../BVH/walkTightCurve.bvh
 example walk_2d 0.0 1.0 ../BVH/jogCurve.bvh
 # Both axes vary, so this is a genuine 2-D space -- held to that claim at load.
 expect walk_2d spanned_axes 2
+# The authored support is the triangle formed by the three examples above.
+# LoadGraphSpec validates that the examples are exactly a non-collinear simplex.
 # corner_coverage full is deliberately NOT claimed: the (1,1) tight-jog corner
 # is unsampled because the corpus has only one jog clip (jogCurve). A complete
 # rectangular 2-D family would add a tight-turn jog BVH. Until then, requests
-# outside the authored triangle remain valid AABB requests and may synthesize
+# outside the authored triangle are projected onto the valid simplex and synthesize
 # sparse three-example blends.
 edge walk_2d walk_2d
 # Explicit default advancing phase range. This does not enforce triangular

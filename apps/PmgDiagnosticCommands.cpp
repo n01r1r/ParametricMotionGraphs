@@ -13,8 +13,8 @@
 #include "pmg/MotionSpacePreparation.h"
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/RuntimeController.h"
+#include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
-#include "pmg/legacy/FrameCountClipGeneration.h"
 
 #include <algorithm>
 #include <array>
@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -169,7 +170,6 @@ SweepMetrics MeasureSpaceSweep(
     const std::vector<int>& contact_joints,
     const pmg::ContactDetectionSettings& settings,
     int sweep_steps,
-    int generated_frame_count,
     float frames_per_second,
     const char* label,
     bool foot_lock = false) {
@@ -197,8 +197,7 @@ SweepMetrics MeasureSpaceSweep(
                          : mid;
         }
 
-        pmg::MotionClip clip = pmg::legacy::GenerateClipWithFrameCount(
-            space, parameter, generated_frame_count, frames_per_second);
+        pmg::MotionClip clip = space.GenerateClip(parameter, frames_per_second);
         if (foot_lock) {
             pmg::FootLockSettings lock_settings;
             lock_settings.contacts = settings;
@@ -231,7 +230,12 @@ SweepMetrics MeasureSpaceSweep(
     }
 
     for (std::size_t step = 0; step + 1 < generated.size(); ++step) {
-        for (int frame = 0; frame < generated_frame_count; ++frame) {
+        const int shared_frame_count = std::min(
+            generated[step].NumFrames(), generated[step + 1].NumFrames());
+        if (shared_frame_count <= 0) {
+            throw std::runtime_error("MeasureSpaceSweep: generated clip must not be empty");
+        }
+        for (int frame = 0; frame < shared_frame_count; ++frame) {
             const float distance = MeanJointDistance(
                 skeleton, generated[step].frames[frame], generated[step + 1].frames[frame]);
             metrics.max_adjacent_step = std::max(metrics.max_adjacent_step, distance);
@@ -299,17 +303,16 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
                   << " anchors=" << anchors.size() << "\n";
     }
 
-    const int generated_frame_count = naive_space.Examples().front().clip.NumFrames();
     const float frames_per_second = naive_space.Examples().front().clip.frames_per_second;
 
     std::cout << "registered=yes\n";
 
     const SweepMetrics naive = MeasureSpaceSweep(
         naive_space, skeleton, contact_joints, settings, options.sweep_steps,
-        generated_frame_count, frames_per_second, "naive");
+        frames_per_second, "naive");
     const SweepMetrics registered = MeasureSpaceSweep(
         registered_space, skeleton, contact_joints, settings, options.sweep_steps,
-        generated_frame_count, frames_per_second, "registered");
+        frames_per_second, "registered");
 
     std::optional<SweepMetrics> dtw;
     pmg::ParametricMotionSpace best_space = registered_space;
@@ -324,7 +327,7 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
         std::cout << "dtw_refined=yes\n";
         dtw = MeasureSpaceSweep(
             best_space, skeleton, contact_joints, settings, options.sweep_steps,
-            generated_frame_count, frames_per_second, "dtw");
+            frames_per_second, "dtw");
     }
 
     // IK foot locking post-processes the best registered variant's clips.
@@ -333,7 +336,7 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
         std::cout << "foot_lock=yes\n";
         locked = MeasureSpaceSweep(
             best_space, skeleton, contact_joints, settings, options.sweep_steps,
-            generated_frame_count, frames_per_second, "locked", /*foot_lock=*/true);
+            frames_per_second, "locked", /*foot_lock=*/true);
     }
 
     bool failed = false;
@@ -1400,6 +1403,289 @@ int CyclicAuditCommand(
     return 0;
 }
 
+struct RootCanonicalizationAuditOptions {
+    std::string spec_path;
+    std::string output_csv;
+    std::string output_md;
+};
+
+struct RootCanonicalizationAuditRow {
+    std::string node_name;
+    std::string bvh_path;
+    pmg::ParameterVector parameter;
+    pmg::RootStartSummary raw;
+    pmg::RootStartSummary normalized;
+    bool start_is_origin = false;
+    bool heading_is_canonical = false;
+    bool displacement_preserved = false;
+    std::string verdict;
+};
+
+constexpr float kRootOriginTolerance = 1.0e-4f;
+constexpr float kRootHeadingTolerance = 1.0e-4f;
+constexpr float kDisplacementTolerance = 1.0e-3f;
+
+float HorizontalDistance(const pmg::Vec3& value) {
+    return std::sqrt(value.x * value.x + value.z * value.z);
+}
+
+std::string ParameterCsv(const pmg::ParameterVector& parameter) {
+    std::ostringstream out;
+    out << '"';
+    for (std::size_t i = 0; i < parameter.size(); ++i) {
+        if (i > 0) {
+            out << ' ';
+        }
+        out << parameter[i];
+    }
+    out << '"';
+    return out.str();
+}
+
+std::string ParameterMd(const pmg::ParameterVector& parameter) {
+    std::ostringstream out;
+    out << '(';
+    for (std::size_t i = 0; i < parameter.size(); ++i) {
+        if (i > 0) {
+            out << ", ";
+        }
+        out << parameter[i];
+    }
+    out << ')';
+    return out.str();
+}
+
+std::string Vec3Csv(const pmg::Vec3& v) {
+    std::ostringstream out;
+    out << '"' << v.x << ' ' << v.y << ' ' << v.z << '"';
+    return out.str();
+}
+
+std::string BoundsCsv(const pmg::Vec3& min_value, const pmg::Vec3& max_value) {
+    std::ostringstream out;
+    out << '"' << min_value.x << ' ' << min_value.y << ' ' << min_value.z
+        << " .. " << max_value.x << ' ' << max_value.y << ' ' << max_value.z
+        << '"';
+    return out.str();
+}
+
+std::string RootAuditVerdict(
+    const pmg::RootStartSummary& raw,
+    const pmg::RootStartSummary& normalized,
+    bool start_is_origin,
+    bool heading_is_canonical,
+    bool displacement_preserved) {
+    if (!start_is_origin) {
+        return "FAIL_NOT_CANONICALIZED";
+    }
+    if (!heading_is_canonical) {
+        return "FAIL_HEADING_NOT_CANONICALIZED";
+    }
+    if (!displacement_preserved) {
+        return "FAIL_NOT_CANONICALIZED";
+    }
+    const bool raw_has_offset =
+        HorizontalDistance(raw.first_root_position) > kRootOriginTolerance ||
+        std::abs(raw.first_heading_yaw) > kRootHeadingTolerance;
+    return raw_has_offset ? "WARN_RAW_OFFSET_ONLY" : "PASS_CANONICALIZED";
+}
+
+std::vector<RootCanonicalizationAuditRow> BuildRootCanonicalizationAudit(
+    const pmg::GraphSpec& spec,
+    const pmg::PreparedMotionSpaces& prepared) {
+    std::vector<RootCanonicalizationAuditRow> rows;
+    for (const pmg::GraphSpecNode& node : spec.nodes) {
+        const pmg::PreparedMotionSpace& prepared_node = prepared.Node(node.name);
+        std::size_t node_example_index = 0;
+        for (const pmg::GraphSpecExample& example : spec.examples) {
+            if (example.node_name != node.name) {
+                continue;
+            }
+            if (node_example_index >= prepared_node.production.Examples().size()) {
+                throw std::runtime_error(
+                    "--audit-root-canonicalization: prepared example count mismatch");
+            }
+            const pmg::BvhData raw_bvh = pmg::BvhLoader::Load(example.bvh_path);
+            const pmg::MotionClip raw_canonical =
+                pmg::CanonicalizeRootOrigin(raw_bvh.clip);
+            const pmg::MotionClip& normalized_clip =
+                prepared_node.production.Examples()[node_example_index].clip;
+            RootCanonicalizationAuditRow row;
+            row.node_name = node.name;
+            row.bvh_path = example.bvh_path;
+            row.parameter = example.parameter;
+            row.raw = pmg::SummarizeRootStart(raw_bvh.clip);
+            row.normalized = pmg::SummarizeRootStart(normalized_clip);
+            row.start_is_origin =
+                HorizontalDistance(row.normalized.first_root_position) <=
+                kRootOriginTolerance;
+            row.heading_is_canonical =
+                std::abs(row.normalized.first_heading_yaw) <=
+                kRootHeadingTolerance;
+            const pmg::RootStartSummary expected =
+                pmg::SummarizeRootStart(raw_canonical);
+            const pmg::Vec3 displacement_delta =
+                row.normalized.final_relative_displacement -
+                expected.final_relative_displacement;
+            row.displacement_preserved =
+                HorizontalDistance(displacement_delta) <= kDisplacementTolerance;
+            row.verdict = RootAuditVerdict(
+                row.raw, row.normalized, row.start_is_origin,
+                row.heading_is_canonical, row.displacement_preserved);
+            rows.push_back(std::move(row));
+            ++node_example_index;
+        }
+    }
+    return rows;
+}
+
+void WriteRootCanonicalizationCsv(
+    const std::string& path,
+    const std::vector<RootCanonicalizationAuditRow>& rows) {
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error("--audit-root-canonicalization: cannot write CSV");
+    }
+    csv << std::setprecision(9)
+        << "node,bvh,parameter,raw_first_root,raw_first_x,raw_first_z,"
+           "raw_first_yaw,normalized_first_root,normalized_first_x,"
+           "normalized_first_z,normalized_first_yaw,final_relative_dx,"
+           "final_relative_dz,final_relative_heading,normalized_bounds,"
+           "start_is_origin,heading_is_canonical,verdict\n";
+    for (const RootCanonicalizationAuditRow& row : rows) {
+        csv << row.node_name << ',' << row.bvh_path << ','
+            << ParameterCsv(row.parameter) << ',' << Vec3Csv(row.raw.first_root_position)
+            << ',' << row.raw.first_root_position.x << ','
+            << row.raw.first_root_position.z << ',' << row.raw.first_heading_yaw
+            << ',' << Vec3Csv(row.normalized.first_root_position) << ','
+            << row.normalized.first_root_position.x << ','
+            << row.normalized.first_root_position.z << ','
+            << row.normalized.first_heading_yaw << ','
+            << row.normalized.final_relative_displacement.x << ','
+            << row.normalized.final_relative_displacement.z << ','
+            << row.normalized.final_relative_heading << ','
+            << BoundsCsv(row.normalized.normalized_bounds_min,
+                         row.normalized.normalized_bounds_max)
+            << ',' << (row.start_is_origin ? "true" : "false")
+            << ',' << (row.heading_is_canonical ? "true" : "false")
+            << ',' << row.verdict << "\n";
+    }
+}
+
+void WriteRootCanonicalizationMarkdown(
+    const std::string& path,
+    const RootCanonicalizationAuditOptions& options,
+    const std::vector<RootCanonicalizationAuditRow>& rows) {
+    std::ofstream md(path);
+    if (!md) {
+        throw std::runtime_error("--audit-root-canonicalization: cannot write markdown");
+    }
+    const bool all_origin = std::all_of(rows.begin(), rows.end(), [](const auto& row) {
+        return row.start_is_origin;
+    });
+    const bool all_heading = std::all_of(rows.begin(), rows.end(), [](const auto& row) {
+        return row.heading_is_canonical;
+    });
+    const bool raw_starts_differ = [&]() {
+        if (rows.size() < 2) {
+            return false;
+        }
+        const pmg::Vec3 first = rows.front().raw.first_root_position;
+        const float yaw = rows.front().raw.first_heading_yaw;
+        for (const auto& row : rows) {
+            if (HorizontalDistance(row.raw.first_root_position - first) >
+                    kRootOriginTolerance ||
+                std::abs(row.raw.first_heading_yaw - yaw) >
+                    kRootHeadingTolerance) {
+                return true;
+            }
+        }
+        return false;
+    }();
+    std::string recommendation = "PASS_NO_CANONICALIZATION_CHANGE_NEEDED";
+    if (!all_origin) {
+        recommendation = "NEED_LOAD_TIME_CANONICALIZATION";
+    } else if (!all_heading) {
+        recommendation = "NEED_HEADING_CANONICALIZATION";
+    }
+
+    md << "# Root Canonicalization Audit\n\n";
+    md << "- Spec: `" << options.spec_path << "`\n";
+    md << "- Raw BVH starts differ: " << (raw_starts_differ ? "yes" : "no") << "\n";
+    md << "- Prepared normalized starts align: " << (all_origin ? "yes" : "no") << "\n";
+    md << "- Heading normalization consistent: " << (all_heading ? "yes" : "no") << "\n";
+    md << "- Final recommendation: `" << recommendation << "`\n\n";
+    md << "| Node | BVH | Parameter | Raw start x/z | Raw yaw | Normalized start x/z | Normalized yaw | Final dx/dz | Bounds x/z | Verdict |\n";
+    md << "|---|---|---|---:|---:|---:|---:|---:|---:|---|\n";
+    for (const RootCanonicalizationAuditRow& row : rows) {
+        md << "| " << row.node_name << " | "
+           << std::filesystem::path(row.bvh_path).filename().string() << " | "
+           << ParameterMd(row.parameter) << " | "
+           << row.raw.first_root_position.x << ", " << row.raw.first_root_position.z
+           << " | " << row.raw.first_heading_yaw << " | "
+           << row.normalized.first_root_position.x << ", "
+           << row.normalized.first_root_position.z << " | "
+           << row.normalized.first_heading_yaw << " | "
+           << row.normalized.final_relative_displacement.x << ", "
+           << row.normalized.final_relative_displacement.z << " | "
+           << row.normalized.normalized_bounds_min.x << ".."
+           << row.normalized.normalized_bounds_max.x << ", "
+           << row.normalized.normalized_bounds_min.z << ".."
+           << row.normalized.normalized_bounds_max.z << " | `"
+           << row.verdict << "` |\n";
+    }
+}
+
+RootCanonicalizationAuditOptions ParseRootCanonicalizationAuditOptions(
+    int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error("--audit-root-canonicalization needs <spec>");
+    }
+    RootCanonicalizationAuditOptions options;
+    options.spec_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--output-csv") {
+            options.output_csv = require_value("--output-csv");
+        } else if (option == "--output-md") {
+            options.output_md = require_value("--output-md");
+        } else {
+            throw std::runtime_error(
+                "unknown audit-root-canonicalization option '" + option + "'");
+        }
+    }
+    if (options.output_csv.empty()) {
+        throw std::runtime_error(
+            "--audit-root-canonicalization requires --output-csv");
+    }
+    if (options.output_md.empty()) {
+        throw std::runtime_error(
+            "--audit-root-canonicalization requires --output-md");
+    }
+    return options;
+}
+
+int RootCanonicalizationAuditCommand(
+    const RootCanonicalizationAuditOptions& options) {
+    const pmg::GraphSpec spec = pmg::LoadGraphSpec(options.spec_path);
+    const pmg::PreparedMotionSpaces prepared = pmg::PrepareMotionSpaces(spec);
+    const std::vector<RootCanonicalizationAuditRow> rows =
+        BuildRootCanonicalizationAudit(spec, prepared);
+    WriteRootCanonicalizationCsv(options.output_csv, rows);
+    WriteRootCanonicalizationMarkdown(options.output_md, options, rows);
+    std::cout << "root_canonicalization_rows=" << rows.size() << "\n";
+    std::cout << "root_canonicalization_csv=" << options.output_csv << "\n";
+    std::cout << "root_canonicalization_md=" << options.output_md << "\n";
+    return 0;
+}
+
 int CyclicRecutSearchCommand(
     const CyclicRecutSearchOptions& options,
     const std::string& command_line) {
@@ -2135,6 +2421,172 @@ CyclicRecutEvaluateOptions ParseCyclicRecutEvaluateOptions(
     return options;
 }
 
+struct SimplexAuditOptions {
+    std::string pmg_path;
+    std::string node_name;
+    std::string output_csv;
+    std::string output_md;
+    int samples_per_axis = 10;
+};
+
+SimplexAuditOptions ParseSimplexAuditOptions(int argc, char** argv) {
+    SimplexAuditOptions options;
+    if (argc < 4) {
+        throw std::runtime_error("Usage: pmg_cli --audit-parameter-node graph.pmg node_name --output-csv ... --output-md ... [--samples N]");
+    }
+    options.pmg_path = argv[2];
+    options.node_name = argv[3];
+    for (int index = 4; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) throw std::runtime_error(std::string(name) + " requires a value");
+            return argv[++index];
+        };
+        if (option == "--output-csv") options.output_csv = require_value("--output-csv");
+        else if (option == "--output-md") options.output_md = require_value("--output-md");
+        else if (option == "--samples") options.samples_per_axis = std::stoi(require_value("--samples"));
+        else throw std::runtime_error("Unknown option: " + option);
+    }
+    return options;
+}
+
+int SimplexAuditCommand(const SimplexAuditOptions& options) {
+    if (options.output_csv.empty() || options.output_md.empty()) {
+        throw std::runtime_error("--audit-parameter-node requires --output-csv and --output-md");
+    }
+    const pmg::BuiltPmgArtifact artifact = pmg::LoadPmgArtifactText(options.pmg_path);
+    int node_idx = -1;
+    for (int i = 0; i < artifact.graph.NumNodes(); ++i) {
+        if (artifact.graph.Node(i).name == options.node_name) {
+            node_idx = i;
+            break;
+        }
+    }
+    if (node_idx < 0) throw std::runtime_error("Node not found: " + options.node_name);
+
+    const pmg::ParametricMotionSpace& space = artifact.graph.Node(node_idx).motion_space;
+    if (!space.HasExplicitParameterSupport()) {
+        throw std::runtime_error("Node has no explicit parameter support");
+    }
+    const pmg::ParameterSupport& support = *space.ExplicitSupport();
+    
+    const pmg::ParameterDomain domain = space.Domain();
+    
+    std::ofstream csv(options.output_csv);
+    // Foot contact/sliding proxy intentionally omitted until a formal contact metric is available.
+    csv << "p0,p1,duration,root_disp,speed,net_heading,curvature,projected\n";
+    
+    std::vector<pmg::ParameterVector> grid;
+    if (domain.Dimension() == 1) {
+        for (int i = 0; i < options.samples_per_axis; ++i) {
+            float t = i / std::max(1.0f, float(options.samples_per_axis - 1));
+            pmg::ParameterVector pt = {domain.Bounds().min_corner[0] + t * (domain.Bounds().max_corner[0] - domain.Bounds().min_corner[0])};
+            if (support.Contains(pt)) grid.push_back(pt);
+        }
+    } else if (domain.Dimension() == 2) {
+        for (int i = 0; i < options.samples_per_axis; ++i) {
+            float ty = i / std::max(1.0f, float(options.samples_per_axis - 1));
+            float y = domain.Bounds().min_corner[1] + ty * (domain.Bounds().max_corner[1] - domain.Bounds().min_corner[1]);
+            for (int j = 0; j < options.samples_per_axis; ++j) {
+                float tx = j / std::max(1.0f, float(options.samples_per_axis - 1));
+                float x = domain.Bounds().min_corner[0] + tx * (domain.Bounds().max_corner[0] - domain.Bounds().min_corner[0]);
+                pmg::ParameterVector pt = {x, y};
+                if (support.Contains(pt)) grid.push_back(pt);
+            }
+        }
+    } else {
+        throw std::runtime_error("Only 1D and 2D spaces supported");
+    }
+    
+    for (const auto& p : grid) {
+        bool projected = !support.Contains(p);
+        pmg::ParameterVector sp = support.Project(p);
+        float duration = space.BlendedDurationSeconds(sp);
+        pmg::MotionClip clip = space.GenerateClip(sp, artifact.metadata.frames_per_second);
+        float speed = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTravelSpeed, clip);
+        float turn_rate = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTurnRate, clip);
+        float heading = turn_rate * duration;
+        float disp = speed * duration;
+        float curvature = disp > 1e-4f ? heading / disp : 0.0f;
+        
+        csv << (p.size() > 0 ? p[0] : 0) << "," 
+            << (p.size() > 1 ? p[1] : 0) << ","
+            << duration << "," << disp << "," << speed << "," << heading << "," << curvature << "," << projected << "\n";
+    }
+    
+    std::ofstream md(options.output_md);
+    md << "# Parameter Node Audit: " << options.node_name << "\n\n";
+    md << "Audit complete. " << grid.size() << " samples taken.\n\n";
+    md << "**Curvature Definition**: curvature = net_heading / max(root_disp, 1e-4)\n\n";
+    md << "The audit samples from the node's declared support; therefore projected=false is expected for normal samples. Projection becomes relevant only when evaluating externally requested parameters outside support.\n";
+    return 0;
+}
+
+struct InventoryBvhOptions {
+    std::string bvh_dir;
+    std::string pmg_path;
+    std::string output_csv;
+};
+
+InventoryBvhOptions ParseInventoryBvhOptions(int argc, char** argv) {
+    InventoryBvhOptions options;
+    if (argc < 5) {
+        throw std::runtime_error("Usage: pmg_cli --inventory-bvh <dir> <pmg> <csv>");
+    }
+    options.bvh_dir = argv[2];
+    options.pmg_path = argv[3];
+    options.output_csv = argv[4];
+    return options;
+}
+
+int InventoryBvhCommand(const InventoryBvhOptions& options) {
+    const pmg::BuiltPmgArtifact artifact = pmg::LoadPmgArtifactText(options.pmg_path);
+    std::ofstream csv(options.output_csv);
+    csv << "filename,compatible,frames,duration,root_disp,speed,net_heading,curvature,loopability,locomotion,idle,start,stop,turn,jump,unknown\n";
+    
+    for (const auto& entry : std::filesystem::directory_iterator(options.bvh_dir)) {
+        if (entry.path().extension() != ".bvh") continue;
+        std::string filename = entry.path().filename().string();
+        try {
+            pmg::BvhData bvh = pmg::BvhLoader::Load(entry.path().string());
+            bool compat = pmg::CheckSkeletonCompatibility(artifact.skeleton, bvh.skeleton).compatible;
+            int frames = bvh.clip.NumFrames();
+            float duration = bvh.clip.DurationSeconds();
+            float speed = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTravelSpeed, bvh.clip);
+            float heading_rate = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTurnRate, bvh.clip);
+            float heading = heading_rate * duration;
+            float root_disp = speed * duration;
+            float curvature = root_disp > 1e-4f ? heading / root_disp : 0.0f;
+            
+            float loopability = 0.0f;
+            if (frames > 0) {
+                pmg::PointCloud p1 = pmg::MotionDistance::BuildPointCloudFromFirstFrame(bvh.skeleton, bvh.clip, 0, 1);
+                pmg::PointCloud p2 = pmg::MotionDistance::BuildPointCloudFromFirstFrame(bvh.skeleton, bvh.clip, frames-1, 1);
+                loopability = pmg::MotionDistance::AlignedPointCloudDistance(p1, p2).distance;
+            }
+            
+            std::string lower = filename;
+            for (char& c : lower) c = std::tolower(c);
+            
+            bool is_locomotion = lower.find("walk") != std::string::npos || lower.find("jog") != std::string::npos || lower.find("run") != std::string::npos || lower.find("sneak") != std::string::npos || lower.find("strut") != std::string::npos;
+            bool is_idle = lower.find("stand") != std::string::npos || lower.find("idle") != std::string::npos;
+            bool is_start = lower.find("start") != std::string::npos || lower.find("to") != std::string::npos;
+            bool is_stop = lower.find("stop") != std::string::npos;
+            bool is_turn = lower.find("turn") != std::string::npos || lower.find("aboutface") != std::string::npos;
+            bool is_jump = lower.find("jump") != std::string::npos || lower.find("vault") != std::string::npos;
+            bool is_unknown = !is_locomotion && !is_idle && !is_start && !is_stop && !is_turn && !is_jump;
+            
+            csv << filename << "," << compat << "," << frames << "," << duration << "," 
+                << root_disp << "," << speed << "," << heading << "," << curvature << "," 
+                << loopability << "," << is_locomotion << "," << is_idle << "," << is_start << "," 
+                << is_stop << "," << is_turn << "," << is_jump << "," << is_unknown << "\n";
+        } catch (...) {
+            csv << filename << ",0,0,0,0,0,0,0,0,0,0,0,0,0,0,1\n";
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 namespace pmgcli {
@@ -2152,6 +2604,10 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
             ParseCyclicAuditOptions(argc, argv),
             CommandLineString(argc, argv));
     }
+    if (command == "--audit-root-canonicalization" && argc >= 3) {
+        return RootCanonicalizationAuditCommand(
+            ParseRootCanonicalizationAuditOptions(argc, argv));
+    }
     if (command == "--search-cyclic-recuts") {
         return CyclicRecutSearchCommand(
             ParseCyclicRecutSearchOptions(argc, argv),
@@ -2161,6 +2617,14 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
         return CyclicRecutEvaluateCommand(
             ParseCyclicRecutEvaluateOptions(argc, argv),
             CommandLineString(argc, argv));
+    }
+    if (command == "--audit-simplex-node" || command == "--audit-parameter-node") {
+        if (argc >= 4) {
+            return SimplexAuditCommand(ParseSimplexAuditOptions(argc, argv));
+        }
+    }
+    if (command == "--inventory-bvh" && argc >= 5) {
+        return InventoryBvhCommand(ParseInventoryBvhOptions(argc, argv));
     }
     return std::nullopt;
 }

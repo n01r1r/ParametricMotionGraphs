@@ -34,11 +34,11 @@ struct PmgEdge {
     int target_node = -1;
     std::vector<TransitionSample> samples;
 
-    // k-nearest interpolation of the target box + transition phases (PMG paper
+    // k-nearest interpolation of the target box and transition phases (PMG paper
     // §4, eqs. 1-3). Uses k = parameter_dimension + 1 nearest source samples
     // and cutoff = distance to the k-th nearest neighbor. Exact matches are
     // handled before reciprocal-weight evaluation. Returns nullopt only for an
-    // empty (no-edge) edge.
+    // edge with no sampled transitions.
     std::optional<InterpolatedTransition> LookupInterpolated(
         const ParameterVector& source_parameter,
         const ParameterVector& desired_target_parameter) const;

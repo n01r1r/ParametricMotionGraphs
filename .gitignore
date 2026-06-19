@@ -49,6 +49,7 @@ distance_grid.csv
 
 # Agent-local files
 .claude/
+.codegraph/
 docs/STATUS.md
 
 # Source papers and local extracts

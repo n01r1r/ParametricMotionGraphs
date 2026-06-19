@@ -2,6 +2,7 @@
 
 #include "pmg/BvhLoader.h"
 #include "pmg/MotionRegistration.h"
+#include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
 
 #include <filesystem>
@@ -105,6 +106,7 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
                 clip = ExtractFirstCycle(*reference_skeleton, clip, cycle_joint, cycle_settings);
             }
 
+            clip = CanonicalizeRootOrigin(clip);
             authored.AddExample(example.parameter, std::move(clip));
             prepared.source_bvh_paths.push_back(example.bvh_path);
         }
@@ -112,6 +114,13 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
         if (authored.NumExamples() == 0) {
             throw std::runtime_error("PrepareMotionSpaces: node '" + node.name +
                                      "' has no examples");
+        }
+
+        if (node.parameter_support_simplex) {
+            authored.SetParameterSupport(ParameterSupport(authored.ExampleParameters()));
+        } else if (node.parameter_support_triangulated_2d) {
+            authored.SetParameterSupport(ParameterSupport::CreateTriangulated2D(
+                authored.ExampleParameters(), node.parameter_triangles));
         }
 
         stages.authored = authored;
@@ -164,6 +173,11 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
         }
 
         stages.production = std::move(production);
+        
+        if ((node.parameter_support_simplex || node.parameter_support_triangulated_2d) && !stages.production.HasExplicitParameterSupport()) {
+            throw std::runtime_error("PrepareMotionSpaces: production space lost explicit parameter support");
+        }
+
         const auto insertion = prepared.nodes.emplace(node.name, std::move(stages));
         if (!insertion.second) {
             throw std::runtime_error("PrepareMotionSpaces: duplicate node '" + node.name + "'");

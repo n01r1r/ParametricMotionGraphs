@@ -1,7 +1,6 @@
 #include "PmgViewerWorkspace.h"
 
 #include "GraphAuthoringModel.h"
-#include "PmgViewerWorkspaceFactory.h"
 
 #include <imgui.h>
 
@@ -12,11 +11,11 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
-#include <memory>
 #include <string>
 
 #include "pmg/ForwardKinematics.h"
 #include "pmg/MathTypes.h"
+#include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
 
 #ifndef PMG_BVH_DIRECTORY
@@ -30,9 +29,6 @@ constexpr float kEpsilon = 1.0e-6f;
 constexpr float kParameterCanvasHeight = 88.0f;
 constexpr float kPhaseRowHeight = 26.0f;
 constexpr int kSteeringCurveSamples = 24;  // turn-rate plot resolution
-constexpr std::size_t kMaxRuntimePathPoints = 600;
-constexpr std::size_t kMaxTransitionMarkers = 128;
-constexpr float kMinimumTracePointDistance = 0.01f;
 
 glm::vec3 ToGlm(const pmg::Vec3& v) { return glm::vec3(v.x, v.y, v.z); }
 
@@ -103,10 +99,6 @@ void DrawPhaseMarker(ImDrawList* draw_list, float phase, float left, float top,
 }
 
 }  // namespace
-
-std::unique_ptr<ViewerWorkspace> CreatePmgViewerWorkspace() {
-    return std::make_unique<PmgViewerWorkspace>();
-}
 
 void PmgViewerWorkspace::Initialize(const std::string& artifact_path) {
     DiscoverBvhFiles();
@@ -192,8 +184,7 @@ bool PmgViewerWorkspace::ParametricBlendActive() const {
 }
 
 bool PmgViewerWorkspace::GraphRuntimeActive() const {
-    return mode_ == ViewerPlaybackMode::GraphRuntime && graph_ready_ &&
-           graph_controller_.has_value();
+    return mode_ == ViewerPlaybackMode::GraphRuntime && runtime_.Ready();
 }
 
 void PmgViewerWorkspace::ResetPlayback() {
@@ -285,15 +276,18 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     scene_.diagnostic_points.clear();
     scene_.diagnostic_lines.clear();
 
+    const ViewerRuntimeSnapshot runtime = runtime_.Snapshot();
+    const auto& path_points = runtime.runtime_path_points;
+    const auto& transition_markers = runtime.transition_markers;
     if (GraphRuntimeActive() && show_graph_path_trail_ &&
-        graph_path_points_.size() >= 2) {
+        path_points.size() >= 2) {
         constexpr glm::vec3 kPathTrailColor(0.10f, 0.70f, 0.95f);
         const float trail_height = 0.05f * display_scale_;
         const float trail_radius = 0.035f * display_scale_;
-        for (std::size_t index = 1; index < graph_path_points_.size();
+        for (std::size_t index = 1; index < path_points.size();
              ++index) {
-            const glm::vec2& previous = graph_path_points_[index - 1];
-            const glm::vec2& current = graph_path_points_[index];
+            const glm::vec2& previous = path_points[index - 1];
+            const glm::vec2& current = path_points[index];
             scene_.diagnostic_lines.push_back({
                 glm::vec3(previous.x * display_scale_, trail_height,
                           previous.y * display_scale_),
@@ -309,8 +303,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
         const float marker_height = 0.25f * display_scale_;
         const float marker_radius = 0.065f * display_scale_;
         const float line_radius = 0.022f * display_scale_;
-        for (const TransitionTraceMarker& marker :
-             graph_transition_markers_) {
+        for (const TransitionTraceMarker& marker : transition_markers) {
             const glm::vec3 color =
                 TransitionMarkerColor(marker.source_node, marker.target_node);
             const glm::vec3 ground_position(
@@ -336,9 +329,69 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
         scene_.marker_lines.push_back({base, top});
     }
 
+    AppendRootCanonicalizationMarkers(pose);
     AppendPathPreview();
 
     scene_.focus_point = centroid;
+}
+
+void PmgViewerWorkspace::AppendRootCanonicalizationMarkers(
+    const pmg::Pose& current_pose) {
+    if (!GraphRuntimeActive() || !show_root_canonicalization_markers_) {
+        return;
+    }
+    constexpr glm::vec3 kRawColor(0.95f, 0.25f, 0.18f);
+    constexpr glm::vec3 kNormalizedColor(0.18f, 0.80f, 0.35f);
+    constexpr glm::vec3 kTrajectoryColor(0.95f, 0.75f, 0.18f);
+    constexpr glm::vec3 kRuntimeColor(0.20f, 0.65f, 1.00f);
+    const float y = 0.12f * display_scale_;
+    const float point_radius = 0.06f * display_scale_;
+    const float line_radius = 0.018f * display_scale_;
+    const glm::vec3 canonical_origin(0.0f, y, 0.0f);
+
+    scene_.diagnostic_points.push_back(
+        {canonical_origin, kNormalizedColor, point_radius * 1.4f});
+    for (const RootCanonicalizationMarker& marker :
+         root_canonicalization_markers_) {
+        const glm::vec3 raw(marker.raw_start.x * display_scale_, y,
+                            marker.raw_start.z * display_scale_);
+        scene_.diagnostic_points.push_back({raw, kRawColor, point_radius});
+        scene_.diagnostic_lines.push_back({
+            raw + glm::vec3(-point_radius, 0.0f, 0.0f),
+            raw + glm::vec3(point_radius, 0.0f, 0.0f),
+            kRawColor,
+            line_radius,
+        });
+        scene_.diagnostic_lines.push_back({
+            raw + glm::vec3(0.0f, 0.0f, -point_radius),
+            raw + glm::vec3(0.0f, 0.0f, point_radius),
+            kRawColor,
+            line_radius,
+        });
+        if (!show_anchor_root_trajectories_) {
+            continue;
+        }
+        for (std::size_t i = 1; i < marker.normalized_trajectory.size(); ++i) {
+            const pmg::Vec3& previous = marker.normalized_trajectory[i - 1];
+            const pmg::Vec3& current = marker.normalized_trajectory[i];
+            scene_.diagnostic_lines.push_back({
+                glm::vec3(previous.x * display_scale_, y,
+                          previous.z * display_scale_),
+                glm::vec3(current.x * display_scale_, y,
+                          current.z * display_scale_),
+                kTrajectoryColor,
+                line_radius,
+            });
+        }
+    }
+
+    scene_.diagnostic_points.push_back({
+        glm::vec3(current_pose.root_position.x * display_scale_,
+                  0.22f * display_scale_,
+                  current_pose.root_position.z * display_scale_),
+        kRuntimeColor,
+        point_radius * 1.5f,
+    });
 }
 
 std::vector<glm::vec3> PmgViewerWorkspace::PoseWorldPositions(
@@ -438,75 +491,73 @@ void PmgViewerWorkspace::AppendPathPreview() {
     }
 }
 
-void PmgViewerWorkspace::ResetRuntimeTrace() {
-    graph_path_points_.clear();
-    graph_transition_markers_.clear();
-    if (graph_controller_.has_value()) {
-        RecordRuntimeTracePoint(graph_controller_->CurrentPose());
-    }
-}
-
-void PmgViewerWorkspace::RecordRuntimeTracePoint(const pmg::Pose& pose) {
-    if (!graph_ready_) {
-        return;
-    }
-    const glm::vec2 root_position(
-        pose.root_position.x, pose.root_position.z);
-    if (!graph_path_points_.empty()) {
-        const glm::vec2 delta = root_position - graph_path_points_.back();
-        if (glm::dot(delta, delta) <
-            kMinimumTracePointDistance * kMinimumTracePointDistance) {
-            return;
-        }
-    }
-    graph_path_points_.push_back(root_position);
-    if (graph_path_points_.size() > kMaxRuntimePathPoints) {
-        graph_path_points_.erase(graph_path_points_.begin());
-    }
-}
-
-void PmgViewerWorkspace::RecordTransitionMarker(
-    const pmg::RuntimeTransitionDiagnostics& transition) {
-    if (!graph_controller_.has_value()) {
-        return;
-    }
-    const pmg::Pose pose = graph_controller_->CurrentPose();
-    graph_transition_markers_.push_back({
-        glm::vec2(pose.root_position.x, pose.root_position.z),
-        transition.source_node,
-        transition.target_node,
-    });
-    if (graph_transition_markers_.size() > kMaxTransitionMarkers) {
-        graph_transition_markers_.erase(
-            graph_transition_markers_.begin());
-    }
-}
-
 // --- Goto steering (viewer port of CLI --goto) ------------------------------
+
+void PmgViewerWorkspace::ResetGotoState(const std::string& status) {
+    goto_active_ = false;
+    goto_desired_parameter_.clear();
+    goto_status_ = status;
+}
+
+void PmgViewerWorkspace::ResetSteeringState(const std::string& status) {
+    steering_.reset();
+    ResetGotoState(status);
+}
+
+void PmgViewerWorkspace::SetDesiredRuntimeNode(int node) {
+    if (node < 0 || node >= runtime_.Graph().NumNodes()) {
+        return;
+    }
+    graph_desired_node_ = node;
+    const pmg::ParametricMotionSpace& target_space =
+        runtime_.Graph().Node(graph_desired_node_).motion_space;
+    if (target_space.ParameterDimension() == 1) {
+        graph_desired_parameter_ = std::clamp(
+            graph_desired_parameter_,
+            target_space.MinParameter().front(),
+            target_space.MaxParameter().front());
+    }
+    ResetGotoState();
+}
+
+void PmgViewerWorkspace::PlaceGotoTarget(const glm::vec2& target) {
+    goto_target_ = target;
+    if (!steering_.has_value()) {
+        CalibrateSteering();  // one-time; a few seconds of offline streaming
+    }
+    if (!steering_.has_value()) {
+        return;
+    }
+    steering_->Reset();
+    goto_desired_parameter_.clear();
+    goto_active_ = true;
+    playing_ = true;
+    goto_status_ = "Walking to target.";
+}
 
 // Achieved world turn rate when streaming the graph at one held parameter.
 // Differs from the example clips' own turn rates: each self-transition plays
 // only the target-phase -> source-gate slice per cycle, so the net heading
 // advance per hop is that slice's heading change (including sway).
 void PmgViewerWorkspace::CalibrateSteering() {
-    steering_.reset();
-    if (!graph_ready_ || pmg_examples_.empty()) {
+    ResetSteeringState();
+    if (!runtime_.Ready() || pmg_examples_.empty()) {
         goto_status_ = "Build a graph first.";
         return;
     }
     try {
         pmg::GoalDirectedLocomotionConfig steering_config;
-        steering_config.runtime = graph_runtime_config_;
+        steering_config.runtime = runtime_.Config();
         steering_.emplace(
-            graph_, pmg_skeleton_, 0, graph_fps_, steering_config);
+            runtime_.Graph(), pmg_skeleton_, 0, graph_fps_, steering_config);
         const pmg::SteeringCalibration& calibration =
             steering_->Calibration();
         goto_status_ = "Calibrated: achieved turn rates " +
                        std::to_string(calibration.LowestRate()) + " .. " +
                        std::to_string(calibration.HighestRate()) + " rad/s.";
     } catch (const std::exception& error) {
-        steering_.reset();
-        goto_status_ = std::string("Calibration failed: ") + error.what();
+        ResetSteeringState(
+            std::string("Calibration failed: ") + error.what());
     }
 }
 
@@ -515,13 +566,12 @@ void PmgViewerWorkspace::UpdateGotoSteering(const pmg::Pose& pose) {
     const float dz = goto_target_.y - pose.root_position.z;
     const float distance = std::sqrt(dx * dx + dz * dz);
     if (distance <= goto_tolerance_) {
-        goto_active_ = false;
-        goto_status_ = "Target reached.";
+        ResetGotoState("Target reached.");
         return;
     }
     pmg::GoalRequest goal;
     goal.target_position = {goto_target_.x, 0.0f, goto_target_.y};
-    graph_desired_node_ = graph_controller_->CurrentNode();
+    graph_desired_node_ = runtime_.Snapshot().current_node;
     // The core steering now drives every node axis (turn_rate + travel_speed);
     // keep the whole vector so multidimensional goto is not flattened back to
     // axis 0. graph_desired_parameter_ mirrors axis 0 for the 1-D slider UI.
@@ -557,7 +607,7 @@ void PmgViewerWorkspace::UpdateRootMotionDiagnostics(
 bool PmgViewerWorkspace::HandleGroundClick(const glm::vec3& ray_origin,
                                   const glm::vec3& ray_direction) {
     if (!GraphRuntimeActive()) {
-        if (graph_ready_) {
+        if (runtime_.Ready()) {
             status_message_ = "Switch to Graph runtime mode to place a walk target.";
         }
         return false;
@@ -571,56 +621,30 @@ bool PmgViewerWorkspace::HandleGroundClick(const glm::vec3& ray_origin,
     }
     const glm::vec3 hit = ray_origin + t * ray_direction;
     // The scene is rendered at display scale; steering runs in native units.
-    goto_target_ = glm::vec2(hit.x, hit.z) / std::max(display_scale_, kEpsilon);
-
-    if (!steering_.has_value()) {
-        CalibrateSteering();  // one-time; a few seconds of offline streaming
-    }
-    if (steering_.has_value()) {
-        steering_->Reset();
-    }
-    goto_active_ = steering_.has_value();
-    if (goto_active_) {
-        playing_ = true;
-        goto_status_ = "Walking to target.";
-    }
-    return true;
+    PlaceGotoTarget(
+        glm::vec2(hit.x, hit.z) / std::max(display_scale_, kEpsilon));
+    return steering_.has_value();
 }
 
 void PmgViewerWorkspace::Update(float delta_seconds) {
-    // Graph runtime: drive the RuntimeController and render its streamed pose.
+    // Graph runtime: translate viewer state to a raw runtime request, then
+    // render the module snapshot. Runtime scheduling/status stays in module.
     if (GraphRuntimeActive()) {
+        ViewerRuntimeSnapshot runtime = runtime_.Snapshot();
         if (playing_) {
-            const bool was_transitioning =
-                graph_controller_->IsTransitioning();
             if (goto_active_ && steering_.has_value()) {
-                UpdateGotoSteering(graph_controller_->CurrentPose());
+                UpdateGotoSteering(runtime.current_pose.value_or(pmg::Pose{}));
             }
-            pmg::RuntimeControlRequest request;
-            // A PMG stream repeatedly traverses edges, including a node's
-            // self-edge when the requested node and parameter stay unchanged.
-            // That transition blends the end of one generated clip into the
-            // start of the next; leaving the request empty would raw-wrap the
-            // extracted cycle and expose its joint-space seam.
+            ViewerRuntimeRequest request;
             request.desired_node = graph_desired_node_;
-            // Active goto supplies a full per-axis steering vector; manual
-            // streaming uses the 1-D slider (axis 0) padded to node dimension.
-            request.desired_parameter =
+            request.desired_parameter_raw =
                 (goto_active_ && !goto_desired_parameter_.empty())
                     ? goto_desired_parameter_
                     : DesiredParameterForNode(graph_desired_node_);
-            graph_controller_->Update(delta_seconds * playback_speed_, request);
-            if (!was_transitioning &&
-                graph_controller_->IsTransitioning()) {
-                const auto transition =
-                    graph_controller_->ActiveTransitionDiagnostics();
-                if (transition.has_value()) {
-                    RecordTransitionMarker(*transition);
-                }
-            }
+            runtime_.Update(delta_seconds * playback_speed_, request);
+            runtime = runtime_.Snapshot();
         }
-        const pmg::Pose pose = graph_controller_->CurrentPose();
-        RecordRuntimeTracePoint(pose);
+        const pmg::Pose pose = runtime.current_pose.value_or(pmg::Pose{});
         UpdateRootMotionDiagnostics(
             pose, playing_ ? delta_seconds * playback_speed_ : 0.0f);
         RebuildScene(pose);
@@ -1015,7 +1039,7 @@ void PmgViewerWorkspace::BuildWorkflowSection() {
         next_hint = "Next: load a clip in Inputs";
     } else if (pmg_examples_.empty()) {
         next_hint = "Next: add motion samples in Inputs";
-    } else if (!graph_ready_) {
+    } else if (!runtime_.Ready()) {
         next_hint = "Next: build a graph in PMG Runtime";
     }
     if (next_hint != nullptr) {
@@ -1047,7 +1071,7 @@ void PmgViewerWorkspace::BuildWorkflowSection() {
     gated_radio("Parametric blend", ViewerPlaybackMode::ParametricBlend, pmg_space_ready_,
                 "add a clip");
     gated_radio("Graph runtime", ViewerPlaybackMode::GraphRuntime,
-                graph_ready_ && graph_controller_.has_value(), "build graph");
+                runtime_.Ready(), "build graph");
     mode_ = static_cast<ViewerPlaybackMode>(mode_int);
 }
 
@@ -1070,12 +1094,10 @@ void PmgViewerWorkspace::BuildTransportSection() {
     if (ImGui::Button("Reset")) {
         ResetPlayback();
     }
-    if (GraphRuntimeActive() && graph_controller_.has_value()) {
+    if (GraphRuntimeActive()) {
         ImGui::SameLine();
         if (ImGui::Button("Restart graph")) {
-            graph_controller_->Start(graph_controller_->CurrentNode(),
-                                     graph_controller_->CurrentParameter(), graph_fps_);
-            ResetRuntimeTrace();
+            runtime_.Reset();
         }
     }
 
@@ -1092,8 +1114,8 @@ void PmgViewerWorkspace::BuildTransportSection() {
         if (ImGui::IsItemActive()) {
             playing_ = false;
         }
-    } else if (graph_controller_.has_value()) {
-        ImGui::Text("Phase %.3f", graph_controller_->CurrentPhase());
+    } else if (runtime_.Ready()) {
+        ImGui::Text("Phase %.3f", runtime_.Snapshot().current_phase);
     }
 
     // Path preview: ghost skeletons sampled across the active clip so the start,
@@ -1289,8 +1311,8 @@ void PmgViewerWorkspace::BuildMotionSpaceSection() {
         }
 
         const float canonical_phase =
-            GraphRuntimeActive() && graph_controller_.has_value()
-                ? graph_controller_->CurrentPhase()
+            GraphRuntimeActive()
+                ? runtime_.Snapshot().current_phase
                 : current_phase_;
         DrawPhaseTimeline(canonical_phase);
 
@@ -1763,6 +1785,5 @@ void PmgViewerWorkspace::BuildDistanceGridSection() {
                     alignment.yaw, alignment.dx, alignment.dz);
     }
 }
-
 
 }  // namespace pmgviewer

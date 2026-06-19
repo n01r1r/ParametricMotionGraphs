@@ -16,9 +16,9 @@ namespace pmg {
 struct AlignmentContext {
     const MotionClip& source_clip;
     const MotionClip& target_clip;
-    float live_source_phase;
+    float live_source_phase;  // normalized [0, 1]
     const InterpolatedTransition& transition;
-    int window_size = 5;
+    int window_size = 5;  // sampled frames; must be positive
     TransitionWindowConvention convention =
         TransitionWindowConvention::kKovarDirectional;
 };
@@ -31,8 +31,8 @@ public:
     virtual RigidTransform2D Resolve(const AlignmentContext& context) const = 0;
 };
 
-// Paper-faithful (PMG §3.2 / §5.2.1): recompute the point-cloud alignment
-// between the current and chosen target clips at the selected transition phases.
+// PMG §3.2 / §5.2.1 path used here: recompute point-cloud alignment between
+// current and chosen target clips under the configured sampled frame window.
 class PointCloudAlignment : public AlignmentStrategy {
 public:
     explicit PointCloudAlignment(const Skeleton& skeleton, int window = 5)

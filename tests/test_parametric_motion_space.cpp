@@ -243,5 +243,31 @@ int main() {
         assert(std::abs(mid_rate) < std::abs(right_rate));
     }
 
+    // Simplex support: projection and barycentric weight reconstruction
+    {
+        pmg::ParametricMotionSpace simplex("simplex", 2);
+        simplex.AddExample({0.0f, 0.0f}, MakeClip(0.0f));
+        simplex.AddExample({1.0f, 0.0f}, MakeClip(10.0f));
+        simplex.AddExample({0.0f, 1.0f}, MakeClip(20.0f));
+
+        simplex.SetParameterSupport(pmg::ParameterSupport(simplex.ExampleParameters()));
+
+        // Inside simplex, barycentric weights must reconstruct the parameter exactly
+        const pmg::ParameterVector inside{0.25f, 0.25f};
+        const std::vector<float> inside_weights = simplex.ComputeLocalBlendWeights(inside);
+        assert(inside_weights.size() == 3);
+        float x = inside_weights[0] * 0.0f + inside_weights[1] * 1.0f + inside_weights[2] * 0.0f;
+        float y = inside_weights[0] * 0.0f + inside_weights[1] * 0.0f + inside_weights[2] * 1.0f;
+        assert(std::abs(x - 0.25f) < 1.0e-5f);
+        assert(std::abs(y - 0.25f) < 1.0e-5f);
+
+        // Outside simplex: evaluating a pose projects to the boundary
+        const pmg::ParameterVector outside{0.75f, 0.75f};
+        // The projected parameter is (0.5, 0.5), which interpolates between {1.0, 0.0} (root 10.0) and {0.0, 1.0} (root 20.0).
+        // The weights for (0.5, 0.5) are 0.0, 0.5, 0.5. The blended root x should be 15.0f.
+        const pmg::Pose projected_pose = simplex.EvaluatePose(outside, 0.0f);
+        assert(std::abs(projected_pose.root_position.x - 15.0f) < 1.0e-5f);
+    }
+
     return 0;
 }

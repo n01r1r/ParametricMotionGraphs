@@ -1,5 +1,3 @@
-#include "PmgCommands.h"
-
 #include "PmgCommandModules.h"
 
 #include <exception>
@@ -34,6 +32,8 @@ void PrintUsage() {
               << "      registration options must match explicit GraphSpec settings\n"
               << "  pmg_cli --audit-cyclic-continuity graph_spec.txt\n"
               << "      --output-csv out.csv --output-md out.md [--fps N]\n"
+              << "  pmg_cli --audit-root-canonicalization graph_spec.txt\n"
+              << "      --output-csv out.csv --output-md out.md\n"
               << "  pmg_cli --random-walk graph_spec.txt|graph.pmg [--seconds S] [--walk-seed N]\n"
               << "      [--min-transitions N] [--max-pop-ratio X]\n"
               << "      [--blend-placement directional|centered] [--preroll-policy clamp|wrap]\n"
@@ -48,7 +48,7 @@ void PrintUsage() {
 
 }  // namespace
 
-int RunPmgCli(int argc, char** argv) {
+int main(int argc, char** argv) {
     try {
         using CommandRunner = std::optional<int> (*)(int, char**);
         constexpr CommandRunner kCommandRunners[] = {

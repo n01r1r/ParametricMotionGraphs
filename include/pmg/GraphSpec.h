@@ -3,6 +3,7 @@
 #include "pmg/PmgArtifact.h"
 #include "pmg/PmgBuilder.h"
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,9 @@ struct GraphSpecNode {
     bool expect_corner_coverage_full = false;
     bool has_expect_spanned_axes = false;
     int expect_spanned_axes = 0;
+    bool parameter_support_simplex = false;
+    bool parameter_support_triangulated_2d = false;
+    std::vector<std::array<int, 3>> parameter_triangles;
 };
 
 struct GraphSpecExample {
@@ -61,6 +65,9 @@ struct GraphSpec {
 //   parameter_metric <node> <turn_rate|travel_speed|none>  # legacy 1-D form
 //   parameter_metrics <node> <metric0> ... <metricN-1>
 //   parameter_calibration <node> <samples_per_axis>
+//   parameter_support <node> simplex  # exactly N+1 affinely independent
+//               examples define the authored support for an N-D node; runtime
+//               lookup still uses the implementation's current AABB behavior
 //   example <node_name> <p0> ... <pN-1> <path/to/file.bvh>
 //   edge <source_node> <target_node>
 //   edge_config <source> <target> <tgood> <tbad> <source_samples>
@@ -96,9 +103,8 @@ struct ArtifactBuildConfig {
     float skeleton_offset_tolerance = 1.0e-4f;
 };
 
-// Builds the paper-core offline artifact: loads and cycle-normalizes examples,
-// installs contact/DTW registration, samples every requested edge, and returns
-// the Skeleton plus reproducibility metadata needed by online playback.
+// Compatibility wrapper for the paper offline pipeline. New orchestration lives
+// in PmgOfflinePipeline; GraphSpec owns parse and structural validation.
 BuiltPmgArtifact BuildPmgArtifactFromSpec(
     const GraphSpec& spec,
     const ArtifactBuildConfig& config = {});

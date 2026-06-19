@@ -18,16 +18,18 @@ add_library(pmg_core
     src/GoalDirectedLocomotion.cpp
     src/GraphIo.cpp
     src/GraphSpec.cpp
-    src/LegacyFrameCountClipGeneration.cpp
     src/MotionClip.cpp
     src/MotionDistance.cpp
     src/MotionRegistration.cpp
     src/MotionSpacePreparation.cpp
     src/ParametricMotionGraph.cpp
     src/ParametricMotionSpace.cpp
+    src/ParameterSupport.cpp
     src/PmgArtifact.cpp
     src/PmgBuilder.cpp
+    src/PmgOfflinePipeline.cpp
     src/PoseBlend.cpp
+    src/RootCanonicalization.cpp
     src/RuntimeController.cpp
     src/SkeletonCompatibility.cpp
     src/TimeWarp.cpp
@@ -43,7 +45,6 @@ target_compile_options(pmg_core PRIVATE
 )
 
 add_executable(pmg_cli
-    apps/pmg_cli.cpp
     apps/PmgBvhCommands.cpp
     apps/PmgCommands.cpp
     apps/PmgDiagnosticCommands.cpp
@@ -71,6 +72,10 @@ if(PMG_BUILD_TESTS)
     add_executable(test_parametric_motion_space tests/test_parametric_motion_space.cpp)
     target_link_libraries(test_parametric_motion_space PRIVATE pmg_core)
     add_test(NAME test_parametric_motion_space COMMAND test_parametric_motion_space)
+
+    add_executable(test_parameter_support tests/test_parameter_support.cpp)
+    target_link_libraries(test_parameter_support PRIVATE pmg_core)
+    add_test(NAME test_parameter_support COMMAND test_parameter_support)
 
     add_executable(test_bvh_loader tests/test_bvh_loader.cpp)
     target_link_libraries(test_bvh_loader PRIVATE pmg_core)
@@ -128,9 +133,17 @@ if(PMG_BUILD_TESTS)
     target_link_libraries(test_graph_spec PRIVATE pmg_core)
     add_test(NAME test_graph_spec COMMAND test_graph_spec)
 
+    add_executable(test_pmg_offline_pipeline tests/test_pmg_offline_pipeline.cpp)
+    target_link_libraries(test_pmg_offline_pipeline PRIVATE pmg_core)
+    add_test(NAME test_pmg_offline_pipeline COMMAND test_pmg_offline_pipeline)
+
     add_executable(test_motion_space_preparation tests/test_motion_space_preparation.cpp)
     target_link_libraries(test_motion_space_preparation PRIVATE pmg_core)
     add_test(NAME test_motion_space_preparation COMMAND test_motion_space_preparation)
+
+    add_executable(test_root_canonicalization tests/test_root_canonicalization.cpp)
+    target_link_libraries(test_root_canonicalization PRIVATE pmg_core)
+    add_test(NAME test_root_canonicalization COMMAND test_root_canonicalization)
 
     add_executable(test_time_warp tests/test_time_warp.cpp)
     target_link_libraries(test_time_warp PRIVATE pmg_core)
@@ -165,7 +178,7 @@ if(PMG_BUILD_TESTS)
     # Canonical course-demo spec. This is the only viewer-facing PMG demo kept
     # for the final clean repository.
     add_test(NAME cli_validate_demo_walk_2d
-        COMMAND pmg_cli --validate-graph
+        COMMAND pmg_cli --validate-graph-spec
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec)
 
     add_test(NAME cli_build_artifact_walk_2d
@@ -277,6 +290,7 @@ if(PMG_BUILD_VIEWER)
     add_library(pmg_viewer_workspace STATIC
         apps/viewer/PmgViewerWorkspace.cpp
         apps/viewer/PmgViewerWorkspaceGraph.cpp
+        apps/viewer/ViewerRuntimeModule.cpp
     )
     target_include_directories(pmg_viewer_workspace PUBLIC apps/viewer)
     target_link_libraries(pmg_viewer_workspace
@@ -293,6 +307,7 @@ if(PMG_BUILD_VIEWER)
 
     add_executable(pmg_viewer apps/viewer/main.cpp)
     target_link_libraries(pmg_viewer PRIVATE
+        pmg_core
         viewer_host
         pmg_viewer_workspace
     )
@@ -308,5 +323,16 @@ if(PMG_BUILD_VIEWER)
             PRIVATE apps/viewer)
         add_test(NAME test_viewer_graph_authoring
             COMMAND test_viewer_graph_authoring)
+
+        add_executable(test_viewer_graph_runtime tests/test_viewer_graph_runtime.cpp)
+        target_include_directories(test_viewer_graph_runtime PRIVATE apps/viewer include)
+        target_link_libraries(test_viewer_graph_runtime PRIVATE pmg_viewer_workspace pmg_core)
+        add_test(NAME test_viewer_graph_runtime COMMAND test_viewer_graph_runtime)
+
+        add_executable(test_viewer_runtime_module
+            apps/viewer/tests/test_viewer_runtime_module.cpp)
+        target_include_directories(test_viewer_runtime_module PRIVATE apps/viewer include)
+        target_link_libraries(test_viewer_runtime_module PRIVATE pmg_viewer_workspace pmg_core)
+        add_test(NAME test_viewer_runtime_module COMMAND test_viewer_runtime_module)
     endif()
 endif()

@@ -45,12 +45,32 @@ pmg::MotionClip MakeLoopClip(float parameter, char axis, float amplitude_degrees
     return clip;
 }
 
+pmg::MotionClip MakeLoopClip2D(const pmg::ParameterVector& parameter) {
+    return MakeLoopClip(parameter[0] + 0.5f * parameter[1], 'X', 20.0f);
+}
+
 pmg::ParametricMotionSpace MakeSpace(char axis, float amplitude_degrees) {
     pmg::ParametricMotionSpace space("space", 1);
     space.AddExample({0.0f}, MakeLoopClip(0.0f, axis, amplitude_degrees));
     space.AddExample({0.5f}, MakeLoopClip(0.5f, axis, amplitude_degrees));
     space.AddExample({1.0f}, MakeLoopClip(1.0f, axis, amplitude_degrees));
     return space;
+}
+
+pmg::ParametricMotionSpace MakeTriangleSpace() {
+    pmg::ParametricMotionSpace space("triangle", 2);
+    space.AddExample({0.0f, 0.0f}, MakeLoopClip2D({0.0f, 0.0f}));
+    space.AddExample({1.0f, 0.0f}, MakeLoopClip2D({1.0f, 0.0f}));
+    space.AddExample({0.0f, 1.0f}, MakeLoopClip2D({0.0f, 1.0f}));
+    space.SetParameterSupport(pmg::ParameterSupport(space.ExampleParameters()));
+    return space;
+}
+
+bool InUnitTriangle(const pmg::ParameterVector& parameter) {
+    return parameter.size() == 2 &&
+           parameter[0] >= -1.0e-5f &&
+           parameter[1] >= -1.0e-5f &&
+           parameter[0] + parameter[1] <= 1.0f + 1.0e-5f;
 }
 
 pmg::PmgBuilderConfig SmallConfig() {
@@ -160,6 +180,28 @@ int main() {
         }
     }
 
+    // Random edge-builder samples come from simplex support, not the enclosing
+    // AABB. For this triangle support, AABB sampling could produce x+y>1.
+    {
+        const pmg::ParametricMotionSpace triangle_space = MakeTriangleSpace();
+        pmg::PmgBuilderConfig config = SmallConfig();
+        config.source_sample_count = 20;
+        config.target_sample_count = 20;
+        config.include_example_parameters = false;
+        config.good_transition_threshold = 1.0e9f;
+        config.bad_transition_threshold = 2.0e9f;
+        const pmg::PmgEdge edge = pmg::PmgBuilder::BuildEdge(
+            skeleton, 0, 0, triangle_space, triangle_space, config);
+        assert(!edge.samples.empty());
+        for (const pmg::TransitionSample& sample : edge.samples) {
+            assert(InUnitTriangle(sample.source_parameter));
+            for (const pmg::TargetTransitionPhaseSample& phase_sample :
+                 sample.target_phase_samples) {
+                assert(InUnitTriangle(phase_sample.target_parameter));
+            }
+        }
+    }
+
     // Deterministic given a fixed seed.
     {
         pmg::PmgBuilderConfig config = SmallConfig();
@@ -252,6 +294,36 @@ int main() {
         const pmg::PmgEdge built =
             pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, narrow_source, static_target, config);
         assert(!built.samples.empty());
+    }
+    {
+        // PmgBuilder_SamplesInsideTriangulatedSupport
+        pmg::ParametricMotionSpace triangulated_source("walk", 2);
+        triangulated_source.AddExample({-0.3f, 0.0f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        triangulated_source.AddExample({0.0f, 0.0f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        triangulated_source.AddExample({1.0f, 0.0f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        triangulated_source.AddExample({0.0f, 1.0f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        triangulated_source.AddExample({0.15f, 0.75f}, MakeLoopClip(0.0f, 'X', 90.0f));
+        std::vector<pmg::ParameterVector> vertices = {
+            {-0.3f, 0.0f}, {0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}, {0.15f, 0.75f}
+        };
+        std::vector<std::array<int, 3>> triangles = {{0, 1, 4}, {1, 2, 4}, {2, 3, 4}, {3, 0, 4}};
+        const pmg::ParameterSupport support = pmg::ParameterSupport::CreateTriangulated2D(vertices, triangles);
+        triangulated_source.SetParameterSupport(support);
+
+        pmg::PmgBuilderConfig config;
+        config.source_sample_count = 50;
+        config.target_sample_count = 1;
+        config.generated_frame_count = 1;
+        config.good_transition_threshold = 1.0e9f;
+        config.bad_transition_threshold = 2.0e9f;
+
+        const pmg::PmgEdge built =
+            pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, triangulated_source, triangulated_source, config);
+        
+        assert(!built.samples.empty());
+        for (const pmg::TransitionSample& sample : built.samples) {
+            assert(support.Contains(sample.source_parameter));
+        }
     }
 
     return 0;

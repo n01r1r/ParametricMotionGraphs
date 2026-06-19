@@ -1,6 +1,5 @@
 #include "pmg/PmgBuilder.h"
 
-#include <algorithm>
 #include <cmath>
 #include <random>
 #include <stdexcept>
@@ -15,12 +14,10 @@ std::vector<ParameterVector> RandomParameterSamples(
     const ParametricMotionSpace& space,
     int sample_count,
     std::mt19937& rng) {
-    const ParameterDomain domain = space.Domain();
-
     std::vector<ParameterVector> samples;
     samples.reserve(static_cast<std::size_t>(sample_count));
     for (int sample_index = 0; sample_index < sample_count; ++sample_index) {
-        samples.push_back(domain.SampleUniform(rng));
+        samples.push_back(space.SampleSupportedParameter(rng));
     }
     return samples;
 }

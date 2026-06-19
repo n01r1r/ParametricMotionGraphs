@@ -54,6 +54,7 @@ pmg::ParametricMotionGraph MakeGraph(bool registered) {
             {{0.2f, 1.4f}, {0.2f, 0.4f, 0.4f}},
         };
         space.SetParameterCalibration(calibration);
+        space.SetParameterSupport(pmg::ParameterSupport({{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}}));
     }
 
     pmg::ParametricMotionGraph graph;
@@ -296,7 +297,7 @@ int main() {
         std::ifstream input(path);
         std::string header;
         input >> header;
-        assert(header == "PMG_GRAPH_V10");
+        assert(header == "PMG_GRAPH_V12");
     }
     const pmg::BuiltPmgArtifact loaded =
         pmg::LoadPmgArtifactText(path.string());
@@ -351,6 +352,9 @@ int main() {
                1.0e-6f);
     }
 
+    assert(loaded.graph.Node(0).motion_space.HasExplicitParameterSupport());
+    assert(std::abs(loaded.graph.Node(0).motion_space.ProjectToSupport({1.0f, 1.0f})[0] - 0.5f) < 1e-4f);
+
     const pmg::ParametricMotionSpace& original_space =
         original.graph.Node(0).motion_space;
     const pmg::ParametricMotionSpace& loaded_space =
@@ -394,6 +398,18 @@ int main() {
         assert(legacy.skeleton.NumJoints() == 0);
         assert(legacy.graph.NumNodes() == 1);
         assert(legacy.graph.NumEdges() == 1);
+    }
+
+    // GraphIo_MalformedInputFails
+    {
+        std::ofstream(path) << "PMG_GRAPH_V99\n";
+        bool rejected = false;
+        try {
+            (void)pmg::LoadPmgArtifactText(path.string());
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        assert(rejected);
     }
 
     {
@@ -448,6 +464,26 @@ int main() {
             space.ComputeLocalBlendWeights({0.5f});
         assert(std::abs(weights[1] - (0.5f * (0.5f / 0.7f))) <
                1.0e-5f);
+    }
+    {
+        // GraphIo_PreservesTriangulated2D
+        pmg::BuiltPmgArtifact artifact;
+        pmg::ParametricMotionSpace space("walk", 2);
+        std::vector<pmg::ParameterVector> vertices = {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}};
+        std::vector<std::array<int, 3>> triangles = {{0, 1, 2}};
+        space.SetParameterSupport(pmg::ParameterSupport::CreateTriangulated2D(vertices, triangles));
+        artifact.graph.AddNode("walk", std::move(space));
+
+        pmg::SavePmgArtifactText(artifact, path.string());
+        const pmg::BuiltPmgArtifact reloaded = pmg::LoadPmgArtifactText(path.string());
+        
+        const pmg::ParametricMotionSpace& reloaded_space = reloaded.graph.Node(0).motion_space;
+        assert(reloaded_space.HasExplicitParameterSupport());
+        const pmg::ParameterSupport& support = *reloaded_space.ExplicitSupport();
+        assert(support.GetType() == pmg::ParameterSupport::Type::kTriangulated2D);
+        assert(support.NumVertices() == 3);
+        assert(support.Triangles().size() == 1);
+        assert(support.Triangles()[0][0] == 0 && support.Triangles()[0][1] == 1 && support.Triangles()[0][2] == 2);
     }
 
     std::filesystem::remove(path);

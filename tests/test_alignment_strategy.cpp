@@ -110,8 +110,44 @@ int main() {
         assert(rejected_mismatch);
     }
 
-    // The seam decouples timing from alignment: an arbitrary adapter plugs into
-    // the controller, gets called on transitions, and the run still completes.
+    // AlignmentStrategyCalledOnChangedSelfEdgeTransition: a self-edge with a
+    // changed effective parameter is eligible after the phase gate.
+    {
+        const pmg::Skeleton skeleton = MakeSkeleton();
+        pmg::ParametricMotionSpace space("walk", 1);
+        space.AddExample({0.0f}, MakeWalkClip(0.0f));
+        space.AddExample({1.0f}, MakeWalkClip(1.0f));
+
+        pmg::ParametricMotionGraph graph;
+        const int node = graph.AddNode("walk", space);
+        pmg::PmgBuilderConfig config;
+        config.source_sample_count = 4;
+        config.target_sample_count = 8;
+        config.generated_frame_count = 24;
+        config.good_transition_threshold = 1.0e9f;
+        config.bad_transition_threshold = 2.0e9f;
+        pmg::PmgEdge edge =
+            pmg::PmgBuilder::BuildEdge(skeleton, node, node, space, space, config);
+        assert(!edge.samples.empty());
+        graph.AddEdge(edge);
+
+        CountingAlignment alignment;
+        pmg::RuntimeController controller(graph, alignment);
+        controller.Start(node, {0.5f}, 30.0f);
+
+        pmg::RuntimeControlRequest request;
+        request.desired_node = node;
+        request.desired_parameter = {0.75f};
+        for (int step = 0; step < 240; ++step) {
+            controller.Update(1.0f / 30.0f, request);
+        }
+
+        assert(alignment.calls >= 1);                 // the seam was exercised
+        assert(controller.CompletedTransitions() >= 1);
+    }
+
+    // SameNodeSameParameterDoesNotScheduleTransition: a same-node request with
+    // the same effective parameter is a runtime no-op.
     {
         const pmg::Skeleton skeleton = MakeSkeleton();
         pmg::ParametricMotionSpace space("walk", 1);
@@ -142,8 +178,8 @@ int main() {
             controller.Update(1.0f / 30.0f, request);
         }
 
-        assert(alignment.calls >= 1);                 // the seam was exercised
-        assert(controller.CompletedTransitions() >= 1);
+        assert(alignment.calls == 0);
+        assert(controller.CompletedTransitions() == 0);
     }
 
     return 0;

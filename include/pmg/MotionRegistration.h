@@ -58,7 +58,7 @@ void RegisterSpaceByContacts(
 struct DtwRefineSettings {
     int window_size = 5;            // frames per point cloud in the DTW cost
     int max_knots_per_segment = 8;  // interior warp knots sampled per anchor segment
-    float smoothing_strength = 4.0f;  // cubic smoothing-spline penalty (lambda)
+    float smoothing_strength = 4.0f;  // nonnegative cubic smoothing penalty (lambda)
                                       // applied to the DTW correspondence; 0
                                       // keeps the raw staircase correspondence
 };

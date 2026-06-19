@@ -27,19 +27,22 @@ struct GraphPayloadFormat {
     bool has_transition_convention;  // V8+ store the edge transition-window convention
     bool has_transition_distance;    // V9+ store per-sample build-time distance D
     bool has_transition_metric_config;  // V10+ store metric kind/config per edge build
+    bool has_parameter_support;      // V11+ store explicit parameter support
 };
 
 std::optional<GraphPayloadFormat> FormatForHeader(const std::string& header) {
-    //                                       meta+skel warp  calib vector target quoted conv   dist   metric
-    if (header == "PMG_GRAPH_V10") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true};
-    if (header == "PMG_GRAPH_V9")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  false};
-    if (header == "PMG_GRAPH_V8")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  false, false};
-    if (header == "PMG_GRAPH_V7")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false, false, false};
-    if (header == "PMG_GRAPH_V6")  return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false, false, false};
-    if (header == "PMG_GRAPH_V5")  return GraphPayloadFormat{true,  true,  true,  false, false, true,  false, false, false};
-    if (header == "PMG_GRAPH_V4")  return GraphPayloadFormat{true,  true,  false, false, false, true,  false, false, false};
-    if (header == "PMG_GRAPH_V3")  return GraphPayloadFormat{false, true,  false, false, false, false, false, false, false};
-    if (header == "PMG_GRAPH_V2")  return GraphPayloadFormat{false, false, false, false, false, false, false, false, false};
+    //                                       meta+skel warp  calib vector target quoted conv   dist   metric support
+    if (header == "PMG_GRAPH_V12") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true};
+    if (header == "PMG_GRAPH_V11") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true};
+    if (header == "PMG_GRAPH_V10") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  false};
+    if (header == "PMG_GRAPH_V9")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  false, false};
+    if (header == "PMG_GRAPH_V8")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  false, false, false};
+    if (header == "PMG_GRAPH_V7")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V6")  return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V5")  return GraphPayloadFormat{true,  true,  true,  false, false, true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V4")  return GraphPayloadFormat{true,  true,  false, false, false, true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V3")  return GraphPayloadFormat{false, true,  false, false, false, false, false, false, false, false};
+    if (header == "PMG_GRAPH_V2")  return GraphPayloadFormat{false, false, false, false, false, false, false, false, false, false};
     return std::nullopt;
 }
 
@@ -344,6 +347,30 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
                 output << '\n';
             }
         }
+        if (space.HasExplicitParameterSupport()) {
+            const ParameterSupport& support = *space.ExplicitSupport();
+            if (support.GetType() == ParameterSupport::Type::kSimplex) {
+                output << "support_simplex " << support.NumVertices() << '\n';
+                for (const ParameterVector& vertex : support.Vertices()) {
+                    output << "vertex ";
+                    WriteParameter(output, vertex);
+                    output << '\n';
+                }
+            } else if (support.GetType() == ParameterSupport::Type::kTriangulated2D) {
+                const auto& triangles = support.Triangles();
+                output << "support_triangulated_2d " << support.NumVertices() << ' ' << triangles.size() << '\n';
+                for (const ParameterVector& vertex : support.Vertices()) {
+                    output << "vertex ";
+                    WriteParameter(output, vertex);
+                    output << '\n';
+                }
+                for (const auto& t : triangles) {
+                    output << "triangle " << t[0] << ' ' << t[1] << ' ' << t[2] << '\n';
+                }
+            }
+        } else {
+            output << "support_none\n";
+        }
     }
 
     output << "edges " << graph.NumEdges() << '\n';
@@ -514,9 +541,7 @@ ParametricMotionGraph ReadGraphPayload(
                             "LoadPmgArtifactText: invalid empty calibration record");
                     }
                 }
-                graph.AddNode(node_name, std::move(space));
-                continue;
-            }
+            } else {
 
             int metric_value = -1;
             input >> keyword >> metric_value;
@@ -618,6 +643,59 @@ ParametricMotionGraph ReadGraphPayload(
                         ? range
                         : 1.0f};
                 space.SetParameterCalibration(std::move(calibration));
+            }
+        }
+        }
+        if (format.has_parameter_support) {
+            input >> keyword;
+            if (keyword == "support_simplex") {
+                int vertex_count = 0;
+                input >> vertex_count;
+                if (vertex_count <= 0) {
+                    throw std::runtime_error("LoadPmgArtifactText: invalid support_simplex record");
+                }
+                std::vector<ParameterVector> vertices;
+                vertices.reserve(vertex_count);
+                for (int v = 0; v < vertex_count; ++v) {
+                    input >> keyword;
+                    if (keyword != "vertex") {
+                        throw std::runtime_error("LoadPmgArtifactText: expected vertex record");
+                    }
+                    vertices.push_back(ReadParameter(input));
+                }
+                space.SetParameterSupport(ParameterSupport(std::move(vertices)));
+            } else if (keyword == "support_triangulated_2d") {
+                int vertex_count = 0;
+                int triangle_count = 0;
+                input >> vertex_count >> triangle_count;
+                if (vertex_count <= 0 || triangle_count <= 0) {
+                    throw std::runtime_error("LoadPmgArtifactText: invalid support_triangulated_2d record");
+                }
+                std::vector<ParameterVector> vertices;
+                vertices.reserve(vertex_count);
+                for (int v = 0; v < vertex_count; ++v) {
+                    input >> keyword;
+                    if (keyword != "vertex") {
+                        throw std::runtime_error("LoadPmgArtifactText: expected vertex record");
+                    }
+                    vertices.push_back(ReadParameter(input));
+                }
+                std::vector<std::array<int, 3>> triangles;
+                triangles.reserve(triangle_count);
+                for (int t = 0; t < triangle_count; ++t) {
+                    input >> keyword;
+                    if (keyword != "triangle") {
+                        throw std::runtime_error("LoadPmgArtifactText: expected triangle record");
+                    }
+                    std::array<int, 3> tri;
+                    input >> tri[0] >> tri[1] >> tri[2];
+                    triangles.push_back(tri);
+                }
+                space.SetParameterSupport(ParameterSupport::CreateTriangulated2D(std::move(vertices), std::move(triangles)));
+            } else if (keyword == "support_none") {
+                // explicit lack of support
+            } else {
+                throw std::runtime_error("LoadPmgArtifactText: expected support record");
             }
         }
         graph.AddNode(node_name, std::move(space));
@@ -879,7 +957,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V10\n";
+    output << "PMG_GRAPH_V12\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
@@ -897,7 +975,7 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     const std::optional<GraphPayloadFormat> format = FormatForHeader(header);
     if (!format) {
         throw std::runtime_error(
-            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V10");
+            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V12");
     }
 
     BuiltPmgArtifact artifact;

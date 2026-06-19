@@ -193,8 +193,21 @@ int main() {
     assert(full_corner.nodes[0].has_expect_spanned_axes);
     assert(full_corner.nodes[0].expect_spanned_axes == 2);
 
-    // The same node missing the (1,1) corner is a degenerate simplex and fails
-    // the corner_coverage full claim.
+    const std::filesystem::path simplex_spec_path = directory / "simplex.txt";
+    {
+        std::ofstream simplex_spec(simplex_spec_path);
+        simplex_spec << "node g 2\n"
+                     << "parameter_support g simplex\n"
+                     << "example g 0 0 walk_a.bvh\n"
+                     << "example g 1 0 walk_a.bvh\n"
+                     << "example g 0 1 walk_a.bvh\n";
+    }
+    const pmg::GraphSpec simplex =
+        pmg::LoadGraphSpec(simplex_spec_path.string());
+    assert(simplex.nodes[0].parameter_support_simplex);
+
+    // The same node missing the (1,1) corner is a valid triangle, but fails the
+    // rectangular corner_coverage full claim.
     const std::filesystem::path missing_corner_spec_path =
         directory / "missing_corner.txt";
     {
@@ -231,6 +244,24 @@ int main() {
         collinear_threw = true;
     }
     assert(collinear_threw);
+
+    const std::filesystem::path collinear_simplex_spec_path =
+        directory / "collinear_simplex.txt";
+    {
+        std::ofstream collinear_simplex_spec(collinear_simplex_spec_path);
+        collinear_simplex_spec << "node g 2\n"
+                               << "parameter_support g simplex\n"
+                               << "example g 0 0 walk_a.bvh\n"
+                               << "example g 1 0 walk_a.bvh\n"
+                               << "example g 2 0 walk_a.bvh\n";
+    }
+    bool collinear_simplex_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(collinear_simplex_spec_path.string());
+    } catch (const std::runtime_error&) {
+        collinear_simplex_threw = true;
+    }
+    assert(collinear_simplex_threw);
 
     pmg::PmgBuilderConfig config;
     config.source_sample_count = 1;
@@ -277,6 +308,43 @@ int main() {
         invalid_joint_threw = true;
     }
     assert(invalid_joint_threw);
+
+    // GraphSpec_ParsesTriangulated2D
+    const std::filesystem::path triangulated_spec_path = directory / "triangulated.txt";
+    {
+        std::ofstream triangulated_spec(triangulated_spec_path);
+        triangulated_spec << "node g 2\n"
+                          << "parameter_support g triangulated_2d\n"
+                          << "example g -0.3 0.0 walk_a.bvh\n"
+                          << "example g 0.0 0.0 walk_a.bvh\n"
+                          << "example g 1.0 0.0 walk_a.bvh\n"
+                          << "example g 0.0 1.0 walk_a.bvh\n"
+                          << "example g 0.15 0.75 walk_a.bvh\n"
+                          << "triangle g 0 1 4\n"
+                          << "triangle g 1 2 4\n"
+                          << "triangle g 2 3 4\n"
+                          << "triangle g 3 0 4\n";
+    }
+    const pmg::GraphSpec triangulated_spec_parsed =
+        pmg::LoadGraphSpec(triangulated_spec_path.string());
+    assert(triangulated_spec_parsed.nodes[0].parameter_support_triangulated_2d);
+    assert(triangulated_spec_parsed.nodes[0].parameter_triangles.size() == 4);
+
+    const std::filesystem::path triangulated_invalid_spec_path = directory / "triangulated_invalid.txt";
+    {
+        std::ofstream triangulated_invalid_spec(triangulated_invalid_spec_path);
+        triangulated_invalid_spec << "node g 2\n"
+                                  << "parameter_support g triangulated_2d\n"
+                                  << "example g 0.0 0.0 walk_a.bvh\n"
+                                  << "triangle g 0 1 2\n"; // invalid indices
+    }
+    bool triangulated_invalid_threw = false;
+    try {
+        (void)pmg::LoadGraphSpec(triangulated_invalid_spec_path.string());
+    } catch (const std::runtime_error&) {
+        triangulated_invalid_threw = true;
+    }
+    assert(triangulated_invalid_threw);
 
     std::filesystem::remove_all(directory);
     return 0;

@@ -1,8 +1,9 @@
 #include "pmg/GraphSpec.h"
 
-#include "pmg/MotionSpacePreparation.h"
+#include "pmg/PmgOfflinePipeline.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -67,6 +68,58 @@ ParameterMetric ParseParameterMetric(
     throw std::runtime_error(
         "LoadGraphSpec line " + std::to_string(line_number) +
         ": unknown parameter metric '" + metric_name + "'");
+}
+
+bool HasFullSimplexRank(const std::vector<const ParameterVector*>& params,
+                        int dimension) {
+    constexpr float kRankEpsilon = 1.0e-6f;
+    std::vector<std::vector<float>> matrix(
+        static_cast<std::size_t>(dimension),
+        std::vector<float>(static_cast<std::size_t>(dimension), 0.0f));
+    for (int column = 0; column < dimension; ++column) {
+        for (int row = 0; row < dimension; ++row) {
+            matrix[static_cast<std::size_t>(row)][static_cast<std::size_t>(column)] =
+                (*params[static_cast<std::size_t>(column + 1)])[row] -
+                (*params.front())[row];
+        }
+    }
+
+    int rank = 0;
+    for (int column = 0; column < dimension; ++column) {
+        int pivot = rank;
+        for (int row = rank + 1; row < dimension; ++row) {
+            if (std::fabs(matrix[static_cast<std::size_t>(row)]
+                                [static_cast<std::size_t>(column)]) >
+                std::fabs(matrix[static_cast<std::size_t>(pivot)]
+                                [static_cast<std::size_t>(column)])) {
+                pivot = row;
+            }
+        }
+        if (std::fabs(matrix[static_cast<std::size_t>(pivot)]
+                            [static_cast<std::size_t>(column)]) <= kRankEpsilon) {
+            continue;
+        }
+        std::swap(matrix[static_cast<std::size_t>(rank)],
+                  matrix[static_cast<std::size_t>(pivot)]);
+        const float pivot_value =
+            matrix[static_cast<std::size_t>(rank)]
+                  [static_cast<std::size_t>(column)];
+        for (int row = rank + 1; row < dimension; ++row) {
+            const float scale =
+                matrix[static_cast<std::size_t>(row)]
+                      [static_cast<std::size_t>(column)] /
+                pivot_value;
+            for (int col = column; col < dimension; ++col) {
+                matrix[static_cast<std::size_t>(row)]
+                      [static_cast<std::size_t>(col)] -=
+                    scale *
+                    matrix[static_cast<std::size_t>(rank)]
+                          [static_cast<std::size_t>(col)];
+            }
+        }
+        ++rank;
+    }
+    return rank == dimension;
 }
 
 // Checks each node's declared `expect` clauses against its parsed examples so a
@@ -151,6 +204,97 @@ void ValidateNodeExpectations(const GraphSpec& spec) {
                         "' expects corner_coverage full but a corner of its "
                         "parameter box has no example");
                 }
+            }
+        }
+    }
+}
+
+void ValidateParameterSupport(const GraphSpec& spec) {
+    for (const GraphSpecNode& node : spec.nodes) {
+        if (!node.parameter_support_simplex) {
+            continue;
+        }
+        std::vector<const ParameterVector*> params;
+        for (const GraphSpecExample& example : spec.examples) {
+            if (example.node_name == node.name) {
+                params.push_back(&example.parameter);
+            }
+        }
+        const int expected_count = node.parameter_dimension + 1;
+        if (static_cast<int>(params.size()) != expected_count) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' declares simplex parameter_support but has " +
+                std::to_string(params.size()) + " examples; expected " +
+                std::to_string(expected_count));
+        }
+        if (!HasFullSimplexRank(params, node.parameter_dimension)) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' declares simplex parameter_support but its examples are "
+                "not affinely independent");
+        }
+    }
+}
+
+void ValidateTriangulatedSupport(const GraphSpec& spec) {
+    for (const GraphSpecNode& node : spec.nodes) {
+        if (!node.parameter_support_triangulated_2d) {
+            continue;
+        }
+        if (node.parameter_dimension != 2) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' triangulated_2d requires parameter dimension == 2");
+        }
+        if (node.parameter_triangles.empty()) {
+            throw std::runtime_error(
+                "LoadGraphSpec: node '" + node.name +
+                "' triangulated_2d requires at least one triangle");
+        }
+
+        std::vector<const ParameterVector*> params;
+        for (const GraphSpecExample& example : spec.examples) {
+            if (example.node_name == node.name) {
+                params.push_back(&example.parameter);
+            }
+        }
+
+        std::vector<bool> covered(params.size(), false);
+        for (const std::array<int, 3>& t : node.parameter_triangles) {
+            for (int idx : t) {
+                if (idx < 0 || idx >= static_cast<int>(params.size())) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec: node '" + node.name +
+                        "' triangle index out of bounds");
+                }
+            }
+            if (t[0] == t[1] || t[1] == t[2] || t[2] == t[0]) {
+                throw std::runtime_error(
+                    "LoadGraphSpec: node '" + node.name +
+                    "' duplicate vertex index inside a triangle");
+            }
+
+            const ParameterVector& p0 = *params[static_cast<std::size_t>(t[0])];
+            const ParameterVector& p1 = *params[static_cast<std::size_t>(t[1])];
+            const ParameterVector& p2 = *params[static_cast<std::size_t>(t[2])];
+            float cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
+            if (std::abs(cross) <= 1.0e-5f) {
+                throw std::runtime_error(
+                    "LoadGraphSpec: node '" + node.name +
+                    "' triangle area must be > epsilon");
+            }
+
+            covered[static_cast<std::size_t>(t[0])] = true;
+            covered[static_cast<std::size_t>(t[1])] = true;
+            covered[static_cast<std::size_t>(t[2])] = true;
+        }
+
+        for (std::size_t i = 0; i < covered.size(); ++i) {
+            if (!covered[i]) {
+                throw std::runtime_error(
+                    "LoadGraphSpec: node '" + node.name +
+                    "' example is not covered by any triangle");
             }
         }
     }
@@ -381,6 +525,71 @@ GraphSpec LoadGraphSpec(const std::string& path) {
             }
             node_it->has_calibration_sampling_config = true;
             node_it->calibration_samples_per_axis = samples_per_axis;
+            continue;
+        }
+
+        if (keyword == "parameter_support") {
+            std::string node_name;
+            std::string support_shape;
+            if (!(line >> node_name >> support_shape)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": expected parameter_support <node> <simplex|triangulated_2d>");
+            }
+            auto node_it = std::find_if(
+                spec.nodes.begin(), spec.nodes.end(),
+                [&](const GraphSpecNode& node) {
+                    return node.name == node_name;
+                });
+            if (node_it == spec.nodes.end()) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": parameter_support references unknown node '" +
+                    node_name + "'");
+            }
+            if (support_shape == "simplex") {
+                if (node_it->parameter_support_simplex || node_it->parameter_support_triangulated_2d) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec line " + std::to_string(line_number) +
+                        ": duplicate parameter_support for node '" + node_name + "'");
+                }
+                node_it->parameter_support_simplex = true;
+            } else if (support_shape == "triangulated_2d") {
+                if (node_it->parameter_support_simplex || node_it->parameter_support_triangulated_2d) {
+                    throw std::runtime_error(
+                        "LoadGraphSpec line " + std::to_string(line_number) +
+                        ": duplicate parameter_support for node '" + node_name + "'");
+                }
+                node_it->parameter_support_triangulated_2d = true;
+            } else {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": parameter_support only supports 'simplex' and 'triangulated_2d'");
+            }
+            continue;
+        }
+
+        if (keyword == "triangle") {
+            std::string node_name;
+            int i0 = 0;
+            int i1 = 0;
+            int i2 = 0;
+            if (!(line >> node_name >> i0 >> i1 >> i2)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": expected triangle <node> <i0> <i1> <i2>");
+            }
+            auto node_it = std::find_if(
+                spec.nodes.begin(), spec.nodes.end(),
+                [&](const GraphSpecNode& node) {
+                    return node.name == node_name;
+                });
+            if (node_it == spec.nodes.end()) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": triangle references unknown node '" + node_name + "'");
+            }
+            node_it->parameter_triangles.push_back({i0, i1, i2});
             continue;
         }
 
@@ -655,83 +864,15 @@ GraphSpec LoadGraphSpec(const std::string& path) {
         }
     }
     ValidateNodeExpectations(spec);
+    ValidateParameterSupport(spec);
+    ValidateTriangulatedSupport(spec);
     return spec;
 }
 
 BuiltPmgArtifact BuildPmgArtifactFromSpec(
     const GraphSpec& spec,
     const ArtifactBuildConfig& config) {
-    BuiltPmgArtifact artifact;
-    MotionSpacePreparationConfig preparation_config;
-    preparation_config.default_cycle_joint = config.default_cycle_joint;
-    preparation_config.default_contact_joints = config.default_contact_joints;
-    preparation_config.default_min_contact_frames =
-        config.default_min_contact_frames;
-    preparation_config.default_dtw_refine = config.default_dtw_refine;
-    preparation_config.calibration_frames_per_second =
-        config.default_edge_config.generated_frames_per_second;
-    preparation_config.skeleton_offset_tolerance =
-        config.skeleton_offset_tolerance;
-    const PreparedMotionSpaces prepared =
-        PrepareMotionSpaces(spec, preparation_config);
-
-    artifact.skeleton = prepared.skeleton;
-    artifact.metadata.source_bvh_paths = prepared.source_bvh_paths;
-
-    std::map<std::string, int> node_indices;
-    for (const GraphSpecNode& node : spec.nodes) {
-        const PreparedMotionSpace& prepared_node = prepared.Node(node.name);
-        node_indices.emplace(
-            node.name,
-            artifact.graph.AddNode(node.name, prepared_node.production));
-        artifact.metadata.node_registrations.push_back(
-            prepared_node.registration);
-    }
-
-    artifact.metadata.generated_frame_count =
-        config.default_edge_config.generated_frame_count;
-    artifact.metadata.frames_per_second =
-        config.default_edge_config.generated_frames_per_second;
-    if (artifact.metadata.generated_frame_count <= 1 ||
-        artifact.metadata.frames_per_second <= 0.0f) {
-        throw std::runtime_error(
-            "BuildPmgArtifactFromSpec: generated runtime frame settings are invalid");
-    }
-
-    for (const GraphSpecEdge& edge_spec : spec.edges) {
-        PmgBuilderConfig edge_config =
-            edge_spec.has_build_config ? edge_spec.build_config
-                                       : config.default_edge_config;
-        edge_config.generated_frame_count = artifact.metadata.generated_frame_count;
-        edge_config.generated_frames_per_second = artifact.metadata.frames_per_second;
-
-        const int source_index = node_indices.at(edge_spec.source_node);
-        const int target_index = node_indices.at(edge_spec.target_node);
-        EdgeBuildResult result = PmgBuilder::BuildEdgeWithReport(
-            artifact.skeleton, source_index, target_index,
-            artifact.graph.Node(source_index).motion_space,
-            artifact.graph.Node(target_index).motion_space, edge_config);
-        EdgeBuildMetadata metadata;
-        metadata.source_node = edge_spec.source_node;
-        metadata.target_node = edge_spec.target_node;
-        metadata.config = edge_config;
-        metadata.report = result.report;
-        artifact.metadata.edge_builds.push_back(metadata);
-
-        // Tolerant build: the reject is recorded in edge_builds above (visible
-        // via the report and the CLI warning), and the edge is skipped instead
-        // of aborting -- consistent with the viewer and with paper semantics.
-        if (result.report.edge_created) {
-            artifact.graph.AddEdge(std::move(result.edge));
-        }
-    }
-
-    if (!spec.edges.empty() && artifact.graph.NumEdges() == 0) {
-        throw std::runtime_error(
-            "BuildPmgArtifactFromSpec: every declared edge was rejected; no "
-            "transitions built");
-    }
-    return artifact;
+    return BuildPmgOfflinePipeline(spec, config);
 }
 
 }  // namespace pmg

@@ -4,7 +4,7 @@ This directory intentionally lists only specs that are currently usable with the
 
 ## Presentation / viewer demos
 
-### `demo_walk_2d_triangle.pmg_spec`
+### `demo_walk_2d_triangulated.pmg_spec`
 
 Primary demo.
 
@@ -14,7 +14,9 @@ Use this for the smooth sparse parametric locomotion viewer demo. It places wide
 walk_2d -> walk_2d
 ```
 
-This matches the current corpus. It does **not** claim a full rectangular 2-D locomotion family because the `(tight turn, jog)` corner is missing.
+The primary demo uses a triangulated 2D scattered support over five authored locomotion anchors.
+The spec declares `parameter_support walk_2d triangulated_2d`, so loading validates the authored examples and the explicitly provided triangle indices.
+In the viewer, use Graph -> Coverage to see that triangulated mesh overlaid on the node's domain; the missing corners are marked as unsampled. Use Graph -> Runtime -> Transition to interact with the 2D canvas and compare the requested target parameter with the actual transition parameter projected into authored support and the current edge's reachable box.
 
 ### `demo_walk_self_edge_minimal.pmg_spec`
 

@@ -432,7 +432,7 @@ void WriteArtifactReports(
     {
         std::ofstream config(output_directory / "config.json");
         config << "{\n"
-               << "  \"format\": \"PMG_GRAPH_V10\",\n"
+               << "  \"format\": \"PMG_GRAPH_V12\",\n"
                << "  \"units\": \"" << JsonEscape(artifact.metadata.units) << "\",\n"
                << "  \"generated_frame_count\": "
                << artifact.metadata.generated_frame_count << ",\n"
@@ -706,7 +706,7 @@ int BuildGraphCommand(const std::string& spec_path,
     pmg::SavePmgArtifactText(artifact, output_path);
     WriteArtifactReports(artifact, artifact_path, build_seconds);
     std::cout << "wrote graph: " << output_path << "\n";
-    std::cout << "format=PMG_GRAPH_V10\n";
+    std::cout << "format=PMG_GRAPH_V12\n";
     std::cout << "nodes=" << artifact.graph.NumNodes()
               << " edges=" << artifact.graph.NumEdges() << "\n";
     for (const pmg::EdgeBuildMetadata& edge_build : artifact.metadata.edge_builds) {

@@ -3,22 +3,14 @@
 #include "pmg/MotionClip.h"
 #include "pmg/ParameterVector.h"
 #include "pmg/ParameterDomain.h"
+#include "pmg/ParameterSupport.h"
 #include "pmg/TimeWarp.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace pmg {
-
-class ParametricMotionSpace;
-
-namespace legacy {
-MotionClip GenerateClipWithFrameCount(
-    const ParametricMotionSpace& space,
-    const ParameterVector& parameter,
-    int frame_count,
-    float frames_per_second);
-}  // namespace legacy
 
 struct ExampleMotion {
     ParameterVector parameter;
@@ -88,6 +80,14 @@ public:
     bool HasParameterCalibration() const;
     const ParameterCalibration& ParameterCalibrationData() const;
 
+    void SetParameterSupport(ParameterSupport support);
+    const std::optional<ParameterSupport>& ExplicitSupport() const;
+    bool HasExplicitParameterSupport() const;
+
+    ParameterVector ProjectToSupport(const ParameterVector& parameter) const;
+    bool ContainsSupportedParameter(const ParameterVector& parameter) const;
+    ParameterVector SampleSupportedParameter(std::mt19937& rng) const;
+
     std::vector<float> ComputeLocalBlendWeights(
         const ParameterVector& parameter) const;
 
@@ -135,6 +135,7 @@ private:
     std::vector<TimeWarp> example_time_warps_;
     // Empty metrics means uncalibrated (Shepard weights).
     ParameterCalibration parameter_calibration_;
+    std::optional<ParameterSupport> parameter_support_;
 
     friend ParameterCalibration CalibrateParameterMetrics(
         const ParametricMotionSpace& space,
@@ -146,15 +147,11 @@ private:
         ParameterMetric metric,
         float frames_per_second,
         int samples_per_segment);
-    friend MotionClip legacy::GenerateClipWithFrameCount(
-        const ParametricMotionSpace& space,
-        const ParameterVector& parameter,
-        int frame_count,
-        float frames_per_second);
 };
 
 // Offline multidimensional calibration. Samples a deterministic regular grid
-// over the authored parameter domain, generates each uncalibrated blend, and
+// over the authored parameter domain (projected to explicit support if present),
+// generates each uncalibrated blend, and
 // records the resulting metric vector and full example-weight vector.
 // metrics.size() must equal the space parameter dimension.
 ParameterCalibration CalibrateParameterMetrics(

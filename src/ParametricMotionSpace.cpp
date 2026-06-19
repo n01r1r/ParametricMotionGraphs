@@ -209,6 +209,42 @@ const ParameterCalibration& ParametricMotionSpace::ParameterCalibrationData() co
     return parameter_calibration_;
 }
 
+void ParametricMotionSpace::SetParameterSupport(ParameterSupport support) {
+    if (support.Dimension() != parameter_dimension_) {
+        throw std::runtime_error("ParametricMotionSpace::SetParameterSupport: dimension mismatch");
+    }
+    parameter_support_ = std::move(support);
+}
+
+const std::optional<ParameterSupport>& ParametricMotionSpace::ExplicitSupport() const {
+    return parameter_support_;
+}
+
+bool ParametricMotionSpace::HasExplicitParameterSupport() const {
+    return parameter_support_.has_value();
+}
+
+ParameterVector ParametricMotionSpace::ProjectToSupport(const ParameterVector& parameter) const {
+    if (HasExplicitParameterSupport()) {
+        return parameter_support_->Project(parameter);
+    }
+    return ClampToDomain(parameter);
+}
+
+bool ParametricMotionSpace::ContainsSupportedParameter(const ParameterVector& parameter) const {
+    if (HasExplicitParameterSupport()) {
+        return parameter_support_->Contains(parameter);
+    }
+    return Domain().Bounds().Contains(parameter);
+}
+
+ParameterVector ParametricMotionSpace::SampleSupportedParameter(std::mt19937& rng) const {
+    if (HasExplicitParameterSupport()) {
+        return parameter_support_->SampleUniform(rng);
+    }
+    return Domain().SampleUniform(rng);
+}
+
 std::vector<float> ParametricMotionSpace::CalibratedBlendWeights(
     const ParameterVector& parameter) const {
     const ParameterCalibration& calibration = parameter_calibration_;
@@ -475,6 +511,9 @@ ParameterCalibration CalibrateParameterMetrics(
 
     const ParameterDomain domain = space.Domain();
     const ParameterAabb& bounds = domain.Bounds();
+    std::vector<ParameterVector> processed_parameters;
+    processed_parameters.reserve(grid_sample_count);
+
     for (std::size_t grid_index = 0;
          grid_index < grid_sample_count; ++grid_index) {
         std::size_t remaining_index = grid_index;
@@ -496,8 +535,22 @@ ParameterCalibration CalibrateParameterMetrics(
                     (bounds.max_corner[static_cast<std::size_t>(dimension)] -
                      bounds.min_corner[static_cast<std::size_t>(dimension)]);
         }
+
+        ParameterVector supported_parameter = space.ProjectToSupport(parameter);
+        bool is_duplicate = false;
+        for (const ParameterVector& existing : processed_parameters) {
+            if (Distance(supported_parameter, existing) < kExactParameterThreshold) {
+                is_duplicate = true;
+                break;
+            }
+        }
+        if (is_duplicate) {
+            continue;
+        }
+        processed_parameters.push_back(supported_parameter);
+
         std::vector<float> weights =
-            space.UncalibratedBlendWeights(parameter);
+            space.UncalibratedBlendWeights(supported_parameter);
         calibration.samples.push_back(
             {generate_and_measure(weights), std::move(weights)});
     }
@@ -528,14 +581,30 @@ std::vector<float> ParametricMotionSpace::ComputeLocalBlendWeights(
         throw std::runtime_error("ParametricMotionSpace::ComputeLocalBlendWeights: no examples available");
     }
 
+    const ParameterVector supported_parameter = ProjectToSupport(parameter);
+
     if (HasParameterCalibration()) {
-        return CalibratedBlendWeights(parameter);
+        return CalibratedBlendWeights(supported_parameter);
     }
-    return UncalibratedBlendWeights(parameter);
+    return UncalibratedBlendWeights(supported_parameter);
 }
 
 std::vector<float> ParametricMotionSpace::UncalibratedBlendWeights(
     const ParameterVector& parameter) const {
+
+    if (HasExplicitParameterSupport() && parameter_support_->NumVertices() == examples_.size()) {
+        bool order_matches = true;
+        for (std::size_t i = 0; i < examples_.size(); ++i) {
+            if (Distance(parameter_support_->Vertices()[i], examples_[i].parameter) > kExactParameterThreshold) {
+                order_matches = false;
+                break;
+            }
+        }
+        if (order_matches) {
+            return parameter_support_->BarycentricWeights(parameter);
+        }
+    }
+
     std::vector<float> weights(examples_.size(), 0.0f);
     std::vector<std::size_t> order(examples_.size());
     std::vector<float> distances(examples_.size(), 0.0f);
@@ -591,9 +660,9 @@ std::vector<float> ParametricMotionSpace::UncalibratedBlendWeights(
 Pose ParametricMotionSpace::EvaluatePose(
     const ParameterVector& parameter,
     float normalized_phase) const {
-    const ParameterVector clamped_parameter = ClampToDomain(parameter);
+    const ParameterVector supported_parameter = ProjectToSupport(parameter);
     return EvaluatePoseFromWeights(
-        ComputeLocalBlendWeights(clamped_parameter), normalized_phase);
+        ComputeLocalBlendWeights(supported_parameter), normalized_phase);
 }
 
 Pose ParametricMotionSpace::EvaluatePoseFromWeights(
@@ -613,8 +682,8 @@ Pose ParametricMotionSpace::EvaluatePoseFromWeights(
 
 float ParametricMotionSpace::BlendedDurationSeconds(
     const ParameterVector& parameter) const {
-    const ParameterVector clamped_parameter = ClampToDomain(parameter);
-    const std::vector<float> weights = ComputeLocalBlendWeights(clamped_parameter);
+    const ParameterVector supported_parameter = ProjectToSupport(parameter);
+    const std::vector<float> weights = ComputeLocalBlendWeights(supported_parameter);
 
     float duration = 0.0f;
     for (std::size_t example_index = 0; example_index < examples_.size(); ++example_index) {
@@ -630,12 +699,12 @@ MotionClip ParametricMotionSpace::GenerateClip(
     if (frames_per_second <= 0.0f) {
         throw std::runtime_error("ParametricMotionSpace::GenerateClip: frames_per_second must be positive");
     }
-    const ParameterVector clamped_parameter = ClampToDomain(parameter);
-    const float duration = BlendedDurationSeconds(clamped_parameter);
+    const ParameterVector supported_parameter = ProjectToSupport(parameter);
+    const float duration = BlendedDurationSeconds(supported_parameter);
     const int frame_count = std::max(
         2, static_cast<int>(std::lround(duration * frames_per_second)) + 1);
     return GenerateClipFromWeights(
-        ComputeLocalBlendWeights(clamped_parameter), frame_count, frames_per_second);
+        ComputeLocalBlendWeights(supported_parameter), frame_count, frames_per_second);
 }
 
 MotionClip ParametricMotionSpace::GenerateClipFromWeights(
