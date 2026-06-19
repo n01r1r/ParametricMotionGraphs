@@ -30,6 +30,7 @@
 #include <map>
 #include <optional>
 #include <random>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -1686,6 +1687,1181 @@ int RootCanonicalizationAuditCommand(
     return 0;
 }
 
+struct RegistrationPhaseAlignmentAuditOptions {
+    std::string spec_path;
+    std::string output_csv;
+    std::string output_md;
+};
+
+struct RegistrationPhaseAlignmentClipRow {
+    std::string node_name;
+    std::string clip_name;
+    std::string bvh_path;
+    pmg::ParameterVector parameter;
+    int frame_count = 0;
+    float frames_per_second = 0.0f;
+    pmg::RootStartSummary normalized;
+    pmg::CyclicContinuityRecord seam;
+    bool start_is_origin = false;
+    bool heading_is_canonical = false;
+    std::vector<int> source_phase_frames;
+    std::vector<int> target_phase_frames;
+    std::string conclusion;
+};
+
+struct RegistrationPhaseAlignmentPairRow {
+    std::string node_name;
+    std::string source_clip_name;
+    std::string target_clip_name;
+    std::string source_bvh_path;
+    std::string target_bvh_path;
+    pmg::ParameterVector source_parameter;
+    pmg::ParameterVector target_parameter;
+    std::vector<int> source_phase_frames;
+    std::vector<int> target_phase_frames;
+    float root_trajectory_rmse = 0.0f;
+    float phase_alignment_offset = 0.0f;
+    float pose_seam_distance = 0.0f;
+    std::string pose_seam_class;
+    float velocity_seam_cost = 0.0f;
+    float root_motion_cost = 0.0f;
+    float foot_mismatch_ratio = -1.0f;
+    bool safe_for_transition_sampling = false;
+    bool jog_like_pair = false;
+    std::string conclusion;
+};
+
+struct RegistrationPhaseAlignmentAuditData {
+    std::vector<RegistrationPhaseAlignmentClipRow> clip_rows;
+    std::vector<RegistrationPhaseAlignmentPairRow> pair_rows;
+    std::string conclusion;
+};
+
+std::string LowercaseCopy(std::string text) {
+    std::transform(
+        text.begin(), text.end(), text.begin(), [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+    return text;
+}
+
+std::vector<int> SamplePhaseFrames(
+    int frame_count,
+    float phase_start,
+    float phase_end,
+    int stride) {
+    if (frame_count <= 0) {
+        throw std::runtime_error("SamplePhaseFrames: frame_count must be positive");
+    }
+    if (stride < 1) {
+        throw std::runtime_error("SamplePhaseFrames: stride must be >= 1");
+    }
+    if (phase_start < 0.0f || phase_end > 1.0f || phase_start > phase_end) {
+        throw std::runtime_error("SamplePhaseFrames: invalid phase range");
+    }
+    const int last_frame = frame_count - 1;
+    const int first = static_cast<int>(std::lround(phase_start * last_frame));
+    const int last = static_cast<int>(std::lround(phase_end * last_frame));
+    std::vector<int> frames;
+    for (int frame = first; frame <= last; frame += stride) {
+        frames.push_back(frame);
+    }
+    if (frames.empty()) {
+        frames.push_back(first);
+    }
+    return frames;
+}
+
+std::string IntegerListCsv(const std::vector<int>& values) {
+    std::ostringstream out;
+    out << '"';
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ' ';
+        }
+        out << values[index];
+    }
+    out << '"';
+    return out.str();
+}
+
+const pmg::GraphSpecEdge* FindSpecEdge(
+    const pmg::GraphSpec& spec,
+    const std::string& source_node,
+    const std::string& target_node) {
+    for (const pmg::GraphSpecEdge& edge : spec.edges) {
+        if (edge.source_node == source_node && edge.target_node == target_node) {
+            return &edge;
+        }
+    }
+    return nullptr;
+}
+
+float WrapPhaseOffset(float phase_offset) {
+    while (phase_offset > 0.5f) {
+        phase_offset -= 1.0f;
+    }
+    while (phase_offset < -0.5f) {
+        phase_offset += 1.0f;
+    }
+    return phase_offset;
+}
+
+float RootTrajectoryRmse(
+    const pmg::MotionClip& source_clip,
+    const pmg::MotionClip& target_clip) {
+    constexpr int kPhaseSamples = 17;
+    float squared_error_sum = 0.0f;
+    for (int sample = 0; sample < kPhaseSamples; ++sample) {
+        const float phase =
+            static_cast<float>(sample) / static_cast<float>(kPhaseSamples - 1);
+        const pmg::Pose source_pose = source_clip.SampleNormalizedPhase(phase);
+        const pmg::Pose target_pose = target_clip.SampleNormalizedPhase(phase);
+        const float dx = source_pose.root_position.x - target_pose.root_position.x;
+        const float dz = source_pose.root_position.z - target_pose.root_position.z;
+        squared_error_sum += dx * dx + dz * dz;
+    }
+    return std::sqrt(squared_error_sum / static_cast<float>(kPhaseSamples));
+}
+
+std::string PoseSeamClass(
+    float distance,
+    const pmg::PmgBuilderConfig& config) {
+    if (!std::isfinite(distance)) {
+        return "EMPTY";
+    }
+    if (distance <= config.good_transition_threshold) {
+        return "GOOD";
+    }
+    if (distance >= config.bad_transition_threshold) {
+        return "BAD";
+    }
+    return "NEUTRAL";
+}
+
+bool LooksJogLike(const std::string& clip_name) {
+    return LowercaseCopy(clip_name).find("jog") != std::string::npos;
+}
+
+RegistrationPhaseAlignmentAuditData BuildRegistrationPhaseAlignmentAudit(
+    const pmg::GraphSpec& spec,
+    const pmg::PreparedMotionSpaces& prepared) {
+    RegistrationPhaseAlignmentAuditData data;
+    for (const pmg::GraphSpecNode& node : spec.nodes) {
+        const pmg::PreparedMotionSpace& prepared_node = prepared.Node(node.name);
+        const pmg::GraphSpecEdge* self_edge =
+            FindSpecEdge(spec, node.name, node.name);
+        const pmg::PmgBuilderConfig builder_config =
+            self_edge ? self_edge->build_config : pmg::PmgBuilderConfig{};
+        const pmg::DistanceGridConfig& grid_config = builder_config.distance_grid;
+        const pmg::CyclicContinuityContext cyclic_context =
+            CyclicContextForNode(prepared.skeleton, prepared_node);
+        const auto& examples = prepared_node.production.Examples();
+
+        std::vector<const pmg::GraphSpecExample*> node_examples;
+        node_examples.reserve(examples.size());
+        for (const pmg::GraphSpecExample& example : spec.examples) {
+            if (example.node_name == node.name) {
+                node_examples.push_back(&example);
+            }
+        }
+        if (node_examples.size() != examples.size()) {
+            throw std::runtime_error(
+                "--audit-registration-phase-alignment: prepared example count mismatch");
+        }
+
+        for (std::size_t example_index = 0; example_index < examples.size();
+             ++example_index) {
+            const pmg::ExampleMotion& example = examples[example_index];
+            const pmg::MotionClip& clip = example.clip;
+            const pmg::RootStartSummary normalized =
+                pmg::SummarizeRootStart(clip);
+            RegistrationPhaseAlignmentClipRow row;
+            row.node_name = node.name;
+            row.clip_name = std::filesystem::path(
+                                node_examples[example_index]->bvh_path)
+                                .filename()
+                                .string();
+            row.bvh_path = node_examples[example_index]->bvh_path;
+            row.parameter = example.parameter;
+            row.frame_count = clip.NumFrames();
+            row.frames_per_second = clip.frames_per_second;
+            row.normalized = normalized;
+            row.seam = pmg::MeasureCyclicContinuity(
+                prepared.skeleton, clip, cyclic_context);
+            row.start_is_origin =
+                HorizontalDistance(normalized.first_root_position) <=
+                kRootOriginTolerance;
+            row.heading_is_canonical =
+                std::abs(normalized.first_heading_yaw) <=
+                kRootHeadingTolerance;
+            row.source_phase_frames = SamplePhaseFrames(
+                clip.NumFrames(), grid_config.source_phase_start,
+                grid_config.source_phase_end, grid_config.source_frame_stride);
+            row.target_phase_frames = SamplePhaseFrames(
+                clip.NumFrames(), grid_config.target_phase_start,
+                grid_config.target_phase_end, grid_config.target_frame_stride);
+            if (!row.start_is_origin || !row.heading_is_canonical) {
+                row.conclusion = "FAIL_REGISTRATION_INCONSISTENT";
+            } else if (row.seam.classification ==
+                       pmg::CyclicContinuityClassification::kInsufficientData) {
+                row.conclusion = "FAIL_CLIP_NOT_CYCLIC_ENOUGH";
+            } else if (row.seam.classification !=
+                       pmg::CyclicContinuityClassification::kStrong) {
+                row.conclusion = "WARN_WEAK_CYCLE_SEAM";
+            } else {
+                row.conclusion = "PASS_CLIP_PHASE_ALIGNMENT";
+            }
+            data.clip_rows.push_back(std::move(row));
+        }
+
+        pmg::TransitionMetricConfig metric_config =
+            builder_config.transition_metric;
+        metric_config.contact_joint_indices = prepared_node.contact_joint_indices;
+        metric_config.contact_settings = prepared_node.contact_settings;
+        for (std::size_t source_index = 0; source_index < examples.size();
+             ++source_index) {
+            for (std::size_t target_index = source_index + 1;
+                 target_index < examples.size();
+                 ++target_index) {
+                const pmg::ExampleMotion& source = examples[source_index];
+                const pmg::ExampleMotion& target = examples[target_index];
+                const pmg::OptimalTransition optimal =
+                    pmg::MotionDistance::FindOptimalTransition(
+                        prepared.skeleton, source.clip, target.clip,
+                        grid_config);
+                RegistrationPhaseAlignmentPairRow row;
+                row.node_name = node.name;
+                row.source_clip_name = std::filesystem::path(
+                                           node_examples[source_index]->bvh_path)
+                                           .filename()
+                                           .string();
+                row.target_clip_name = std::filesystem::path(
+                                           node_examples[target_index]->bvh_path)
+                                           .filename()
+                                           .string();
+                row.source_bvh_path = node_examples[source_index]->bvh_path;
+                row.target_bvh_path = node_examples[target_index]->bvh_path;
+                row.source_parameter = source.parameter;
+                row.target_parameter = target.parameter;
+                row.source_phase_frames = SamplePhaseFrames(
+                    source.clip.NumFrames(), grid_config.source_phase_start,
+                    grid_config.source_phase_end,
+                    grid_config.source_frame_stride);
+                row.target_phase_frames = SamplePhaseFrames(
+                    target.clip.NumFrames(), grid_config.target_phase_start,
+                    grid_config.target_phase_end,
+                    grid_config.target_frame_stride);
+                row.root_trajectory_rmse =
+                    RootTrajectoryRmse(source.clip, target.clip);
+                row.phase_alignment_offset =
+                    optimal.source_frame >= 0
+                        ? WrapPhaseOffset(
+                              optimal.source_phase - optimal.target_phase)
+                        : 0.0f;
+                row.pose_seam_distance = optimal.distance;
+                row.pose_seam_class =
+                    PoseSeamClass(optimal.distance, builder_config);
+                if (optimal.source_frame >= 0 && optimal.target_frame >= 0) {
+                    const pmg::TransitionMetricResult dynamics =
+                        pmg::MotionDistance::EvaluateDynamicsTransition(
+                            prepared.skeleton, source.clip, target.clip,
+                            optimal.source_frame, optimal.target_frame,
+                            grid_config, metric_config);
+                    row.velocity_seam_cost = dynamics.velocity_cost;
+                    row.root_motion_cost = dynamics.root_cost;
+                    row.foot_mismatch_ratio =
+                        dynamics.foot_comparison_count > 0
+                            ? static_cast<float>(dynamics.foot_mismatch_count) /
+                                  static_cast<float>(
+                                      dynamics.foot_comparison_count)
+                            : -1.0f;
+                }
+                row.safe_for_transition_sampling =
+                    row.pose_seam_class == "GOOD";
+                row.jog_like_pair = LooksJogLike(row.source_clip_name) ||
+                                    LooksJogLike(row.target_clip_name);
+                if (row.jog_like_pair && !row.safe_for_transition_sampling) {
+                    row.conclusion = "WARN_PHASE_MISMATCH_FOR_JOG";
+                } else if (row.pose_seam_class == "BAD") {
+                    row.conclusion = "WARN_PAIR_NOT_SAFE";
+                } else {
+                    row.conclusion = "PASS_PAIR_PHASE_ALIGNMENT";
+                }
+                data.pair_rows.push_back(std::move(row));
+            }
+        }
+    }
+
+    data.conclusion = "PASS_PHASE_ALIGNMENT";
+    for (const RegistrationPhaseAlignmentClipRow& row : data.clip_rows) {
+        if (row.conclusion == "FAIL_REGISTRATION_INCONSISTENT") {
+            data.conclusion = "FAIL_REGISTRATION_INCONSISTENT";
+            return data;
+        }
+        if (row.conclusion == "FAIL_CLIP_NOT_CYCLIC_ENOUGH") {
+            data.conclusion = "FAIL_CLIP_NOT_CYCLIC_ENOUGH";
+            return data;
+        }
+    }
+    for (const RegistrationPhaseAlignmentPairRow& row : data.pair_rows) {
+        if (row.conclusion == "WARN_PHASE_MISMATCH_FOR_JOG") {
+            data.conclusion = "WARN_PHASE_MISMATCH_FOR_JOG";
+            return data;
+        }
+    }
+    for (const RegistrationPhaseAlignmentClipRow& row : data.clip_rows) {
+        if (row.conclusion == "WARN_WEAK_CYCLE_SEAM") {
+            data.conclusion = "WARN_WEAK_CYCLE_SEAM";
+            return data;
+        }
+    }
+    return data;
+}
+
+void WriteRegistrationPhaseAlignmentCsv(
+    const std::string& path,
+    const RegistrationPhaseAlignmentAuditData& data) {
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error(
+            "--audit-registration-phase-alignment: cannot write CSV");
+    }
+    csv << std::setprecision(9)
+        << "row_type,node,source_clip,target_clip,source_bvh,target_bvh,"
+           "source_parameter,target_parameter,frame_count,fps,first_root,"
+           "first_yaw,final_relative_dx,final_relative_dz,final_relative_heading,"
+           "seam_pose_distance,seam_pose_ratio,root_speed_ratio,yaw_rate_ratio,"
+           "has_contact_evidence,contact_state_matches,source_phase_frames,"
+           "target_phase_frames,root_trajectory_rmse,phase_alignment_offset,"
+           "pose_seam_class,velocity_seam_cost,root_motion_cost,"
+           "foot_mismatch_ratio,safe_for_transition_sampling,conclusion\n";
+    for (const RegistrationPhaseAlignmentClipRow& row : data.clip_rows) {
+        csv << "clip," << row.node_name << ',' << row.clip_name << ",,"
+            << row.bvh_path << ",,"
+            << ParameterCsv(row.parameter) << ",,"
+            << row.frame_count << ',' << row.frames_per_second << ','
+            << Vec3Csv(row.normalized.first_root_position) << ','
+            << row.normalized.first_heading_yaw << ','
+            << row.normalized.final_relative_displacement.x << ','
+            << row.normalized.final_relative_displacement.z << ','
+            << row.normalized.final_relative_heading << ','
+            << row.seam.seam_step << ',' << row.seam.seam_step_ratio << ','
+            << row.seam.root_speed_ratio << ',' << row.seam.yaw_rate_ratio
+            << ',' << (row.seam.has_contact_evidence ? "true" : "false") << ','
+            << (row.seam.contact_state_matches ? "true" : "false") << ','
+            << IntegerListCsv(row.source_phase_frames) << ','
+            << IntegerListCsv(row.target_phase_frames)
+            << ",,,,"
+            << ",,,,"
+            << row.conclusion << "\n";
+    }
+    for (const RegistrationPhaseAlignmentPairRow& row : data.pair_rows) {
+        csv << "pair," << row.node_name << ',' << row.source_clip_name << ','
+            << row.target_clip_name << ',' << row.source_bvh_path << ','
+            << row.target_bvh_path << ',' << ParameterCsv(row.source_parameter)
+            << ',' << ParameterCsv(row.target_parameter) << ",,,,,,,"
+            << row.pose_seam_distance << ",,,,,"
+            << IntegerListCsv(row.source_phase_frames) << ','
+            << IntegerListCsv(row.target_phase_frames) << ','
+            << row.root_trajectory_rmse << ','
+            << row.phase_alignment_offset << ',' << row.pose_seam_class << ','
+            << row.velocity_seam_cost << ',' << row.root_motion_cost << ','
+            << row.foot_mismatch_ratio << ','
+            << (row.safe_for_transition_sampling ? "true" : "false") << ','
+            << row.conclusion << "\n";
+    }
+}
+
+void WriteRegistrationPhaseAlignmentMarkdown(
+    const std::string& path,
+    const RegistrationPhaseAlignmentAuditOptions& options,
+    const RegistrationPhaseAlignmentAuditData& data) {
+    std::ofstream md(path);
+    if (!md) {
+        throw std::runtime_error(
+            "--audit-registration-phase-alignment: cannot write markdown");
+    }
+    const int weak_clip_count = static_cast<int>(std::count_if(
+        data.clip_rows.begin(), data.clip_rows.end(), [](const auto& row) {
+            return row.conclusion == "WARN_WEAK_CYCLE_SEAM";
+        }));
+    const int jog_warning_count = static_cast<int>(std::count_if(
+        data.pair_rows.begin(), data.pair_rows.end(), [](const auto& row) {
+            return row.conclusion == "WARN_PHASE_MISMATCH_FOR_JOG";
+        }));
+    const bool canonical_ok = std::all_of(
+        data.clip_rows.begin(), data.clip_rows.end(), [](const auto& row) {
+            return row.start_is_origin && row.heading_is_canonical;
+        });
+
+    md << "# Registration / Phase Alignment Audit\n\n";
+    md << "## Purpose\n\n";
+    md << "Report canonical starts, cyclic seam quality, and pairwise transition "
+          "compatibility for current authored anchors. Report only; no clips, "
+          "registration, thresholds, or runtime behavior change.\n\n";
+    md << "## Inputs\n\n";
+    md << "- Spec: `" << options.spec_path << "`\n";
+    md << "- Clip rows: " << data.clip_rows.size() << "\n";
+    md << "- Pair rows: " << data.pair_rows.size() << "\n";
+    md << "- Canonical origin/heading verified: "
+       << (canonical_ok ? "yes" : "no") << "\n";
+    md << "- Weak seams: " << weak_clip_count << "\n";
+    md << "- Jog pair warnings: " << jog_warning_count << "\n";
+    md << "- Final conclusion: `" << data.conclusion << "`\n\n";
+    md << "## Clip audit\n\n";
+    md << "| Node | Clip | Parameter | Frames | FPS | First root x/z | First yaw | Final dx/dz | Final heading | Seam ratio | Root speed ratio | Yaw rate ratio | Contact match | Source phases | Target phases | Conclusion |\n";
+    md << "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|\n";
+    for (const RegistrationPhaseAlignmentClipRow& row : data.clip_rows) {
+        md << "| " << row.node_name << " | " << row.clip_name << " | "
+           << ParameterMd(row.parameter) << " | " << row.frame_count << " | "
+           << row.frames_per_second << " | "
+           << row.normalized.first_root_position.x << ", "
+           << row.normalized.first_root_position.z << " | "
+           << row.normalized.first_heading_yaw << " | "
+           << row.normalized.final_relative_displacement.x << ", "
+           << row.normalized.final_relative_displacement.z << " | "
+           << row.normalized.final_relative_heading << " | "
+           << row.seam.seam_step_ratio << " | "
+           << row.seam.root_speed_ratio << " | "
+           << row.seam.yaw_rate_ratio << " | "
+           << (row.seam.has_contact_evidence
+                   ? (row.seam.contact_state_matches ? "yes" : "no")
+                   : "n/a")
+           << " | " << IntegerListCsv(row.source_phase_frames) << " | "
+           << IntegerListCsv(row.target_phase_frames) << " | `"
+           << row.conclusion << "` |\n";
+    }
+    md << "\n## Pair audit\n\n";
+    md << "| Node | Source | Target | Source p | Target p | Trajectory RMSE | Phase offset | Pose seam | Velocity cost | Root cost | Foot mismatch | Safe | Conclusion |\n";
+    md << "|---|---|---|---|---|---:|---:|---|---:|---:|---:|---|---|\n";
+    for (const RegistrationPhaseAlignmentPairRow& row : data.pair_rows) {
+        md << "| " << row.node_name << " | " << row.source_clip_name << " | "
+           << row.target_clip_name << " | " << ParameterMd(row.source_parameter)
+           << " | " << ParameterMd(row.target_parameter) << " | "
+           << row.root_trajectory_rmse << " | "
+           << row.phase_alignment_offset << " | "
+           << row.pose_seam_class << " (" << row.pose_seam_distance << ") | "
+           << row.velocity_seam_cost << " | " << row.root_motion_cost << " | ";
+        if (row.foot_mismatch_ratio < 0.0f) {
+            md << "n/a";
+        } else {
+            md << row.foot_mismatch_ratio;
+        }
+        md << " | " << (row.safe_for_transition_sampling ? "yes" : "no")
+           << " | `" << row.conclusion << "` |\n";
+    }
+    md << "\nArtifacts: `" << options.output_csv << "`, `" << options.output_md
+       << "`.\n";
+}
+
+RegistrationPhaseAlignmentAuditOptions ParseRegistrationPhaseAlignmentAuditOptions(
+    int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error(
+            "--audit-registration-phase-alignment needs <spec>");
+    }
+    RegistrationPhaseAlignmentAuditOptions options;
+    options.spec_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--output-csv") {
+            options.output_csv = require_value("--output-csv");
+        } else if (option == "--output-md") {
+            options.output_md = require_value("--output-md");
+        } else {
+            throw std::runtime_error(
+                "unknown audit-registration-phase-alignment option '" +
+                option + "'");
+        }
+    }
+    if (options.output_csv.empty()) {
+        throw std::runtime_error(
+            "--audit-registration-phase-alignment requires --output-csv");
+    }
+    if (options.output_md.empty()) {
+        throw std::runtime_error(
+            "--audit-registration-phase-alignment requires --output-md");
+    }
+    return options;
+}
+
+int RegistrationPhaseAlignmentAuditCommand(
+    const RegistrationPhaseAlignmentAuditOptions& options) {
+    const pmg::GraphSpec spec = pmg::LoadGraphSpec(options.spec_path);
+    const pmg::PreparedMotionSpaces prepared = pmg::PrepareMotionSpaces(spec);
+    const RegistrationPhaseAlignmentAuditData data =
+        BuildRegistrationPhaseAlignmentAudit(spec, prepared);
+    WriteRegistrationPhaseAlignmentCsv(options.output_csv, data);
+    WriteRegistrationPhaseAlignmentMarkdown(options.output_md, options, data);
+    std::cout << "registration_phase_alignment_clip_rows="
+              << data.clip_rows.size() << "\n";
+    std::cout << "registration_phase_alignment_pair_rows="
+              << data.pair_rows.size() << "\n";
+    std::cout << "registration_phase_alignment_csv=" << options.output_csv
+              << "\n";
+    std::cout << "registration_phase_alignment_md=" << options.output_md
+              << "\n";
+    std::cout << "registration_phase_alignment_conclusion="
+              << data.conclusion << "\n";
+    return 0;
+}
+
+struct ReachableRegionAuditOptions {
+    std::string pmg_path;
+    std::string output_csv;
+    std::string output_md;
+    std::string output_dir;
+    std::string source_node;
+    std::string target_node;
+    int samples_per_axis = 11;
+};
+
+struct ReachableRegionAuditRow {
+    pmg::ParameterVector source_parameter;
+    pmg::ParameterAabb target_box;
+    std::vector<pmg::ParameterVector> accepted_target_parameters;
+    int accepted_target_count = 0;
+    float support_coverage = 0.0f;
+    int good_count = 0;
+    int neutral_count = 0;
+    int bad_count = 0;
+    float worst_accepted_distance = 0.0f;
+    float worst_root_jump = 0.0f;
+    float worst_heading_jump = 0.0f;
+    float worst_velocity_jump = 0.0f;
+    bool empty_region = false;
+    std::string conclusion;
+};
+
+struct ReachableRegionAuditData {
+    std::string source_node;
+    std::string target_node;
+    pmg::PmgBuilderConfig config;
+    std::vector<pmg::ParameterVector> target_samples;
+    std::vector<ReachableRegionAuditRow> rows;
+    std::string conclusion;
+};
+
+void AppendUniqueParameter(
+    std::vector<pmg::ParameterVector>& parameters,
+    const pmg::ParameterVector& candidate) {
+    for (const pmg::ParameterVector& existing : parameters) {
+        if (existing.size() != candidate.size()) {
+            continue;
+        }
+        bool same = true;
+        for (std::size_t axis = 0; axis < existing.size(); ++axis) {
+            if (std::abs(existing[axis] - candidate[axis]) > 1.0e-5f) {
+                same = false;
+                break;
+            }
+        }
+        if (same) {
+            return;
+        }
+    }
+    parameters.push_back(candidate);
+}
+
+std::string ParameterListCsv(
+    const std::vector<pmg::ParameterVector>& parameters) {
+    std::ostringstream out;
+    out << '"';
+    for (std::size_t index = 0; index < parameters.size(); ++index) {
+        if (index > 0) {
+            out << ';';
+        }
+        out << '[';
+        for (std::size_t axis = 0; axis < parameters[index].size(); ++axis) {
+            if (axis > 0) {
+                out << ' ';
+            }
+            out << parameters[index][axis];
+        }
+        out << ']';
+    }
+    out << '"';
+    return out.str();
+}
+
+std::vector<pmg::ParameterVector> BuildAuditParameterSamples(
+    const pmg::ParametricMotionSpace& space,
+    int samples_per_axis) {
+    if (samples_per_axis < 2) {
+        throw std::runtime_error(
+            "--audit-reachable-region: --samples must be at least 2");
+    }
+
+    std::vector<pmg::ParameterVector> samples;
+    for (const pmg::ParameterVector& parameter : space.ExampleParameters()) {
+        AppendUniqueParameter(samples, parameter);
+    }
+
+    if (space.HasExplicitParameterSupport()) {
+        const pmg::ParameterSupport& support = *space.ExplicitSupport();
+        for (const pmg::ParameterVector& vertex : support.Vertices()) {
+            AppendUniqueParameter(samples, vertex);
+        }
+        if (support.GetType() == pmg::ParameterSupport::Type::kTriangulated2D) {
+            std::set<std::pair<int, int>> edges;
+            for (const auto& triangle : support.Triangles()) {
+                pmg::ParameterVector centroid(2, 0.0f);
+                for (int vertex : triangle) {
+                    centroid[0] += support.Vertices()[vertex][0] / 3.0f;
+                    centroid[1] += support.Vertices()[vertex][1] / 3.0f;
+                }
+                AppendUniqueParameter(samples, centroid);
+                for (int edge = 0; edge < 3; ++edge) {
+                    int a = triangle[edge];
+                    int b = triangle[(edge + 1) % 3];
+                    if (a > b) {
+                        std::swap(a, b);
+                    }
+                    if (!edges.insert({a, b}).second) {
+                        continue;
+                    }
+                    AppendUniqueParameter(
+                        samples,
+                        {(support.Vertices()[a][0] + support.Vertices()[b][0]) * 0.5f,
+                         (support.Vertices()[a][1] + support.Vertices()[b][1]) * 0.5f});
+                }
+            }
+        }
+    }
+
+    const pmg::ParameterDomain domain = space.Domain();
+    const pmg::ParameterAabb& bounds = domain.Bounds();
+    if (domain.Dimension() == 1) {
+        for (int index = 0; index < samples_per_axis; ++index) {
+            const float t =
+                static_cast<float>(index) /
+                static_cast<float>(samples_per_axis - 1);
+            const pmg::ParameterVector parameter = {
+                bounds.min_corner[0] +
+                t * (bounds.max_corner[0] - bounds.min_corner[0])};
+            if (!space.HasExplicitParameterSupport() ||
+                space.ExplicitSupport()->Contains(parameter)) {
+                AppendUniqueParameter(samples, parameter);
+            }
+        }
+    } else if (domain.Dimension() == 2) {
+        for (int y_index = 0; y_index < samples_per_axis; ++y_index) {
+            const float ty =
+                static_cast<float>(y_index) /
+                static_cast<float>(samples_per_axis - 1);
+            const float y = bounds.min_corner[1] +
+                            ty * (bounds.max_corner[1] - bounds.min_corner[1]);
+            for (int x_index = 0; x_index < samples_per_axis; ++x_index) {
+                const float tx =
+                    static_cast<float>(x_index) /
+                    static_cast<float>(samples_per_axis - 1);
+                const float x =
+                    bounds.min_corner[0] +
+                    tx * (bounds.max_corner[0] - bounds.min_corner[0]);
+                const pmg::ParameterVector parameter = {x, y};
+                if (!space.HasExplicitParameterSupport() ||
+                    space.ExplicitSupport()->Contains(parameter)) {
+                    AppendUniqueParameter(samples, parameter);
+                }
+            }
+        }
+    }
+
+    return samples;
+}
+
+const pmg::EdgeBuildMetadata* FindEdgeBuildMetadata(
+    const pmg::BuiltPmgArtifact& artifact,
+    const std::string& source_node,
+    const std::string& target_node) {
+    for (const pmg::EdgeBuildMetadata& edge : artifact.metadata.edge_builds) {
+        if (edge.source_node == source_node && edge.target_node == target_node) {
+            return &edge;
+        }
+    }
+    return nullptr;
+}
+
+pmg::OptimalTransition EvaluateConfiguredTransition(
+    const pmg::Skeleton& skeleton,
+    const pmg::MotionClip& source_clip,
+    const pmg::MotionClip& target_clip,
+    const pmg::PmgBuilderConfig& config) {
+    if (config.transition_metric_type ==
+        pmg::TransitionMetricType::kDynamicsWindow) {
+        return pmg::MotionDistance::FindOptimalDynamicsTransitionForConvention(
+            skeleton, source_clip, target_clip, config.distance_grid,
+            config.transition_metric, config.transition_convention);
+    }
+    return pmg::MotionDistance::FindOptimalTransitionForConvention(
+        skeleton, source_clip, target_clip, config.distance_grid,
+        config.transition_convention);
+}
+
+float RootJumpAtTransition(
+    const pmg::Pose& source_pose,
+    const pmg::Pose& aligned_target_pose) {
+    return HorizontalDistance(
+        aligned_target_pose.root_position - source_pose.root_position);
+}
+
+float HeadingJumpAtTransition(
+    const pmg::Pose& source_pose,
+    const pmg::Pose& aligned_target_pose) {
+    return std::abs(
+        pmg::WrapAngleRadians(
+            pmg::RootHeadingYaw(aligned_target_pose) -
+            pmg::RootHeadingYaw(source_pose)));
+}
+
+float VelocityJumpAtTransition(
+    const pmg::MotionClip& source_clip,
+    const pmg::MotionClip& target_clip,
+    const pmg::RigidTransform2D& alignment,
+    int source_frame,
+    int target_frame) {
+    if (source_frame <= 0 || target_frame <= 0) {
+        return 0.0f;
+    }
+
+    const pmg::Vec3 source_step =
+        source_clip.frames[static_cast<std::size_t>(source_frame)].root_position -
+        source_clip.frames[static_cast<std::size_t>(source_frame - 1)].root_position;
+    const pmg::Vec3 target_step =
+        alignment.ApplyPoint(
+            target_clip.frames[static_cast<std::size_t>(target_frame)].root_position) -
+        alignment.ApplyPoint(
+            target_clip.frames[static_cast<std::size_t>(target_frame - 1)].root_position);
+    const pmg::Vec3 delta =
+        (target_step - source_step) * source_clip.frames_per_second;
+    return HorizontalLength(delta);
+}
+
+int ResolveNodeIndex(
+    const pmg::ParametricMotionGraph& graph,
+    const std::string& node_name) {
+    for (int node_index = 0; node_index < graph.NumNodes(); ++node_index) {
+        if (graph.Node(node_index).name == node_name) {
+            return node_index;
+        }
+    }
+    return -1;
+}
+
+int ResolveEdgeIndex(
+    const pmg::BuiltPmgArtifact& artifact,
+    const ReachableRegionAuditOptions& options,
+    std::string& source_node,
+    std::string& target_node) {
+    if (!options.source_node.empty() || !options.target_node.empty()) {
+        if (options.source_node.empty() || options.target_node.empty()) {
+            throw std::runtime_error(
+                "--audit-reachable-region requires both --source-node and "
+                "--target-node");
+        }
+        const int source_index =
+            ResolveNodeIndex(artifact.graph, options.source_node);
+        const int target_index =
+            ResolveNodeIndex(artifact.graph, options.target_node);
+        if (source_index < 0 || target_index < 0) {
+            throw std::runtime_error(
+                "--audit-reachable-region: unknown source or target node");
+        }
+        for (int edge_index = 0; edge_index < artifact.graph.NumEdges();
+             ++edge_index) {
+            const pmg::PmgEdge& edge = artifact.graph.Edge(edge_index);
+            if (edge.source_node == source_index &&
+                edge.target_node == target_index) {
+                source_node = options.source_node;
+                target_node = options.target_node;
+                return edge_index;
+            }
+        }
+        throw std::runtime_error(
+            "--audit-reachable-region: requested edge not found");
+    }
+
+    if (artifact.graph.NumEdges() != 1) {
+        throw std::runtime_error(
+            "--audit-reachable-region requires --source-node and --target-node "
+            "when artifact has multiple edges");
+    }
+
+    const pmg::PmgEdge& edge = artifact.graph.Edge(0);
+    source_node = artifact.graph.Node(edge.source_node).name;
+    target_node = artifact.graph.Node(edge.target_node).name;
+    return 0;
+}
+
+ReachableRegionAuditData BuildReachableRegionAudit(
+    const pmg::BuiltPmgArtifact& artifact,
+    const ReachableRegionAuditOptions& options) {
+    ReachableRegionAuditData data;
+    int edge_index = -1;
+    edge_index = ResolveEdgeIndex(
+        artifact, options, data.source_node, data.target_node);
+    const pmg::PmgEdge& edge = artifact.graph.Edge(edge_index);
+    const pmg::PmgNode& source_node = artifact.graph.Node(edge.source_node);
+    const pmg::PmgNode& target_node = artifact.graph.Node(edge.target_node);
+    const pmg::EdgeBuildMetadata* edge_metadata =
+        FindEdgeBuildMetadata(artifact, data.source_node, data.target_node);
+    if (edge_metadata == nullptr) {
+        throw std::runtime_error(
+            "--audit-reachable-region: missing edge build metadata");
+    }
+    data.config = edge_metadata->config;
+    data.target_samples = BuildAuditParameterSamples(
+        target_node.motion_space, options.samples_per_axis);
+    for (const pmg::TransitionSample& sample : edge.samples) {
+        for (const pmg::TargetTransitionPhaseSample& phase_sample :
+             sample.target_phase_samples) {
+            AppendUniqueParameter(data.target_samples, phase_sample.target_parameter);
+        }
+    }
+
+    std::vector<int> accepted_density(
+        data.target_samples.size(), 0);
+    std::vector<float> worst_target_distance(
+        data.target_samples.size(), 0.0f);
+
+    constexpr float kCoverageShrinkWarnRatio = 0.5f;
+    float max_support_coverage = 0.0f;
+    bool any_empty = false;
+    bool any_bad_accepted = false;
+
+    for (std::size_t source_index = 0; source_index < edge.samples.size();
+         ++source_index) {
+        const pmg::TransitionSample& source_sample = edge.samples[source_index];
+        ReachableRegionAuditRow row;
+        row.source_parameter = source_sample.source_parameter;
+
+        const pmg::MotionClip source_clip = source_node.motion_space.GenerateClip(
+            source_sample.source_parameter,
+            artifact.metadata.frames_per_second);
+
+        for (std::size_t target_index = 0; target_index < data.target_samples.size();
+             ++target_index) {
+            const pmg::ParameterVector& target_parameter =
+                data.target_samples[target_index];
+            const std::optional<pmg::InterpolatedTransition> interpolated =
+                edge.LookupInterpolated(
+                    source_sample.source_parameter, target_parameter);
+            if (!interpolated.has_value()) {
+                continue;
+            }
+
+            row.target_box = interpolated->target_parameter_box;
+            const pmg::MotionClip target_clip =
+                target_node.motion_space.GenerateClip(
+                    target_parameter, artifact.metadata.frames_per_second);
+            const pmg::OptimalTransition transition =
+                EvaluateConfiguredTransition(
+                    artifact.skeleton, source_clip, target_clip, data.config);
+            if (transition.distance <= data.config.good_transition_threshold) {
+                ++row.good_count;
+            } else if (transition.distance >= data.config.bad_transition_threshold) {
+                ++row.bad_count;
+            } else {
+                ++row.neutral_count;
+            }
+
+            if (!interpolated->target_parameter_box.Contains(target_parameter)) {
+                continue;
+            }
+
+            ++row.accepted_target_count;
+            AppendUniqueParameter(row.accepted_target_parameters, target_parameter);
+            ++accepted_density[target_index];
+            worst_target_distance[target_index] = std::max(
+                worst_target_distance[target_index], transition.distance);
+            row.worst_accepted_distance = std::max(
+                row.worst_accepted_distance, transition.distance);
+            const pmg::Pose source_pose =
+                source_clip.frames[static_cast<std::size_t>(transition.source_frame)];
+            const pmg::Pose aligned_target_pose = transition.alignment.Apply(
+                target_clip.frames[static_cast<std::size_t>(transition.target_frame)]);
+            row.worst_root_jump = std::max(
+                row.worst_root_jump,
+                RootJumpAtTransition(source_pose, aligned_target_pose));
+            row.worst_heading_jump = std::max(
+                row.worst_heading_jump,
+                HeadingJumpAtTransition(source_pose, aligned_target_pose));
+            row.worst_velocity_jump = std::max(
+                row.worst_velocity_jump,
+                VelocityJumpAtTransition(
+                    source_clip, target_clip, transition.alignment,
+                    transition.source_frame, transition.target_frame));
+        }
+
+        if (!data.target_samples.empty()) {
+            row.support_coverage =
+                static_cast<float>(row.accepted_target_count) /
+                static_cast<float>(data.target_samples.size());
+        }
+        row.empty_region = row.accepted_target_count == 0;
+        max_support_coverage = std::max(max_support_coverage, row.support_coverage);
+        any_empty = any_empty || row.empty_region;
+        any_bad_accepted =
+            any_bad_accepted ||
+            row.worst_accepted_distance >= data.config.bad_transition_threshold;
+        data.rows.push_back(std::move(row));
+    }
+
+    data.conclusion = "PASS_REACHABLE_REGION_STABLE";
+    for (ReachableRegionAuditRow& row : data.rows) {
+        if (row.empty_region) {
+            row.conclusion = "FAIL_EMPTY_REGION_FOR_VALID_SOURCE";
+            continue;
+        }
+        if (row.worst_accepted_distance >= data.config.bad_transition_threshold) {
+            row.conclusion = "FAIL_THRESHOLD_TOO_LOOSE";
+            continue;
+        }
+        if (max_support_coverage > 0.0f &&
+            row.support_coverage < max_support_coverage * kCoverageShrinkWarnRatio) {
+            row.conclusion = "WARN_SOURCE_DEPENDENT_REGION_SHRINKAGE";
+            continue;
+        }
+        row.conclusion = "PASS_REACHABLE_REGION_STABLE";
+    }
+
+    if (any_empty) {
+        data.conclusion = "FAIL_EMPTY_REGION_FOR_VALID_SOURCE";
+    } else if (any_bad_accepted) {
+        data.conclusion = "FAIL_THRESHOLD_TOO_LOOSE";
+    } else {
+        for (const ReachableRegionAuditRow& row : data.rows) {
+            if (row.conclusion == "WARN_SOURCE_DEPENDENT_REGION_SHRINKAGE") {
+                data.conclusion = "WARN_SOURCE_DEPENDENT_REGION_SHRINKAGE";
+                break;
+            }
+        }
+    }
+
+    std::filesystem::create_directories(options.output_dir);
+    {
+        std::ofstream density(options.output_dir + "/accepted_density.csv");
+        if (!density) {
+            throw std::runtime_error(
+                "--audit-reachable-region: cannot write accepted density map");
+        }
+        density << "target_parameter,accepted_source_count,worst_accepted_distance\n";
+        for (std::size_t target_index = 0; target_index < data.target_samples.size();
+             ++target_index) {
+            density << ParameterCsv(data.target_samples[target_index]) << ','
+                    << accepted_density[target_index] << ','
+                    << worst_target_distance[target_index] << "\n";
+        }
+    }
+    for (std::size_t source_index = 0; source_index < data.rows.size();
+         ++source_index) {
+        std::ostringstream path;
+        path << options.output_dir << "/source_"
+             << std::setw(2) << std::setfill('0') << source_index << ".csv";
+        std::ofstream csv(path.str());
+        if (!csv) {
+            throw std::runtime_error(
+                "--audit-reachable-region: cannot write per-source map");
+        }
+        csv << "source_parameter,target_parameter,accepted,target_box_min,target_box_max,"
+               "transition_distance,transition_class,root_jump,heading_jump,"
+               "velocity_jump\n";
+        const pmg::MotionClip source_clip = source_node.motion_space.GenerateClip(
+            data.rows[source_index].source_parameter,
+            artifact.metadata.frames_per_second);
+        for (const pmg::ParameterVector& target_parameter : data.target_samples) {
+            const std::optional<pmg::InterpolatedTransition> interpolated =
+                edge.LookupInterpolated(
+                    data.rows[source_index].source_parameter, target_parameter);
+            if (!interpolated.has_value()) {
+                continue;
+            }
+            const pmg::MotionClip target_clip =
+                target_node.motion_space.GenerateClip(
+                    target_parameter, artifact.metadata.frames_per_second);
+            const pmg::OptimalTransition transition =
+                EvaluateConfiguredTransition(
+                    artifact.skeleton, source_clip, target_clip, data.config);
+            const bool accepted =
+                interpolated->target_parameter_box.Contains(target_parameter);
+            const pmg::Pose source_pose =
+                source_clip.frames[static_cast<std::size_t>(transition.source_frame)];
+            const pmg::Pose aligned_target_pose = transition.alignment.Apply(
+                target_clip.frames[static_cast<std::size_t>(transition.target_frame)]);
+            csv << ParameterCsv(data.rows[source_index].source_parameter) << ','
+                << ParameterCsv(target_parameter) << ','
+                << (accepted ? "true" : "false") << ','
+                << ParameterCsv(interpolated->target_parameter_box.min_corner) << ','
+                << ParameterCsv(interpolated->target_parameter_box.max_corner) << ','
+                << transition.distance << ','
+                << PoseSeamClass(transition.distance, data.config) << ','
+                << RootJumpAtTransition(source_pose, aligned_target_pose) << ','
+                << HeadingJumpAtTransition(source_pose, aligned_target_pose) << ','
+                << VelocityJumpAtTransition(
+                       source_clip, target_clip, transition.alignment,
+                       transition.source_frame, transition.target_frame)
+                << "\n";
+        }
+    }
+    return data;
+}
+
+void WriteReachableRegionAuditCsv(
+    const std::string& path,
+    const ReachableRegionAuditData& data) {
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error(
+            "--audit-reachable-region: cannot write CSV");
+    }
+    csv << std::setprecision(9)
+        << "source_node,target_node,source_parameter,target_box_min,target_box_max,"
+           "accepted_target_parameters,accepted_target_count,support_coverage,"
+           "good_count,neutral_count,bad_count,worst_accepted_distance,"
+           "worst_root_jump,worst_heading_jump,worst_velocity_jump,empty_region,"
+           "conclusion\n";
+    for (const ReachableRegionAuditRow& row : data.rows) {
+        csv << data.source_node << ',' << data.target_node << ','
+            << ParameterCsv(row.source_parameter) << ','
+            << ParameterCsv(row.target_box.min_corner) << ','
+            << ParameterCsv(row.target_box.max_corner) << ','
+            << ParameterListCsv(row.accepted_target_parameters) << ','
+            << row.accepted_target_count << ',' << row.support_coverage << ','
+            << row.good_count << ',' << row.neutral_count << ','
+            << row.bad_count << ',' << row.worst_accepted_distance << ','
+            << row.worst_root_jump << ',' << row.worst_heading_jump << ','
+            << row.worst_velocity_jump << ','
+            << (row.empty_region ? "true" : "false") << ','
+            << row.conclusion << "\n";
+    }
+}
+
+void WriteReachableRegionAuditMarkdown(
+    const std::string& path,
+    const ReachableRegionAuditOptions& options,
+    const ReachableRegionAuditData& data) {
+    std::ofstream md(path);
+    if (!md) {
+        throw std::runtime_error(
+            "--audit-reachable-region: cannot write markdown");
+    }
+    const int empty_region_count = static_cast<int>(std::count_if(
+        data.rows.begin(), data.rows.end(), [](const auto& row) {
+            return row.empty_region;
+        }));
+    md << "# Reachable Target Region Audit\n\n";
+    md << "## Purpose\n\n";
+    md << "Report source-parameter-dependent target reachability for one PMG "
+          "edge under current offline metric and stored thresholds. Report only; "
+          "no graph, threshold, or runtime behavior change.\n\n";
+    md << "## Inputs\n\n";
+    md << "- Artifact: `" << options.pmg_path << "`\n";
+    md << "- Edge: `" << data.source_node << " -> " << data.target_node << "`\n";
+    md << "- Metric: `"
+       << pmg::TransitionMetricTypeName(data.config.transition_metric_type)
+       << "`\n";
+    md << "- TGOOD/TBAD: `" << data.config.good_transition_threshold << " / "
+       << data.config.bad_transition_threshold << "`\n";
+    md << "- Source samples: " << data.rows.size() << "\n";
+    md << "- Target samples: " << data.target_samples.size() << "\n";
+    md << "- Empty accepted regions: " << empty_region_count << "\n";
+    md << "- Final conclusion: `" << data.conclusion << "`\n\n";
+    md << "## Contract\n\n";
+    md << "- Parameters use node authored units.\n";
+    md << "- Root jump uses floor-plane distance in artifact units.\n";
+    md << "- Heading jump uses radians after point-cloud alignment.\n";
+    md << "- Velocity jump uses floor-plane root-velocity delta magnitude in artifact units/s.\n";
+    md << "- Coverage = accepted target sample count / audited target sample count.\n\n";
+    md << "## Source summary\n\n";
+    md << "| Source p | Box min | Box max | Accepted | Coverage | GOOD | NEUTRAL | BAD | Worst D | Worst root jump | Worst heading jump | Worst velocity jump | Conclusion |\n";
+    md << "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n";
+    for (const ReachableRegionAuditRow& row : data.rows) {
+        md << "| " << ParameterMd(row.source_parameter) << " | "
+           << ParameterMd(row.target_box.min_corner) << " | "
+           << ParameterMd(row.target_box.max_corner) << " | "
+           << row.accepted_target_count << " | " << row.support_coverage << " | "
+           << row.good_count << " | " << row.neutral_count << " | "
+           << row.bad_count << " | " << row.worst_accepted_distance << " | "
+           << row.worst_root_jump << " | " << row.worst_heading_jump << " | "
+           << row.worst_velocity_jump << " | `" << row.conclusion << "` |\n";
+    }
+    md << "\n## Artifacts\n\n";
+    md << "- Summary CSV: `" << options.output_csv << "`\n";
+    md << "- Markdown report: `" << options.output_md << "`\n";
+    md << "- Maps directory: `" << options.output_dir << "`\n";
+}
+
+ReachableRegionAuditOptions ParseReachableRegionAuditOptions(
+    int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error("--audit-reachable-region needs <graph.pmg>");
+    }
+    ReachableRegionAuditOptions options;
+    options.pmg_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--output-csv") {
+            options.output_csv = require_value("--output-csv");
+        } else if (option == "--output-md") {
+            options.output_md = require_value("--output-md");
+        } else if (option == "--output-dir") {
+            options.output_dir = require_value("--output-dir");
+        } else if (option == "--source-node") {
+            options.source_node = require_value("--source-node");
+        } else if (option == "--target-node") {
+            options.target_node = require_value("--target-node");
+        } else if (option == "--samples") {
+            options.samples_per_axis = std::stoi(require_value("--samples"));
+        } else {
+            throw std::runtime_error(
+                "unknown audit-reachable-region option '" + option + "'");
+        }
+    }
+    if (options.output_csv.empty()) {
+        throw std::runtime_error(
+            "--audit-reachable-region requires --output-csv");
+    }
+    if (options.output_md.empty()) {
+        throw std::runtime_error(
+            "--audit-reachable-region requires --output-md");
+    }
+    if (options.output_dir.empty()) {
+        throw std::runtime_error(
+            "--audit-reachable-region requires --output-dir");
+    }
+    return options;
+}
+
+int ReachableRegionAuditCommand(const ReachableRegionAuditOptions& options) {
+    const pmg::BuiltPmgArtifact artifact =
+        pmg::LoadPmgArtifactText(options.pmg_path);
+    const ReachableRegionAuditData data =
+        BuildReachableRegionAudit(artifact, options);
+    WriteReachableRegionAuditCsv(options.output_csv, data);
+    WriteReachableRegionAuditMarkdown(options.output_md, options, data);
+    std::cout << "reachable_region_rows=" << data.rows.size() << "\n";
+    std::cout << "reachable_region_csv=" << options.output_csv << "\n";
+    std::cout << "reachable_region_md=" << options.output_md << "\n";
+    std::cout << "reachable_region_maps=" << options.output_dir << "\n";
+    std::cout << "reachable_region_conclusion=" << data.conclusion << "\n";
+    return 0;
+}
+
 int CyclicRecutSearchCommand(
     const CyclicRecutSearchOptions& options,
     const std::string& command_line) {
@@ -2450,12 +3626,36 @@ SimplexAuditOptions ParseSimplexAuditOptions(int argc, char** argv) {
     return options;
 }
 
+SimplexAuditOptions ParseParameterResponseAuditOptions(int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error(
+            "Usage: pmg_cli --audit-parameter-response graph.pmg "
+            "--output-csv out.csv --output-md out.md [--samples N]");
+    }
+    SimplexAuditOptions options;
+    options.pmg_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            return argv[++index];
+        };
+        if (option == "--output-csv") options.output_csv = require_value("--output-csv");
+        else if (option == "--output-md") options.output_md = require_value("--output-md");
+        else if (option == "--samples") options.samples_per_axis = std::stoi(require_value("--samples"));
+        else throw std::runtime_error("Unknown option: " + option);
+    }
+    return options;
+}
+
 int SimplexAuditCommand(const SimplexAuditOptions& options) {
     if (options.output_csv.empty() || options.output_md.empty()) {
         throw std::runtime_error("--audit-parameter-node requires --output-csv and --output-md");
     }
     const pmg::BuiltPmgArtifact artifact = pmg::LoadPmgArtifactText(options.pmg_path);
-    int node_idx = -1;
+    int node_idx = options.node_name.empty() && artifact.graph.NumNodes() == 1 ? 0 : -1;
     for (int i = 0; i < artifact.graph.NumNodes(); ++i) {
         if (artifact.graph.Node(i).name == options.node_name) {
             node_idx = i;
@@ -2472,16 +3672,52 @@ int SimplexAuditCommand(const SimplexAuditOptions& options) {
     
     const pmg::ParameterDomain domain = space.Domain();
     
+    if (options.samples_per_axis < 2) {
+        throw std::runtime_error("--samples must be at least 2");
+    }
     std::ofstream csv(options.output_csv);
-    // Foot contact/sliding proxy intentionally omitted until a formal contact metric is available.
-    csv << "p0,p1,duration,root_disp,speed,net_heading,curvature,projected\n";
+    if (!csv) throw std::runtime_error("parameter response audit: cannot write CSV");
+    csv << "sample_type,requested_p0,requested_p1,projected_p0,projected_p1,"
+           "frame_count,dx,dz,path_length,average_speed,signed_heading_change,"
+           "signed_curvature,endpoint_heading,finite_valid,nearest_anchor,"
+           "triangle_index,barycentric_weights,example_weights,projected\n";
     
-    std::vector<pmg::ParameterVector> grid;
+    struct Sample { std::string type; pmg::ParameterVector parameter; };
+    std::vector<Sample> samples;
+    auto add = [&](const std::string& type, const pmg::ParameterVector& parameter) {
+        for (const Sample& sample : samples) {
+            if (sample.parameter.size() == parameter.size() &&
+                std::equal(parameter.begin(), parameter.end(), sample.parameter.begin(),
+                    [](float a, float b) { return std::abs(a - b) < 1.0e-5f; })) return;
+        }
+        samples.push_back({type, parameter});
+    };
+    const auto& vertices = support.Vertices();
+    for (const auto& vertex : vertices) add("anchor", vertex);
+    if (support.GetType() == pmg::ParameterSupport::Type::kTriangulated2D) {
+        std::set<std::pair<int, int>> edges;
+        for (const auto& triangle : support.Triangles()) {
+            pmg::ParameterVector centroid(2, 0.0f);
+            for (int vertex : triangle) {
+                centroid[0] += vertices[vertex][0] / 3.0f;
+                centroid[1] += vertices[vertex][1] / 3.0f;
+            }
+            add("triangle_centroid", centroid);
+            for (int edge = 0; edge < 3; ++edge) {
+                int a = triangle[edge], b = triangle[(edge + 1) % 3];
+                if (a > b) std::swap(a, b);
+                if (edges.insert({a, b}).second) {
+                    add("edge_midpoint", {(vertices[a][0] + vertices[b][0]) * 0.5f,
+                                          (vertices[a][1] + vertices[b][1]) * 0.5f});
+                }
+            }
+        }
+    }
     if (domain.Dimension() == 1) {
         for (int i = 0; i < options.samples_per_axis; ++i) {
             float t = i / std::max(1.0f, float(options.samples_per_axis - 1));
             pmg::ParameterVector pt = {domain.Bounds().min_corner[0] + t * (domain.Bounds().max_corner[0] - domain.Bounds().min_corner[0])};
-            if (support.Contains(pt)) grid.push_back(pt);
+            if (support.Contains(pt)) add("grid", pt);
         }
     } else if (domain.Dimension() == 2) {
         for (int i = 0; i < options.samples_per_axis; ++i) {
@@ -2491,34 +3727,79 @@ int SimplexAuditCommand(const SimplexAuditOptions& options) {
                 float tx = j / std::max(1.0f, float(options.samples_per_axis - 1));
                 float x = domain.Bounds().min_corner[0] + tx * (domain.Bounds().max_corner[0] - domain.Bounds().min_corner[0]);
                 pmg::ParameterVector pt = {x, y};
-                if (support.Contains(pt)) grid.push_back(pt);
+                if (support.Contains(pt)) add("grid", pt);
             }
         }
     } else {
         throw std::runtime_error("Only 1D and 2D spaces supported");
     }
-    
-    for (const auto& p : grid) {
-        bool projected = !support.Contains(p);
-        pmg::ParameterVector sp = support.Project(p);
-        float duration = space.BlendedDurationSeconds(sp);
-        pmg::MotionClip clip = space.GenerateClip(sp, artifact.metadata.frames_per_second);
-        float speed = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTravelSpeed, clip);
-        float turn_rate = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTurnRate, clip);
-        float heading = turn_rate * duration;
-        float disp = speed * duration;
-        float curvature = disp > 1e-4f ? heading / disp : 0.0f;
-        
-        csv << (p.size() > 0 ? p[0] : 0) << "," 
-            << (p.size() > 1 ? p[1] : 0) << ","
-            << duration << "," << disp << "," << speed << "," << heading << "," << curvature << "," << projected << "\n";
+    if (domain.Dimension() == 2) add("outside_request", {0.8f, 0.8f});
+
+    auto list = [](const std::vector<float>& values) {
+        std::ostringstream out;
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            if (i) out << ';';
+            out << values[i];
+        }
+        return out.str();
+    };
+    bool all_valid = true;
+    for (const Sample& sample : samples) {
+        const auto& p = sample.parameter;
+        const bool projected = !support.Contains(p);
+        const pmg::ParameterVector sp = support.Project(p);
+        const pmg::MotionClip clip = space.GenerateClip(sp, artifact.metadata.frames_per_second);
+        clip.RequireNotEmpty("parameter response audit");
+        const pmg::Vec3 start = clip.frames.front().root_position;
+        const pmg::Vec3 end = clip.frames.back().root_position;
+        float path_length = 0.0f;
+        for (std::size_t frame = 1; frame < clip.frames.size(); ++frame) {
+            const pmg::Vec3 step = clip.frames[frame].root_position - clip.frames[frame - 1].root_position;
+            path_length += std::hypot(step.x, step.z);
+        }
+        const float duration = clip.DurationSeconds();
+        const float heading = pmg::MeasureParameterMetric(pmg::ParameterMetric::kTurnRate, clip) * duration;
+        const float endpoint_heading = std::atan2(
+            pmg::Rotate(clip.frames.back().local_rotations.front(), {0, 0, 1}).x,
+            pmg::Rotate(clip.frames.back().local_rotations.front(), {0, 0, 1}).z);
+        const float curvature = path_length > 1.0e-4f ? heading / path_length : 0.0f;
+        bool finite = std::isfinite(path_length) && std::isfinite(heading) &&
+                      std::isfinite(end.x) && std::isfinite(end.z);
+        all_valid = all_valid && finite;
+        int nearest = 0;
+        float nearest_distance = std::numeric_limits<float>::infinity();
+        for (std::size_t i = 0; i < vertices.size(); ++i) {
+            float distance = 0.0f;
+            for (std::size_t axis = 0; axis < sp.size(); ++axis) distance += std::pow(sp[axis] - vertices[i][axis], 2.0f);
+            if (distance < nearest_distance) { nearest_distance = distance; nearest = static_cast<int>(i); }
+        }
+        const auto barycentric = support.BarycentricWeights(sp);
+        int triangle_index = -1;
+        for (std::size_t i = 0; i < support.Triangles().size(); ++i) {
+            const auto& triangle = support.Triangles()[i];
+            if (barycentric[triangle[0]] >= -1.0e-5f && barycentric[triangle[1]] >= -1.0e-5f && barycentric[triangle[2]] >= -1.0e-5f) { triangle_index = static_cast<int>(i); break; }
+        }
+        csv << sample.type << ',' << p[0] << ',' << (p.size() > 1 ? p[1] : 0) << ','
+            << sp[0] << ',' << (sp.size() > 1 ? sp[1] : 0) << ',' << clip.NumFrames() << ','
+            << end.x - start.x << ',' << end.z - start.z << ',' << path_length << ','
+            << (duration > 0 ? path_length / duration : 0) << ',' << heading << ',' << curvature << ','
+            << endpoint_heading << ',' << (finite ? "true" : "false") << ",anchor_" << nearest << ','
+            << triangle_index << ",\"" << list(barycentric) << "\",\""
+            << list(space.ComputeLocalBlendWeights(sp)) << "\"," << (projected ? "true" : "false") << '\n';
     }
-    
+
     std::ofstream md(options.output_md);
-    md << "# Parameter Node Audit: " << options.node_name << "\n\n";
-    md << "Audit complete. " << grid.size() << " samples taken.\n\n";
-    md << "**Curvature Definition**: curvature = net_heading / max(root_disp, 1e-4)\n\n";
-    md << "The audit samples from the node's declared support; therefore projected=false is expected for normal samples. Projection becomes relevant only when evaluating externally requested parameters outside support.\n";
+    if (!md) throw std::runtime_error("parameter response audit: cannot write markdown");
+    md << "# Parameter Response Audit: " << artifact.graph.Node(node_idx).name << "\n\n"
+       << "## Contract\n\nRoot coordinates use artifact units in the x/z floor plane; heading uses radians; "
+          "signed curvature is heading change / path length. Samples include anchors, triangle centroids, "
+          "unique edge midpoints, support grid points, and outside request (0.8, 0.8).\n\n"
+       << "## Result\n\n- Samples: " << samples.size() << "\n- Finite/valid: " << (all_valid ? "yes" : "no")
+       << "\n- Conclusion: " << (all_valid ? "PASS_PARAMETER_RESPONSE" : "FAIL_INTERPOLATION_DISCONTINUITY")
+       << "\n\nDetailed measurements: `" << options.output_csv << "`.\n";
+    std::cout << "parameter_response_rows=" << samples.size() << "\n"
+              << "parameter_response_csv=" << options.output_csv << "\n"
+              << "parameter_response_md=" << options.output_md << "\n";
     return 0;
 }
 
@@ -2593,6 +3874,9 @@ namespace pmgcli {
 
 std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
     const std::string command = argc > 1 ? argv[1] : "";
+    if (command == "--audit-parameter-response") {
+        return SimplexAuditCommand(ParseParameterResponseAuditOptions(argc, argv));
+    }
     if (command == "--space-sweep" && argc >= 4) {
         return SpaceSweepCommand(ParseSpaceSweepOptions(argc, argv));
     }
@@ -2607,6 +3891,14 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
     if (command == "--audit-root-canonicalization" && argc >= 3) {
         return RootCanonicalizationAuditCommand(
             ParseRootCanonicalizationAuditOptions(argc, argv));
+    }
+    if (command == "--audit-registration-phase-alignment" && argc >= 3) {
+        return RegistrationPhaseAlignmentAuditCommand(
+            ParseRegistrationPhaseAlignmentAuditOptions(argc, argv));
+    }
+    if (command == "--audit-reachable-region" && argc >= 3) {
+        return ReachableRegionAuditCommand(
+            ParseReachableRegionAuditOptions(argc, argv));
     }
     if (command == "--search-cyclic-recuts") {
         return CyclicRecutSearchCommand(
