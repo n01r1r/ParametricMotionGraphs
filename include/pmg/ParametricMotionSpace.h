@@ -12,16 +12,6 @@
 
 namespace pmg {
 
-class ParametricMotionSpace;
-
-namespace legacy {
-MotionClip GenerateClipWithFrameCount(
-    const ParametricMotionSpace& space,
-    const ParameterVector& parameter,
-    int frame_count,
-    float frames_per_second);
-}  // namespace legacy
-
 struct ExampleMotion {
     ParameterVector parameter;
     MotionClip clip;
@@ -157,11 +147,6 @@ private:
         ParameterMetric metric,
         float frames_per_second,
         int samples_per_segment);
-    friend MotionClip legacy::GenerateClipWithFrameCount(
-        const ParametricMotionSpace& space,
-        const ParameterVector& parameter,
-        int frame_count,
-        float frames_per_second);
 };
 
 // Offline multidimensional calibration. Samples a deterministic regular grid

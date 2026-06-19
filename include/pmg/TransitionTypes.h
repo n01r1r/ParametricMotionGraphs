@@ -125,7 +125,7 @@ struct ParameterAabb {
     }
 };
 
-// Directional phase pair measured at one retained GOOD target parameter.
+// Directional phase pair measured at one retained accepted target parameter.
 // Source phase identifies the first source support frame; target phase
 // identifies the last target support frame. Runtime evaluates these samples at
 // the requested target instead of using one in-box average.
@@ -136,14 +136,15 @@ struct TargetTransitionPhaseSample {
 };
 
 // One sampled source parameter, its reachable target box, and target-dependent
-// directional transition phases. Scalar phases are V2-V5 fallback/summary
-// values with the same first-source/last-target meaning.
+// directional transition phases. Parameter vectors use their node space's
+// dimension and axis units. Phases are normalized to [0, 1]. Scalar phases are
+// V2-V5 fallback/summary values with the same first-source/last-target meaning.
 struct TransitionSample {
     ParameterVector source_parameter;
     ParameterAabb target_parameter_box;
     float source_transition_phase = 0.85f;
     float target_transition_phase = 0.15f;
-    // Build-time transition quality: mean Kovar metric distance D over the GOOD
+    // Build-time transition quality: mean Kovar metric distance D over accepted
     // target samples retained inside target_parameter_box (paper §3.1/§3.2). It
     // is the offline D the runtime carries forward so a streamed transition can
     // be tagged with the edge quality it was scheduled from. V9+ (zero when

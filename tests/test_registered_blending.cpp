@@ -1,6 +1,5 @@
 #include "pmg/MotionRegistration.h"
 #include "pmg/ParametricMotionSpace.h"
-#include "pmg/legacy/FrameCountClipGeneration.h"
 
 #include <cassert>
 #include <cmath>
@@ -143,8 +142,7 @@ void TestRootDeltaBlendKeepsStepLengthAndHeading() {
     space.AddExample({0.0f}, MakeTurnClip(0.0f));
     space.AddExample({1.0f}, MakeTurnClip(9.0f));
 
-    const pmg::MotionClip blended =
-        pmg::legacy::GenerateClipWithFrameCount(space, {0.5f}, 11, 30.0f);
+    const pmg::MotionClip blended = space.GenerateClip({0.5f}, 30.0f);
     assert(blended.NumFrames() == 11);
 
     const float degrees = 3.14159265f / 180.0f;
@@ -158,22 +156,12 @@ void TestRootDeltaBlendKeepsStepLengthAndHeading() {
     }
 }
 
-void TestLegacyFrameCountGenerationRejectsInvalidSettings() {
+void TestClipGenerationRejectsInvalidSettings() {
     const pmg::ParametricMotionSpace space = MakeStepSpace();
-
-    bool rejected_frame_count = false;
-    try {
-        (void)pmg::legacy::GenerateClipWithFrameCount(
-            space, {0.5f}, 0, 30.0f);
-    } catch (const std::runtime_error&) {
-        rejected_frame_count = true;
-    }
-    assert(rejected_frame_count);
 
     bool rejected_frames_per_second = false;
     try {
-        (void)pmg::legacy::GenerateClipWithFrameCount(
-            space, {0.5f}, 11, 0.0f);
+        (void)space.GenerateClip({0.5f}, 0.0f);
     } catch (const std::runtime_error&) {
         rejected_frames_per_second = true;
     }
@@ -186,6 +174,6 @@ int main() {
     TestUnregisteredBlendFloatsTheFoot();
     TestRegisteredBlendPreservesContactsAndSwing();
     TestRootDeltaBlendKeepsStepLengthAndHeading();
-    TestLegacyFrameCountGenerationRejectsInvalidSettings();
+    TestClipGenerationRejectsInvalidSettings();
     return 0;
 }

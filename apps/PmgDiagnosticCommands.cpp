@@ -15,7 +15,6 @@
 #include "pmg/RuntimeController.h"
 #include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
-#include "pmg/legacy/FrameCountClipGeneration.h"
 
 #include <algorithm>
 #include <array>
@@ -171,7 +170,6 @@ SweepMetrics MeasureSpaceSweep(
     const std::vector<int>& contact_joints,
     const pmg::ContactDetectionSettings& settings,
     int sweep_steps,
-    int generated_frame_count,
     float frames_per_second,
     const char* label,
     bool foot_lock = false) {
@@ -199,8 +197,7 @@ SweepMetrics MeasureSpaceSweep(
                          : mid;
         }
 
-        pmg::MotionClip clip = pmg::legacy::GenerateClipWithFrameCount(
-            space, parameter, generated_frame_count, frames_per_second);
+        pmg::MotionClip clip = space.GenerateClip(parameter, frames_per_second);
         if (foot_lock) {
             pmg::FootLockSettings lock_settings;
             lock_settings.contacts = settings;
@@ -233,7 +230,12 @@ SweepMetrics MeasureSpaceSweep(
     }
 
     for (std::size_t step = 0; step + 1 < generated.size(); ++step) {
-        for (int frame = 0; frame < generated_frame_count; ++frame) {
+        const int shared_frame_count = std::min(
+            generated[step].NumFrames(), generated[step + 1].NumFrames());
+        if (shared_frame_count <= 0) {
+            throw std::runtime_error("MeasureSpaceSweep: generated clip must not be empty");
+        }
+        for (int frame = 0; frame < shared_frame_count; ++frame) {
             const float distance = MeanJointDistance(
                 skeleton, generated[step].frames[frame], generated[step + 1].frames[frame]);
             metrics.max_adjacent_step = std::max(metrics.max_adjacent_step, distance);
@@ -301,17 +303,16 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
                   << " anchors=" << anchors.size() << "\n";
     }
 
-    const int generated_frame_count = naive_space.Examples().front().clip.NumFrames();
     const float frames_per_second = naive_space.Examples().front().clip.frames_per_second;
 
     std::cout << "registered=yes\n";
 
     const SweepMetrics naive = MeasureSpaceSweep(
         naive_space, skeleton, contact_joints, settings, options.sweep_steps,
-        generated_frame_count, frames_per_second, "naive");
+        frames_per_second, "naive");
     const SweepMetrics registered = MeasureSpaceSweep(
         registered_space, skeleton, contact_joints, settings, options.sweep_steps,
-        generated_frame_count, frames_per_second, "registered");
+        frames_per_second, "registered");
 
     std::optional<SweepMetrics> dtw;
     pmg::ParametricMotionSpace best_space = registered_space;
@@ -326,7 +327,7 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
         std::cout << "dtw_refined=yes\n";
         dtw = MeasureSpaceSweep(
             best_space, skeleton, contact_joints, settings, options.sweep_steps,
-            generated_frame_count, frames_per_second, "dtw");
+            frames_per_second, "dtw");
     }
 
     // IK foot locking post-processes the best registered variant's clips.
@@ -335,7 +336,7 @@ int SpaceSweepCommand(const SpaceSweepOptions& options) {
         std::cout << "foot_lock=yes\n";
         locked = MeasureSpaceSweep(
             best_space, skeleton, contact_joints, settings, options.sweep_steps,
-            generated_frame_count, frames_per_second, "locked", /*foot_lock=*/true);
+            frames_per_second, "locked", /*foot_lock=*/true);
     }
 
     bool failed = false;

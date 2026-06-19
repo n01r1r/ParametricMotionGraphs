@@ -1,4 +1,5 @@
 #include "PmgViewerWorkspace.h"
+#include "ViewerRuntimeModule.h"
 
 #include <cassert>
 #include <vector>
@@ -39,9 +40,48 @@ void TestDesiredParameterUsesFull2DVector() {
     assert(NearlyEqual(fallback[0], 0.5f)); // 1D slider
 }
 
+void TestRuntimeModuleLifecycle() {
+    pmg::Skeleton skeleton;
+    pmg::Joint root;
+    root.name = "root";
+    skeleton.joints.push_back(root);
+
+    pmg::MotionClip clip;
+    clip.frames_per_second = 30.0f;
+    pmg::Pose pose;
+    pose.local_rotations.push_back({});
+    clip.frames = {pose, pose};
+
+    pmg::ParametricMotionSpace space("one_dimensional", 1);
+    space.AddExample({0.0f}, clip);
+    space.AddExample({1.0f}, clip);
+    pmg::ParametricMotionGraph graph;
+    graph.AddNode("node", space);
+
+    pmgviewer::ViewerRuntimeModule runtime;
+    runtime.Install(graph, skeleton, {}, 30.0f, {0.5f});
+    runtime.Update(1.0f / 30.0f, {0, pmg::ParameterVector{0.75f}});
+
+    const pmgviewer::ViewerRuntimeSnapshot snapshot = runtime.Snapshot();
+    assert(snapshot.ready);
+    assert(snapshot.current_node == 0);
+    assert(snapshot.runtime_actual == pmg::ParameterVector{0.5f});
+    assert(snapshot.requested_raw == pmg::ParameterVector{0.75f});
+    assert(snapshot.requested_projected == pmg::ParameterVector{0.75f});
+    assert(snapshot.completed_transitions == 0);
+    assert(snapshot.status ==
+           pmgviewer::ViewerRuntimeStatus::kNoFeasibleTransition);
+    assert(!snapshot.runtime_path_points.empty());
+
+    runtime.Update(1.0f / 30.0f, {0, pmg::ParameterVector{0.5f}});
+    assert(runtime.Snapshot().status ==
+           pmgviewer::ViewerRuntimeStatus::kNoOpSameParameter);
+}
+
 } // namespace
 
 int main() {
     TestDesiredParameterUsesFull2DVector();
+    TestRuntimeModuleLifecycle();
     return 0;
 }

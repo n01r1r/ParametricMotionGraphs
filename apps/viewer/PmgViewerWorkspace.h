@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 
-#include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
 #include "pmg/ContactDetection.h"
 #include "pmg/CyclicContinuity.h"
@@ -17,10 +16,10 @@
 #include "pmg/ParametricMotionSpace.h"
 #include "pmg/PmgBuilder.h"
 #include "pmg/Pose.h"
-#include "pmg/RuntimeController.h"
 #include "pmg/Skeleton.h"
 
 #include "GraphAuthoringModel.h"
+#include "ViewerRuntimeModule.h"
 #include "ViewerWorkspace.h"
 
 namespace pmgviewer {
@@ -100,10 +99,6 @@ private:
     // (start .. middle(s) .. end) and append faded ghost skeletons so the whole
     // motion is visible at once. No-op unless path_preview_enabled_.
     void AppendPathPreview();
-    void ResetRuntimeTrace();
-    void RecordRuntimeTracePoint(const pmg::Pose& pose);
-    void RecordTransitionMarker(
-        const pmg::RuntimeTransitionDiagnostics& transition);
     void RebuildRootCanonicalizationMarkers();
     void AppendRootCanonicalizationMarkers(const pmg::Pose& current_pose);
 
@@ -157,6 +152,7 @@ private:
     void ResetGraphRuntimeSession(bool discard_source_artifact);
     void ResetGraphRuntimeSelection();
     void StartGraphRuntimeController(
+        pmg::ParametricMotionGraph graph,
         const pmg::RuntimeControllerConfig& config,
         const std::string& status_label, GraphOrigin origin);
     // Path B: in-GUI multi-node graph authoring. Snapshot the current motion
@@ -292,7 +288,7 @@ private:
     int heatmap_target_index_ = -1;
     pmg::MotionClip heatmap_target_clip_;
     pmg::DistanceGridConfig heatmap_config_{
-        5, 2, 2, 0, 0, 0.70f, 0.95f, 0.05f, 0.30f, {}};
+        5, 2, 2, 0.70f, 0.95f, 0.05f, 0.30f, {}};
     // GOOD/BAD raw-sum thresholds. One source of truth for heatmap
     // classification and sandbox graph builds. Spec builds keep their
     // per-edge thresholds from .pmg_spec authoritative.
@@ -309,21 +305,8 @@ private:
     std::string heatmap_status_ = "Pick a target clip, then Recompute.";
 
     // --- Graph runtime (PMG streaming, paper Sec 4-5) ---------------------------
-    // Builds a self-edge over the parametric space and drives a RuntimeController.
-    pmg::ParametricMotionGraph graph_;
-    pmg::RuntimeControllerConfig graph_runtime_config_;
-    // Owns the alignment strategy injected into the controller; must outlive it,
-    // so it is declared first (members destroy in reverse order).
-    std::optional<pmg::PointCloudAlignment> graph_alignment_;
-    std::optional<pmg::RuntimeController> graph_controller_;
-    bool graph_ready_ = false;
-    struct TransitionTraceMarker {
-        glm::vec2 root_position{0.0f};
-        int source_node = -1;
-        int target_node = -1;
-    };
-    std::vector<glm::vec2> graph_path_points_;
-    std::vector<TransitionTraceMarker> graph_transition_markers_;
+    // Runtime module owns the installed graph and controller lifecycle.
+    ViewerRuntimeModule runtime_;
     struct RootCanonicalizationMarker {
         std::string label;
         pmg::Vec3 raw_start;

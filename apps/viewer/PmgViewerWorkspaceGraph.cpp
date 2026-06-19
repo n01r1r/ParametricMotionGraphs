@@ -73,6 +73,26 @@ std::string ParameterLabel(const pmg::ParameterVector& parameter) {
     return output.str();
 }
 
+const char* ViewerRuntimeStatusLabel(ViewerRuntimeStatus status) {
+    switch (status) {
+        case ViewerRuntimeStatus::kNotInstalled:
+            return "not installed";
+        case ViewerRuntimeStatus::kIdle:
+            return "idle";
+        case ViewerRuntimeStatus::kNoOpSameParameter:
+            return "no-op (parameter unchanged)";
+        case ViewerRuntimeStatus::kWaitingForPhaseGate:
+            return "waiting for phase gate";
+        case ViewerRuntimeStatus::kTransitionActive:
+            return "transition active";
+        case ViewerRuntimeStatus::kNoFeasibleTransition:
+            return "no valid transition";
+        case ViewerRuntimeStatus::kInvalidRequest:
+            return "invalid request";
+    }
+    return "unknown";
+}
+
 std::string MotionSpaceClipSummary(
     const pmg::ParametricMotionSpace& motion_space) {
     constexpr int kMaxVisibleClipNames = 3;
@@ -197,10 +217,10 @@ pmg::ParameterVector ResolveDesiredParameterForNode(
 }
 
 pmg::ParameterVector PmgViewerWorkspace::DesiredParameterForNode(int node) const {
-    if (node < 0 || node >= graph_.NumNodes()) {
+    if (node < 0 || node >= runtime_.Graph().NumNodes()) {
         return {graph_desired_parameter_};
     }
-    const pmg::ParametricMotionSpace& space = graph_.Node(node).motion_space;
+    const pmg::ParametricMotionSpace& space = runtime_.Graph().Node(node).motion_space;
     return ResolveDesiredParameterForNode(
         space,
         graph_desired_parameter_,
@@ -210,10 +230,8 @@ pmg::ParameterVector PmgViewerWorkspace::DesiredParameterForNode(int node) const
 
 void PmgViewerWorkspace::ResetGraphRuntimeSession(
     bool discard_source_artifact) {
-    graph_ready_ = false;
     graph_origin_ = GraphOrigin::None;
-    graph_controller_.reset();
-    graph_alignment_.reset();
+    runtime_.Clear();
     graph_cyclic_summary_ = {};
     graph_cyclic_warning_.clear();
     goto_target_ = {0.0f, 0.0f};
@@ -226,7 +244,7 @@ void PmgViewerWorkspace::ResetGraphRuntimeSession(
 void PmgViewerWorkspace::ResetGraphRuntimeSelection() {
     graph_desired_node_ = 0;
     selected_graph_node_ = 0;
-    selected_graph_edge_ = graph_.NumEdges() > 0 ? 0 : -1;
+    selected_graph_edge_ = runtime_.Graph().NumEdges() > 0 ? 0 : -1;
     // Fresh graph: discard drag offsets so an equal node count cannot inherit a
     // prior graph's positions (size == NumNodes skips the on-demand reset).
     graph_node_offsets_.clear();
@@ -234,21 +252,22 @@ void PmgViewerWorkspace::ResetGraphRuntimeSelection() {
 }
 
 void PmgViewerWorkspace::StartGraphRuntimeController(
+    pmg::ParametricMotionGraph graph,
     const pmg::RuntimeControllerConfig& config,
     const std::string& status_label, GraphOrigin origin) {
-    graph_runtime_config_ = config;
-    graph_alignment_.emplace(
-        pmg_skeleton_, graph_runtime_config_.transition_blend_frames);
-    graph_controller_.emplace(
-        graph_, *graph_alignment_, graph_runtime_config_);
-    graph_controller_->Start(0, DesiredParameterForNode(0), graph_fps_);
-
-    graph_ready_ = true;
-    ResetRuntimeTrace();
+    const pmg::ParameterVector initial_parameter =
+        ResolveDesiredParameterForNode(
+            graph.Node(0).motion_space,
+            graph_desired_parameter_,
+            graph_desired_parameter_vector_valid_,
+            graph_desired_parameter_vector_);
+    runtime_.Install(
+        std::move(graph), pmg_skeleton_, config, graph_fps_, initial_parameter);
     graph_origin_ = origin;
     graph_open_runtime_tab_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
     graph_status_ = status_label;
+    ResetGraphRuntimeSelection();
 }
 
 void PmgViewerWorkspace::RebuildRootCanonicalizationMarkers() {
@@ -314,10 +333,9 @@ void PmgViewerWorkspace::AdoptArtifact(
     }
 
     pmg_skeleton_ = adopted.skeleton;
-    graph_ = adopted.graph;
     RebuildRootCanonicalizationMarkers();
     graph_fps_ = adopted.metadata.frames_per_second;
-    pmg_space_ = graph_.Node(0).motion_space;
+    pmg_space_ = adopted.graph.Node(0).motion_space;
     pmg_examples_.clear();
     for (const pmg::ExampleMotion& example : pmg_space_.Examples()) {
         PmgExample viewer_example{
@@ -334,8 +352,8 @@ void PmgViewerWorkspace::AdoptArtifact(
     const float gmin = pmg_parameter_min_.empty() ? 0.0f : pmg_parameter_min_.front();
     const float gmax = pmg_parameter_max_.empty() ? 1.0f : pmg_parameter_max_.front();
     graph_desired_parameter_ = 0.5f * (gmin + gmax);
-    ResetGraphRuntimeSelection();
     StartGraphRuntimeController(
+        adopted.graph,
         pmg::RuntimeControllerConfigFromArtifact(adopted),
         status_label, origin);
     playing_ = true;
@@ -474,11 +492,9 @@ void PmgViewerWorkspace::InstallSandboxGraph(
     // stale "Save artifact") and clear the runtime overlays (steering/goto).
     ResetGraphRuntimeSession(true);
 
-    graph_ = std::move(built);
-
     // The viewer's parameter slider and canvas assume a one-dimensional first
     // node; derive its range when present.
-    const pmg::ParametricMotionSpace& first_space = graph_.Node(0).motion_space;
+    const pmg::ParametricMotionSpace& first_space = built.Node(0).motion_space;
     if (first_space.ParameterDimension() == 1) {
         pmg_parameter_min_ = first_space.MinParameter();
         pmg_parameter_max_ = first_space.MaxParameter();
@@ -488,12 +504,11 @@ void PmgViewerWorkspace::InstallSandboxGraph(
             pmg_parameter_max_.empty() ? 1.0f : pmg_parameter_max_.front();
         graph_desired_parameter_ = std::clamp(graph_desired_parameter_, gmin, gmax);
     }
-    ResetGraphRuntimeSelection();
-
     // Runtime alignment holds a reference to pmg_skeleton_, so build it first.
-    pmg::RuntimeControllerConfig runtime_config = graph_runtime_config_;
+    pmg::RuntimeControllerConfig runtime_config = runtime_.Config();
     runtime_config.transition_blend_frames = std::max(1, blend_frames);
-    StartGraphRuntimeController(runtime_config, status_label, origin);
+    StartGraphRuntimeController(
+        std::move(built), runtime_config, status_label, origin);
 }
 
 void PmgViewerWorkspace::AddAuthoredNode() {
@@ -839,7 +854,7 @@ void PmgViewerWorkspace::DrawAuthoredGraphCanvas() {
 }
 
 void PmgViewerWorkspace::DrawGraphCanvas() {
-    if (!graph_ready_ || graph_.NumNodes() == 0) {
+    if (!runtime_.Ready() || runtime_.Graph().NumNodes() == 0) {
         return;
     }
 
@@ -857,21 +872,21 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
         origin, Add(origin, canvas_size), IM_COL32(65, 70, 82, 255), 6.0f);
 
     std::vector<ImVec2> node_positions(
-        static_cast<std::size_t>(graph_.NumNodes()), canvas_center);
-    if (graph_.NumNodes() == 2) {
+        static_cast<std::size_t>(runtime_.Graph().NumNodes()), canvas_center);
+    if (runtime_.Graph().NumNodes() == 2) {
         node_positions[0] = ImVec2(
             origin.x + 0.28f * width, canvas_center.y);
         node_positions[1] = ImVec2(
             origin.x + 0.72f * width, canvas_center.y);
-    } else if (graph_.NumNodes() > 2) {
+    } else if (runtime_.Graph().NumNodes() > 2) {
         const float radius = std::min(
             0.34f * width, 0.24f * kGraphCanvasHeight);
-        for (int node_index = 0; node_index < graph_.NumNodes(); ++node_index) {
+        for (int node_index = 0; node_index < runtime_.Graph().NumNodes(); ++node_index) {
             const float angle =
                 -0.5f * pmg::kPi +
                 2.0f * pmg::kPi *
                     static_cast<float>(node_index) /
-                    static_cast<float>(graph_.NumNodes());
+                    static_cast<float>(runtime_.Graph().NumNodes());
             node_positions[node_index] = ImVec2(
                 canvas_center.x + radius * std::cos(angle),
                 canvas_center.y + radius * std::sin(angle));
@@ -880,12 +895,12 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
 
     // Drag offsets ride on top of the auto-layout. Resize on demand so build and
     // load paths need no extra wiring; a node-count change resets the layout.
-    if (static_cast<int>(graph_node_offsets_.size()) != graph_.NumNodes()) {
+    if (static_cast<int>(graph_node_offsets_.size()) != runtime_.Graph().NumNodes()) {
         graph_node_offsets_.assign(
-            static_cast<std::size_t>(graph_.NumNodes()), glm::vec2(0.0f));
+            static_cast<std::size_t>(runtime_.Graph().NumNodes()), glm::vec2(0.0f));
         graph_drag_node_ = -1;
     }
-    for (int node_index = 0; node_index < graph_.NumNodes(); ++node_index) {
+    for (int node_index = 0; node_index < runtime_.Graph().NumNodes(); ++node_index) {
         node_positions[node_index].x += graph_node_offsets_[node_index].x;
         node_positions[node_index].y += graph_node_offsets_[node_index].y;
     }
@@ -896,7 +911,7 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
     const ImVec2 mouse_position = ImGui::GetIO().MousePos;
     int hovered_node = -1;
     if (canvas_hovered) {
-        for (int node_index = 0; node_index < graph_.NumNodes(); ++node_index) {
+        for (int node_index = 0; node_index < runtime_.Graph().NumNodes(); ++node_index) {
             if (Length(Subtract(mouse_position, node_positions[node_index])) <=
                 kGraphNodeRadius + 8.0f) {
                 hovered_node = node_index;
@@ -906,9 +921,7 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
     }
 
     const std::optional<pmg::RuntimeTransitionDiagnostics> active_transition =
-        graph_controller_.has_value()
-            ? graph_controller_->ActiveTransitionDiagnostics()
-            : std::nullopt;
+        runtime_.Snapshot().active_transition;
 
     struct EdgeGeometry {
         bool self_edge = false;
@@ -918,10 +931,10 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
         ImVec2 end;
     };
     std::vector<EdgeGeometry> edge_geometry(
-        static_cast<std::size_t>(graph_.NumEdges()));
+        static_cast<std::size_t>(runtime_.Graph().NumEdges()));
 
-    for (int edge_index = 0; edge_index < graph_.NumEdges(); ++edge_index) {
-        const pmg::PmgEdge& edge = graph_.Edge(edge_index);
+    for (int edge_index = 0; edge_index < runtime_.Graph().NumEdges(); ++edge_index) {
+        const pmg::PmgEdge& edge = runtime_.Graph().Edge(edge_index);
         const ImVec2 source = node_positions[edge.source_node];
         const ImVec2 target = node_positions[edge.target_node];
         const bool is_active =
@@ -977,9 +990,8 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
             {false, start, start, end, end};
     }
 
-    const int active_node =
-        graph_controller_.has_value() ? graph_controller_->CurrentNode() : -1;
-    for (int node_index = 0; node_index < graph_.NumNodes(); ++node_index) {
+    const int active_node = runtime_.Snapshot().current_node;
+    for (int node_index = 0; node_index < runtime_.Graph().NumNodes(); ++node_index) {
         const bool is_active = node_index == active_node;
         const bool is_target = node_index == graph_desired_node_;
         const bool is_selected = node_index == selected_graph_node_;
@@ -1008,7 +1020,7 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
             center, kGraphNodeRadius,
             IM_COL32(135, 145, 165, 255), 0, 2.0f);
 
-        const pmg::PmgNode& node = graph_.Node(node_index);
+        const pmg::PmgNode& node = runtime_.Graph().Node(node_index);
         // The disc is a pure color indicator; name + subtitle stack below it on
         // the dark canvas, so labels of any length stay legible and never spill
         // over the fill.
@@ -1046,7 +1058,7 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
     if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         const ImVec2 mouse = ImGui::GetIO().MousePos;
         int clicked_node = -1;
-        for (int node_index = 0; node_index < graph_.NumNodes(); ++node_index) {
+        for (int node_index = 0; node_index < runtime_.Graph().NumNodes(); ++node_index) {
             if (Length(Subtract(mouse, node_positions[node_index])) <=
                 kGraphNodeRadius + 8.0f) {
                 clicked_node = node_index;
@@ -1063,7 +1075,7 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
         } else {
             float best_distance = 12.0f;
             int clicked_edge = -1;
-            for (int edge_index = 0; edge_index < graph_.NumEdges(); ++edge_index) {
+            for (int edge_index = 0; edge_index < runtime_.Graph().NumEdges(); ++edge_index) {
                 const EdgeGeometry& geometry = edge_geometry[edge_index];
                 float distance = std::numeric_limits<float>::infinity();
                 if (!geometry.self_edge) {
@@ -1104,18 +1116,18 @@ void PmgViewerWorkspace::DrawParameterCoverage() {
         "Example samples and the axis-extreme corners of the parameter box. A "
         "red ring marks a corner no example reaches (that quadrant is "
         "extrapolation, not interpolation).");
-    if (!graph_ready_ || graph_.NumNodes() == 0) {
+    if (!runtime_.Ready() || runtime_.Graph().NumNodes() == 0) {
         ImGui::TextDisabled("Load or build a graph to inspect coverage.");
         return;
     }
 
     selected_graph_node_ =
-        std::clamp(selected_graph_node_, 0, graph_.NumNodes() - 1);
+        std::clamp(selected_graph_node_, 0, runtime_.Graph().NumNodes() - 1);
     if (ImGui::BeginCombo("Node##coverage_node",
-                          graph_.Node(selected_graph_node_).name.c_str())) {
-        for (int index = 0; index < graph_.NumNodes(); ++index) {
+                          runtime_.Graph().Node(selected_graph_node_).name.c_str())) {
+        for (int index = 0; index < runtime_.Graph().NumNodes(); ++index) {
             const bool selected = index == selected_graph_node_;
-            if (ImGui::Selectable(graph_.Node(index).name.c_str(), selected)) {
+            if (ImGui::Selectable(runtime_.Graph().Node(index).name.c_str(), selected)) {
                 selected_graph_node_ = index;
             }
         }
@@ -1123,7 +1135,7 @@ void PmgViewerWorkspace::DrawParameterCoverage() {
     }
 
     const pmg::ParametricMotionSpace& space =
-        graph_.Node(selected_graph_node_).motion_space;
+        runtime_.Graph().Node(selected_graph_node_).motion_space;
     const std::vector<pmg::ExampleMotion>& examples = space.Examples();
     const int dimension = space.ParameterDimension();
     if (examples.empty() || dimension <= 0) {
@@ -1315,10 +1327,10 @@ void PmgViewerWorkspace::DrawParameterCoverage() {
 void PmgViewerWorkspace::BuildGraphSection() {
     ImGui::Text("Current graph: %s", GraphOriginLabel());
     ImGui::SameLine();
-    if (graph_ready_) {
+    if (runtime_.Ready()) {
         ImGui::TextDisabled(
             "| %d nodes, %d edges | %s",
-            graph_.NumNodes(), graph_.NumEdges(), GraphPersistenceLabel());
+            runtime_.Graph().NumNodes(), runtime_.Graph().NumEdges(), GraphPersistenceLabel());
     } else {
         ImGui::TextDisabled("| no live graph");
     }
@@ -1602,7 +1614,7 @@ void PmgViewerWorkspace::BuildGraphAuthorTab() {
 }
 
 void PmgViewerWorkspace::BuildGraphRuntimeTab() {
-    if (!graph_ready_ || !graph_controller_.has_value()) {
+    if (!runtime_.Ready()) {
         ImGui::TextDisabled(
             "No live graph. Build one from Author, From spec, or Quick self-edge.");
         return;
@@ -1610,7 +1622,7 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
 
     ImGui::Text(
         "%s | %d nodes, %d edges | %s",
-        GraphOriginLabel(), graph_.NumNodes(), graph_.NumEdges(),
+        GraphOriginLabel(), runtime_.Graph().NumNodes(), runtime_.Graph().NumEdges(),
         GraphPersistenceLabel());
     if (!graph_cyclic_warning_.empty()) {
         ImGui::TextColored(
@@ -1678,8 +1690,9 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
         }
     }
 
-    const int current_node = graph_controller_->CurrentNode();
-    if (graph_desired_node_ < 0 || graph_desired_node_ >= graph_.NumNodes()) {
+    const ViewerRuntimeSnapshot runtime = runtime_.Snapshot();
+    const int current_node = runtime.current_node;
+    if (graph_desired_node_ < 0 || graph_desired_node_ >= runtime_.Graph().NumNodes()) {
         graph_desired_node_ = current_node;
     }
 
@@ -1687,9 +1700,9 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
     ImGui::Separator();
 
     if (selected_graph_node_ >= 0 &&
-        selected_graph_node_ < graph_.NumNodes()) {
+        selected_graph_node_ < runtime_.Graph().NumNodes()) {
         const pmg::PmgNode& selected_node =
-            graph_.Node(selected_graph_node_);
+            runtime_.Graph().Node(selected_graph_node_);
         ImGui::Text(
             "Selected node: %s | %dD | %d samples",
             selected_node.name.c_str(),
@@ -1702,22 +1715,22 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
             }
         }
     } else if (selected_graph_edge_ >= 0 &&
-               selected_graph_edge_ < graph_.NumEdges()) {
+               selected_graph_edge_ < runtime_.Graph().NumEdges()) {
         const pmg::PmgEdge& selected_edge =
-            graph_.Edge(selected_graph_edge_);
+            runtime_.Graph().Edge(selected_graph_edge_);
         ImGui::Text(
             "Selected edge: %s -> %s | %zu transition samples",
-            graph_.Node(selected_edge.source_node).name.c_str(),
-            graph_.Node(selected_edge.target_node).name.c_str(),
+            runtime_.Graph().Node(selected_edge.source_node).name.c_str(),
+            runtime_.Graph().Node(selected_edge.target_node).name.c_str(),
             selected_edge.samples.size());
     }
 
     const pmg::ParametricMotionSpace& target_space =
-        graph_.Node(graph_desired_node_).motion_space;
+        runtime_.Graph().Node(graph_desired_node_).motion_space;
     ImGui::Text(
         "Runtime request: %s -> %s",
-        graph_.Node(current_node).name.c_str(),
-        graph_.Node(graph_desired_node_).name.c_str());
+        runtime_.Graph().Node(current_node).name.c_str(),
+        runtime_.Graph().Node(graph_desired_node_).name.c_str());
     if (target_space.ParameterDimension() == 1) {
         const float target_min = target_space.MinParameter().front();
         const float target_max = target_space.MaxParameter().front();
@@ -1794,23 +1807,24 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
             graph_desired_parameter_vector_valid_ = true;
         }
 
-        auto preview = graph_controller_->ActiveTransitionDiagnostics();
-        if (!preview) {
-             if (graph_desired_parameter_vector_valid_ && graph_desired_parameter_vector_.size() == 2) {
-                 ImVec2 req = param_to_canvas(graph_desired_parameter_vector_);
-                 draw_list->AddCircleFilled(req, 4.0f, IM_COL32(255, 100, 100, 255));
-                 draw_list->AddCircle(req, 5.0f, IM_COL32(255, 255, 255, 255));
-             }
-        } else {
-             if (preview->requested_target_parameter.size() == 2) {
-                 ImVec2 req = param_to_canvas(preview->requested_target_parameter);
-                 draw_list->AddCircleFilled(req, 3.0f, IM_COL32(255, 200, 200, 255));
-                 draw_list->AddCircle(req, 4.0f, IM_COL32(255, 255, 255, 255));
-             }
-             if (preview->actual_target_parameter.size() == 2) {
-                 ImVec2 act = param_to_canvas(preview->actual_target_parameter);
-                 draw_list->AddCircleFilled(act, 4.0f, IM_COL32(100, 255, 100, 255));
-             }
+        if (runtime.requested_raw.has_value() &&
+            runtime.requested_raw->size() == 2) {
+            const ImVec2 requested = param_to_canvas(*runtime.requested_raw);
+            draw_list->AddCircleFilled(
+                requested, 4.0f, IM_COL32(255, 100, 100, 255));
+            draw_list->AddCircle(
+                requested, 5.0f, IM_COL32(255, 255, 255, 255));
+        }
+        if (runtime.requested_projected.has_value() &&
+            runtime.requested_projected->size() == 2) {
+            const ImVec2 projected = param_to_canvas(*runtime.requested_projected);
+            draw_list->AddCircleFilled(
+                projected, 4.0f, IM_COL32(255, 200, 100, 255));
+        }
+        if (runtime.runtime_actual.has_value() &&
+            runtime.runtime_actual->size() == 2) {
+            const ImVec2 actual = param_to_canvas(*runtime.runtime_actual);
+            draw_list->AddCircleFilled(actual, 4.0f, IM_COL32(100, 255, 100, 255));
         }
         
         ImGui::TextDisabled("Requested parameter is updated immediately; actual transition\n"
@@ -1822,10 +1836,10 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
 
     ImGui::Text(
         "Active: %s | phase %.3f | completed transitions %d",
-        graph_.Node(current_node).name.c_str(),
-        graph_controller_->CurrentPhase(),
-        graph_controller_->CompletedTransitions());
-    const pmg::Pose current_pose = graph_controller_->CurrentPose();
+        runtime_.Graph().Node(current_node).name.c_str(),
+        runtime.current_phase,
+        runtime.completed_transitions);
+    const pmg::Pose current_pose = runtime.current_pose.value_or(pmg::Pose{});
     ImGui::Text(
         "Root: x %.2f | z %.2f | heading %.1f deg | turn %.3f rad/s",
         current_pose.root_position.x,
@@ -1843,11 +1857,11 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
                     &show_anchor_root_trajectories_);
     ImGui::SameLine();
     if (ImGui::Button("Clear trace")) {
-        ResetRuntimeTrace();
+        runtime_.ClearTrace();
     }
     ImGui::TextDisabled(
         "%zu trail points | %zu transitions",
-        graph_path_points_.size(), graph_transition_markers_.size());
+        runtime.runtime_path_points.size(), runtime.transition_markers.size());
     DrawTransitionPipeline();
 
     ImGui::Separator();
@@ -1864,7 +1878,7 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
             calibration.LowestRate(), calibration.HighestRate());
     }
     if (goto_active_) {
-        const pmg::Pose pose = graph_controller_->CurrentPose();
+        const pmg::Pose pose = runtime.current_pose.value_or(pmg::Pose{});
         const float dx = goto_target_.x - pose.root_position.x;
         const float dz = goto_target_.y - pose.root_position.z;
         ImGui::Text(
@@ -1881,34 +1895,29 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
 }
 
 void PmgViewerWorkspace::DrawTransitionPipeline() {
-    if (!graph_ready_ || !graph_controller_.has_value()) {
+    if (!runtime_.Ready()) {
         return;
     }
 
-    const int source_node = graph_controller_->CurrentNode();
-    const pmg::ParameterVector& source_parameter =
-        graph_controller_->CurrentParameter();
-    const pmg::ParameterVector requested_target =
-        DesiredParameterForNode(graph_desired_node_);
-
-    const pmg::PmgEdge* selected_edge = nullptr;
-    for (const int edge_index : graph_.OutgoingEdgeIndices(source_node)) {
-        const pmg::PmgEdge& edge = graph_.Edge(edge_index);
-        if (edge.target_node == graph_desired_node_) {
-            selected_edge = &edge;
-            break;
+    const ViewerRuntimeSnapshot runtime = runtime_.Snapshot();
+    const std::optional<pmg::RuntimeTransitionDiagnostics>& active =
+        runtime.active_transition;
+    const int source_node = active.has_value()
+        ? active->source_node
+        : runtime.current_node;
+    const int target_node = active.has_value()
+        ? active->target_node
+        : runtime.desired_node;
+    const pmg::ParameterVector source_parameter =
+        active.has_value()
+            ? active->source_parameter
+            : runtime.runtime_actual.value_or(pmg::ParameterVector{});
+    const auto node_label = [&](int node) -> const char* {
+        if (node < 0 || node >= runtime_.Graph().NumNodes()) {
+            return "none";
         }
-    }
-
-    std::optional<pmg::InterpolatedTransition> preview;
-    if (selected_edge != nullptr &&
-        source_parameter.size() == graph_.Node(source_node).motion_space.ParameterDimension() &&
-        requested_target.size() == graph_.Node(graph_desired_node_).motion_space.ParameterDimension()) {
-        preview = selected_edge->LookupInterpolated(
-            source_parameter, requested_target);
-    }
-    const std::optional<pmg::RuntimeTransitionDiagnostics> active =
-        graph_controller_->ActiveTransitionDiagnostics();
+        return runtime_.Graph().Node(node).name.c_str();
+    };
 
     ImGui::Separator();
     ImGui::TextDisabled("Transition");
@@ -1919,8 +1928,6 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     constexpr const char* kActualTargetLabel = "RUNTIME ACTUAL";
     constexpr const char* kSchedulingLabel = "SCHEDULING";
     constexpr const char* kCompletedTransitionsLabel = "COMPLETED";
-    constexpr const char* kMetricContractLabel = "METRIC";
-    constexpr const char* kMetricSupportLabel = "METRIC SUPPORT";
     constexpr const char* kRuntimeSupportLabel = "RUNTIME SUPPORT";
     constexpr const char* kAlignmentTransformLabel = "ALIGNMENT";
     constexpr const char* kRuntimeBlendWindowLabel = "BLEND";
@@ -1941,69 +1948,51 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     ImGui::SameLine(value_column_x);
     if (!source_parameter.empty()) {
         ImGui::Text("%s  p=%s",
-                    graph_.Node(source_node).name.c_str(),
+                    node_label(source_node),
                     ParameterLabel(source_parameter).c_str());
     }
 
     ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kRequestedRawLabel);
     ImGui::SameLine(value_column_x);
     ImGui::Text("%s  p=%s",
-                graph_.Node(graph_desired_node_).name.c_str(),
-                ParameterLabel(requested_target).c_str());
+                node_label(target_node),
+                ParameterLabel(
+                    runtime.requested_raw.value_or(pmg::ParameterVector{})).c_str());
 
     ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kProjectedSupportLabel);
     ImGui::SameLine(value_column_x);
-    pmg::ParameterVector projected_target = requested_target;
-    if (graph_.Node(graph_desired_node_).motion_space.HasExplicitParameterSupport()) {
-        projected_target = graph_.Node(graph_desired_node_).motion_space.ProjectToSupport(requested_target);
-    } else {
-        projected_target = graph_.Node(graph_desired_node_).motion_space.ClampToDomain(requested_target);
-    }
     ImGui::Text("%s  p=%s",
-                graph_.Node(graph_desired_node_).name.c_str(),
-                ParameterLabel(projected_target).c_str());
+                node_label(target_node),
+                ParameterLabel(
+                    runtime.requested_projected.value_or(pmg::ParameterVector{})).c_str());
 
     ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kActualTargetLabel);
     ImGui::SameLine(value_column_x);
-    if (active.has_value()) {
+    if (runtime.runtime_actual.has_value()) {
         ImGui::Text("%s  p=%s",
-                    graph_.Node(active->target_node).name.c_str(),
-                    ParameterLabel(active->actual_target_parameter).c_str());
+                    node_label(target_node),
+                    ParameterLabel(*runtime.runtime_actual).c_str());
     } else {
         ImGui::TextDisabled("pending");
     }
 
     ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kSchedulingLabel);
     ImGui::SameLine(value_column_x);
-    if (active.has_value()) {
-        ImGui::Text("transition active");
-    } else if (preview.has_value()) {
-        ImGui::TextDisabled("waiting for phase gate");
-    } else if (graph_desired_node_ == source_node) {
-        if (projected_target.size() == source_parameter.size() &&
-            pmg::SquaredDistance(projected_target, source_parameter) <
-                pmg::kSmallEpsilon * pmg::kSmallEpsilon) {
-            ImGui::TextDisabled("no self-edge (parameter unchanged)");
-        } else {
-            ImGui::TextDisabled("waiting for phase gate");
-        }
-    } else {
-        ImGui::TextDisabled("no valid transition");
-    }
+    ImGui::TextDisabled("%s", ViewerRuntimeStatusLabel(runtime.status));
 
     ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kCompletedTransitionsLabel);
     ImGui::SameLine(value_column_x);
-    ImGui::Text("%d", graph_controller_->CompletedTransitions());
+    ImGui::Text("%d", runtime.completed_transitions);
 
-    if (preview.has_value() || active.has_value()) {
-        const float source_phase =
-            active.has_value()
-                ? active->source_transition_phase
-                : preview->source_transition_phase;
-        const float target_phase =
-            active.has_value()
-                ? active->target_transition_phase
-                : preview->target_transition_phase;
+    if (runtime.transition_preview.has_value() || active.has_value()) {
+        const pmg::InterpolatedTransition* preview =
+            runtime.transition_preview.has_value() ? &*runtime.transition_preview : nullptr;
+        const float source_phase = active.has_value()
+            ? active->source_transition_phase
+            : preview->source_transition_phase;
+        const float target_phase = active.has_value()
+            ? active->target_transition_phase
+            : preview->target_transition_phase;
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         const float width = std::max(120.0f, ImGui::GetContentRegionAvail().x);
         ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -2018,120 +2007,6 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
             draw_list, target_phase, origin.x, origin.y + 2.0f,
             width, 12.0f, IM_COL32(245, 180, 65, 255));
         ImGui::InvisibleButton("##transition_phases", ImVec2(width, 20.0f));
-    }
-
-    const pmg::EdgeBuildMetadata* metric_metadata = nullptr;
-    if (source_artifact_.has_value()) {
-        int metric_source_node = source_node;
-        int metric_target_node = graph_desired_node_;
-        if (active.has_value()) {
-            metric_source_node = active->source_node;
-            metric_target_node = active->target_node;
-        } else if (selected_edge != nullptr) {
-            metric_source_node = selected_edge->source_node;
-            metric_target_node = selected_edge->target_node;
-        }
-        const std::string& source_name = graph_.Node(metric_source_node).name;
-        const std::string& target_name = graph_.Node(metric_target_node).name;
-        for (const pmg::EdgeBuildMetadata& edge_build :
-             source_artifact_->metadata.edge_builds) {
-            if (edge_build.source_node == source_name &&
-                edge_build.target_node == target_name) {
-                metric_metadata = &edge_build;
-                break;
-            }
-        }
-    }
-
-    ImGui::TextColored(
-        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        kMetricContractLabel);
-    ImGui::SameLine(value_column_x);
-    if (metric_metadata != nullptr) {
-        float transition_distance = 0.0f;
-        bool has_distance = false;
-        if (active.has_value()) {
-            transition_distance = active->interpolated_transition_distance;
-            has_distance = true;
-        } else if (preview.has_value()) {
-            transition_distance = preview->transition_distance;
-            has_distance = true;
-        }
-        if (has_distance) {
-            ImGui::Text(
-                "%s  D %.3f  GOOD <= %.3f  BAD >= %.3f",
-                pmg::TransitionMetricTypeName(
-                    metric_metadata->config.transition_metric_type),
-                transition_distance,
-                metric_metadata->config.good_transition_threshold,
-                metric_metadata->config.bad_transition_threshold);
-        } else {
-            ImGui::Text(
-                "%s  GOOD <= %.3f  BAD >= %.3f",
-                pmg::TransitionMetricTypeName(
-                    metric_metadata->config.transition_metric_type),
-                metric_metadata->config.good_transition_threshold,
-                metric_metadata->config.bad_transition_threshold);
-        }
-    } else {
-        ImGui::TextDisabled("artifact metric metadata unavailable");
-    }
-
-    ImGui::TextColored(
-        ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-        kMetricSupportLabel);
-    ImGui::SameLine(value_column_x);
-    if (active.has_value()) {
-        pmg::TransitionWindowConvention metric_convention =
-            pmg::TransitionWindowConvention::kKovarDirectional;
-        int metric_window_size =
-            graph_runtime_config_.transition_blend_frames;
-        if (source_artifact_.has_value()) {
-            const std::string& source_name =
-                graph_.Node(active->source_node).name;
-            const std::string& target_name =
-                graph_.Node(active->target_node).name;
-            for (const pmg::EdgeBuildMetadata& edge_build :
-                 source_artifact_->metadata.edge_builds) {
-                if (edge_build.source_node == source_name &&
-                    edge_build.target_node == target_name) {
-                    metric_convention =
-                        edge_build.config.transition_convention;
-                    metric_window_size =
-                        edge_build.config.distance_grid.window_size;
-                    break;
-                }
-            }
-        }
-        const pmg::MotionClip source_clip =
-            graph_.Node(active->source_node).motion_space.GenerateClip(
-                active->source_parameter, graph_fps_);
-        const pmg::MotionClip target_clip =
-            graph_.Node(active->target_node).motion_space.GenerateClip(
-                active->actual_target_parameter, graph_fps_);
-        const int source_reference_frame = static_cast<int>(std::lround(
-            active->source_transition_phase *
-            static_cast<float>(
-                std::max(1, source_clip.NumFrames() - 1))));
-        const int target_reference_frame = static_cast<int>(std::lround(
-            active->target_transition_phase *
-            static_cast<float>(
-                std::max(1, target_clip.NumFrames() - 1))));
-        const pmg::TransitionFrameWindows metric_windows =
-            pmg::ResolveTransitionFrameWindows(
-                source_clip.NumFrames(), target_clip.NumFrames(),
-                source_reference_frame, target_reference_frame,
-                metric_window_size, metric_convention);
-        const std::string source_frames =
-            FrameList(metric_windows.source.sampled_frames);
-        const std::string target_frames =
-            FrameList(metric_windows.target.sampled_frames);
-        ImGui::Text(
-            "%s  src %s  tgt %s",
-            pmg::TransitionWindowConventionName(metric_convention),
-            source_frames.c_str(), target_frames.c_str());
-    } else {
-        ImGui::TextDisabled("available during active transition");
     }
 
     ImGui::TextColored(
@@ -2173,7 +2048,7 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     if (active.has_value()) {
         ImGui::Text(
             "%d frames   %.3f / %.3f s",
-            graph_runtime_config_.transition_blend_frames,
+            runtime_.Config().transition_blend_frames,
             active->blend_elapsed_seconds,
             active->blend_duration_seconds);
         ImGui::ProgressBar(
@@ -2181,7 +2056,7 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     } else {
         ImGui::Text(
             "%d frames @ %.1f fps",
-            graph_runtime_config_.transition_blend_frames, graph_fps_);
+            runtime_.Config().transition_blend_frames, graph_fps_);
     }
 }
 

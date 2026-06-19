@@ -18,9 +18,10 @@
 #include <cmath>
 #include <cstdio>
 #include <exception>
+#include <memory>
 
 #include "Camera.h"
-#include "PmgViewerWorkspaceFactory.h"
+#include "PmgViewerWorkspace.h"
 #include "ViewerHost.h"
 
 namespace {
@@ -205,7 +206,7 @@ int main(int argc, char** argv) {
     ImGui_ImplOpenGL3_Init("#version 330");
 
     try {
-        pmgviewer::ViewerHost app(pmgviewer::CreatePmgViewerWorkspace());
+        pmgviewer::ViewerHost app(std::make_unique<pmgviewer::PmgViewerWorkspace>());
         app.Initialize(argc >= 2 ? argv[1] : "");
 
         InputState input;

@@ -32,6 +32,7 @@ struct GraphPayloadFormat {
 
 std::optional<GraphPayloadFormat> FormatForHeader(const std::string& header) {
     //                                       meta+skel warp  calib vector target quoted conv   dist   metric support
+    if (header == "PMG_GRAPH_V12") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true};
     if (header == "PMG_GRAPH_V11") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true};
     if (header == "PMG_GRAPH_V10") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  false};
     if (header == "PMG_GRAPH_V9")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  false, false};
@@ -956,7 +957,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V11\n";
+    output << "PMG_GRAPH_V12\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
@@ -974,7 +975,7 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     const std::optional<GraphPayloadFormat> format = FormatForHeader(header);
     if (!format) {
         throw std::runtime_error(
-            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V11");
+            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V12");
     }
 
     BuiltPmgArtifact artifact;

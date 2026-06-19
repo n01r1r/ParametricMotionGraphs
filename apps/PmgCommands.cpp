@@ -1,5 +1,3 @@
-#include "PmgCommands.h"
-
 #include "PmgCommandModules.h"
 
 #include <exception>
@@ -50,7 +48,7 @@ void PrintUsage() {
 
 }  // namespace
 
-int RunPmgCli(int argc, char** argv) {
+int main(int argc, char** argv) {
     try {
         using CommandRunner = std::optional<int> (*)(int, char**);
         constexpr CommandRunner kCommandRunners[] = {

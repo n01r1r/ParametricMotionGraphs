@@ -400,6 +400,18 @@ int main() {
         assert(legacy.graph.NumEdges() == 1);
     }
 
+    // GraphIo_MalformedInputFails
+    {
+        std::ofstream(path) << "PMG_GRAPH_V99\n";
+        bool rejected = false;
+        try {
+            (void)pmg::LoadPmgArtifactText(path.string());
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        assert(rejected);
+    }
+
     {
         WriteV4Fixture(path);
         const pmg::BuiltPmgArtifact v4 = pmg::LoadPmgArtifactText(path.string());

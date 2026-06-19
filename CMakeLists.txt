@@ -18,7 +18,6 @@ add_library(pmg_core
     src/GoalDirectedLocomotion.cpp
     src/GraphIo.cpp
     src/GraphSpec.cpp
-    src/LegacyFrameCountClipGeneration.cpp
     src/MotionClip.cpp
     src/MotionDistance.cpp
     src/MotionRegistration.cpp
@@ -28,6 +27,7 @@ add_library(pmg_core
     src/ParameterSupport.cpp
     src/PmgArtifact.cpp
     src/PmgBuilder.cpp
+    src/PmgOfflinePipeline.cpp
     src/PoseBlend.cpp
     src/RootCanonicalization.cpp
     src/RuntimeController.cpp
@@ -45,7 +45,6 @@ target_compile_options(pmg_core PRIVATE
 )
 
 add_executable(pmg_cli
-    apps/pmg_cli.cpp
     apps/PmgBvhCommands.cpp
     apps/PmgCommands.cpp
     apps/PmgDiagnosticCommands.cpp
@@ -133,6 +132,10 @@ if(PMG_BUILD_TESTS)
     add_executable(test_graph_spec tests/test_graph_spec.cpp)
     target_link_libraries(test_graph_spec PRIVATE pmg_core)
     add_test(NAME test_graph_spec COMMAND test_graph_spec)
+
+    add_executable(test_pmg_offline_pipeline tests/test_pmg_offline_pipeline.cpp)
+    target_link_libraries(test_pmg_offline_pipeline PRIVATE pmg_core)
+    add_test(NAME test_pmg_offline_pipeline COMMAND test_pmg_offline_pipeline)
 
     add_executable(test_motion_space_preparation tests/test_motion_space_preparation.cpp)
     target_link_libraries(test_motion_space_preparation PRIVATE pmg_core)
@@ -287,6 +290,7 @@ if(PMG_BUILD_VIEWER)
     add_library(pmg_viewer_workspace STATIC
         apps/viewer/PmgViewerWorkspace.cpp
         apps/viewer/PmgViewerWorkspaceGraph.cpp
+        apps/viewer/ViewerRuntimeModule.cpp
     )
     target_include_directories(pmg_viewer_workspace PUBLIC apps/viewer)
     target_link_libraries(pmg_viewer_workspace
@@ -303,6 +307,7 @@ if(PMG_BUILD_VIEWER)
 
     add_executable(pmg_viewer apps/viewer/main.cpp)
     target_link_libraries(pmg_viewer PRIVATE
+        pmg_core
         viewer_host
         pmg_viewer_workspace
     )
@@ -323,5 +328,11 @@ if(PMG_BUILD_VIEWER)
         target_include_directories(test_viewer_graph_runtime PRIVATE apps/viewer include)
         target_link_libraries(test_viewer_graph_runtime PRIVATE pmg_viewer_workspace pmg_core)
         add_test(NAME test_viewer_graph_runtime COMMAND test_viewer_graph_runtime)
+
+        add_executable(test_viewer_runtime_module
+            apps/viewer/tests/test_viewer_runtime_module.cpp)
+        target_include_directories(test_viewer_runtime_module PRIVATE apps/viewer include)
+        target_link_libraries(test_viewer_runtime_module PRIVATE pmg_viewer_workspace pmg_core)
+        add_test(NAME test_viewer_runtime_module COMMAND test_viewer_runtime_module)
     endif()
 endif()

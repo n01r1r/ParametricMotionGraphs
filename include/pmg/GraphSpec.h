@@ -103,9 +103,8 @@ struct ArtifactBuildConfig {
     float skeleton_offset_tolerance = 1.0e-4f;
 };
 
-// Builds the paper-core offline artifact: loads and cycle-normalizes examples,
-// installs contact/DTW registration, samples every requested edge, and returns
-// the Skeleton plus reproducibility metadata needed by online playback.
+// Compatibility wrapper for the paper offline pipeline. New orchestration lives
+// in PmgOfflinePipeline; GraphSpec owns parse and structural validation.
 BuiltPmgArtifact BuildPmgArtifactFromSpec(
     const GraphSpec& spec,
     const ArtifactBuildConfig& config = {});
