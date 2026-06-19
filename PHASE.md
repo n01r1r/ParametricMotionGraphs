@@ -244,7 +244,13 @@ Acceptance criteria:
 
 ---
 
-### Phase A4 — Threshold Visual Acceptance and Default Decision
+### Phase A4 — Threshold Visual Acceptance and Default Decision — COMPLETE (2026-06-19)
+
+Completed artifacts: `build/threshold_default_decision.md` and
+`docs/audits/threshold-default-decision-20260619.md`. Decision:
+`COMMIT_120_234_AS_DEFAULT`. Quantitative evidence plus manual viewer
+inspection accepted `120/234`, so the triangulated demo spec now uses
+`edge_config walk_2d walk_2d 120 234 3 6 41` as the committed default.
 
 Convert the existing `120/234` threshold candidate from experimental to either default or documented experimental.
 
