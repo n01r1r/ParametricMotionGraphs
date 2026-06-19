@@ -2224,6 +2224,15 @@ struct ReachableRegionAuditOptions {
     int samples_per_axis = 11;
 };
 
+struct TransitionMontageAuditOptions {
+    std::string pmg_path;
+    std::string output_md;
+    std::string output_dir;
+    std::string source_node;
+    std::string target_node;
+    int samples_per_axis = 9;
+};
+
 struct ReachableRegionAuditRow {
     pmg::ParameterVector source_parameter;
     pmg::ParameterAabb target_box;
@@ -2859,6 +2868,641 @@ int ReachableRegionAuditCommand(const ReachableRegionAuditOptions& options) {
     std::cout << "reachable_region_md=" << options.output_md << "\n";
     std::cout << "reachable_region_maps=" << options.output_dir << "\n";
     std::cout << "reachable_region_conclusion=" << data.conclusion << "\n";
+    return 0;
+}
+
+struct TransitionMontageRow {
+    std::string category;
+    int category_rank = 0;
+    std::string montage_id;
+    std::string replay_id;
+    pmg::ParameterVector source_parameter;
+    pmg::ParameterVector requested_target_parameter;
+    pmg::ParameterVector effective_target_parameter;
+    float source_phase = 0.0f;
+    float target_phase = 0.0f;
+    int source_frame = -1;
+    int target_frame = -1;
+    float transition_distance = 0.0f;
+    std::string transition_class;
+    float root_jump = 0.0f;
+    float heading_jump = 0.0f;
+    float velocity_jump = 0.0f;
+    int blend_frames = 0;
+    std::string notes;
+};
+
+struct TransitionMontageAuditData {
+    std::string source_node;
+    std::string target_node;
+    pmg::PmgBuilderConfig config;
+    std::string manifest_csv_path;
+    std::vector<TransitionMontageRow> rows;
+    int unique_transition_count = 0;
+    int accepted_count = 0;
+    int rejected_count = 0;
+    int rejected_jog_walk_count = 0;
+    std::string conclusion;
+};
+
+constexpr float kTransitionMontageAnchorTolerance = 1.0e-5f;
+constexpr float kTransitionMontageProjectedNoteTolerance = 1.0e-4f;
+constexpr int kWorstAcceptedSamples = 8;
+constexpr int kNearThresholdSamples = 8;
+constexpr int kRejectedJogWalkSamples = 8;
+constexpr int kAnchorToAnchorSamples = 12;
+constexpr int kOutsideRequestSamples = 8;
+constexpr int kShrinkageSamples = 8;
+
+bool SameParameterWithin(
+    const pmg::ParameterVector& left,
+    const pmg::ParameterVector& right,
+    float tolerance) {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t axis = 0; axis < left.size(); ++axis) {
+        if (std::abs(left[axis] - right[axis]) > tolerance) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string NearestAnchorLabel(
+    const pmg::ParameterSupport& support,
+    const pmg::ParameterVector& parameter) {
+    int best_index = -1;
+    float best_distance = std::numeric_limits<float>::infinity();
+    for (std::size_t index = 0; index < support.Vertices().size(); ++index) {
+        const float distance =
+            pmg::SquaredDistance(parameter, support.Vertices()[index]);
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_index = static_cast<int>(index);
+        }
+    }
+    return best_index >= 0 ? "anchor_" + std::to_string(best_index)
+                           : "anchor_unknown";
+}
+
+bool IsAnchorParameter(
+    const pmg::ParameterSupport& support,
+    const pmg::ParameterVector& parameter) {
+    for (const pmg::ParameterVector& vertex : support.Vertices()) {
+        if (SameParameterWithin(
+                parameter, vertex, kTransitionMontageAnchorTolerance)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+float ParameterAxisOrZero(const pmg::ParameterVector& parameter, int axis) {
+    return axis >= 0 && axis < static_cast<int>(parameter.size())
+               ? parameter[static_cast<std::size_t>(axis)]
+               : 0.0f;
+}
+
+bool IsJogWalkPair(
+    const pmg::ParameterVector& source_parameter,
+    const pmg::ParameterVector& target_parameter) {
+    const float source_speed_axis = ParameterAxisOrZero(source_parameter, 1);
+    const float target_speed_axis = ParameterAxisOrZero(target_parameter, 1);
+    return std::max(source_speed_axis, target_speed_axis) >= 0.75f &&
+           std::min(source_speed_axis, target_speed_axis) <= 0.25f;
+}
+
+struct TransitionAuditCandidate {
+    pmg::ParameterVector source_parameter;
+    pmg::ParameterVector requested_target_parameter;
+    pmg::ParameterVector effective_target_parameter;
+    pmg::OptimalTransition transition;
+    bool accepted = false;
+    bool source_is_anchor = false;
+    bool requested_target_is_anchor = false;
+    bool requested_target_projected = false;
+    bool effective_target_projected = false;
+    bool jog_walk_pair = false;
+    float source_coverage = 0.0f;
+    std::string transition_class;
+    std::string notes;
+};
+
+TransitionAuditCandidate BuildTransitionAuditCandidate(
+    const pmg::BuiltPmgArtifact& artifact,
+    const pmg::PmgEdge& edge,
+    const pmg::PmgNode& source_node,
+    const pmg::PmgNode& target_node,
+    const pmg::PmgBuilderConfig& config,
+    const ReachableRegionAuditData& reachable_data,
+    const pmg::ParameterVector& source_parameter,
+    const pmg::ParameterVector& requested_target_parameter,
+    const pmg::ParameterSupport* source_support,
+    const pmg::ParameterSupport* target_support) {
+    const std::optional<pmg::InterpolatedTransition> interpolated =
+        edge.LookupInterpolated(source_parameter, requested_target_parameter);
+    if (!interpolated.has_value()) {
+        throw std::runtime_error(
+            "transition montage audit: edge lookup returned no transition");
+    }
+
+    TransitionAuditCandidate candidate;
+    candidate.source_parameter = source_parameter;
+    candidate.requested_target_parameter = requested_target_parameter;
+    candidate.effective_target_parameter =
+        interpolated->target_parameter_box.Clamp(requested_target_parameter);
+    if (target_support != nullptr) {
+        candidate.effective_target_parameter =
+            target_support->ProjectInside(
+                requested_target_parameter,
+                interpolated->target_parameter_box);
+    }
+    candidate.accepted =
+        interpolated->target_parameter_box.Contains(requested_target_parameter);
+    candidate.source_is_anchor =
+        source_support != nullptr &&
+        IsAnchorParameter(*source_support, source_parameter);
+    candidate.requested_target_is_anchor =
+        target_support != nullptr &&
+        IsAnchorParameter(*target_support, requested_target_parameter);
+    candidate.requested_target_projected =
+        target_support != nullptr &&
+        !target_support->Contains(requested_target_parameter);
+    candidate.effective_target_projected =
+        !SameParameterWithin(
+            candidate.requested_target_parameter,
+            candidate.effective_target_parameter,
+            kTransitionMontageProjectedNoteTolerance);
+    candidate.jog_walk_pair =
+        IsJogWalkPair(source_parameter, requested_target_parameter);
+
+    const pmg::MotionClip source_clip = source_node.motion_space.GenerateClip(
+        source_parameter, artifact.metadata.frames_per_second);
+    const pmg::MotionClip target_clip = target_node.motion_space.GenerateClip(
+        requested_target_parameter, artifact.metadata.frames_per_second);
+    candidate.transition = EvaluateConfiguredTransition(
+        artifact.skeleton, source_clip, target_clip, config);
+    candidate.transition_class =
+        candidate.accepted
+            ? PoseSeamClass(candidate.transition.distance, config)
+            : "REJECTED";
+
+    for (const ReachableRegionAuditRow& row : reachable_data.rows) {
+        if (SameParameterWithin(
+                row.source_parameter, source_parameter,
+                kTransitionMontageAnchorTolerance)) {
+            candidate.source_coverage = row.support_coverage;
+            break;
+        }
+    }
+
+    std::ostringstream notes;
+    notes << (candidate.accepted ? "accepted" : "rejected");
+    if (candidate.source_is_anchor && source_support != nullptr) {
+        notes << "; source " << NearestAnchorLabel(*source_support, source_parameter);
+    }
+    if (candidate.requested_target_is_anchor && target_support != nullptr) {
+        notes << "; target "
+              << NearestAnchorLabel(*target_support, requested_target_parameter);
+    }
+    if (candidate.jog_walk_pair) {
+        notes << "; jog/walk pair";
+    }
+    if (candidate.requested_target_projected) {
+        notes << "; requested target outside support";
+    }
+    if (candidate.effective_target_projected) {
+        notes << "; runtime target projects to "
+              << ParameterMd(candidate.effective_target_parameter);
+    }
+    if (candidate.source_coverage > 0.0f) {
+        notes << "; source coverage " << candidate.source_coverage;
+    }
+    candidate.notes = notes.str();
+    return candidate;
+}
+
+TransitionMontageRow ToTransitionMontageRow(
+    const TransitionAuditCandidate& candidate,
+    const pmg::BuiltPmgArtifact& artifact,
+    const pmg::PmgNode& source_node,
+    const pmg::PmgNode& target_node,
+    const pmg::PmgBuilderConfig& config,
+    const std::string& category,
+    int category_rank,
+    int manifest_index) {
+    const pmg::MotionClip source_clip = source_node.motion_space.GenerateClip(
+        candidate.source_parameter, artifact.metadata.frames_per_second);
+    const pmg::MotionClip target_clip = target_node.motion_space.GenerateClip(
+        candidate.requested_target_parameter, artifact.metadata.frames_per_second);
+    const pmg::Pose source_pose = source_clip.frames[static_cast<std::size_t>(
+        candidate.transition.source_frame)];
+    const pmg::Pose aligned_target_pose = candidate.transition.alignment.Apply(
+        target_clip.frames[static_cast<std::size_t>(
+            candidate.transition.target_frame)]);
+
+    TransitionMontageRow row;
+    row.category = category;
+    row.category_rank = category_rank;
+    {
+        std::ostringstream id;
+        id << 'M' << std::setw(3) << std::setfill('0') << manifest_index;
+        row.montage_id = id.str();
+    }
+    row.replay_id = row.montage_id;
+    row.source_parameter = candidate.source_parameter;
+    row.requested_target_parameter = candidate.requested_target_parameter;
+    row.effective_target_parameter = candidate.effective_target_parameter;
+    row.source_phase = candidate.transition.source_phase;
+    row.target_phase = candidate.transition.target_phase;
+    row.source_frame = candidate.transition.source_frame;
+    row.target_frame = candidate.transition.target_frame;
+    row.transition_distance = candidate.transition.distance;
+    row.transition_class = candidate.transition_class;
+    row.root_jump = RootJumpAtTransition(source_pose, aligned_target_pose);
+    row.heading_jump =
+        HeadingJumpAtTransition(source_pose, aligned_target_pose);
+    row.velocity_jump = VelocityJumpAtTransition(
+        source_clip, target_clip, candidate.transition.alignment,
+        candidate.transition.source_frame, candidate.transition.target_frame);
+    row.blend_frames = config.distance_grid.window_size;
+    row.notes = candidate.notes;
+    return row;
+}
+
+template <typename Predicate, typename RankKey>
+void AppendRankedTransitionRows(
+    const std::vector<TransitionAuditCandidate>& candidates,
+    const pmg::BuiltPmgArtifact& artifact,
+    const pmg::PmgNode& source_node,
+    const pmg::PmgNode& target_node,
+    const pmg::PmgBuilderConfig& config,
+    const std::string& category,
+    int max_rows,
+    Predicate predicate,
+    RankKey rank_key,
+    int& next_manifest_index,
+    std::vector<TransitionMontageRow>& out_rows) {
+    std::vector<const TransitionAuditCandidate*> ranked;
+    for (const TransitionAuditCandidate& candidate : candidates) {
+        if (predicate(candidate)) {
+            ranked.push_back(&candidate);
+        }
+    }
+    std::sort(
+        ranked.begin(), ranked.end(),
+        [&](const TransitionAuditCandidate* left,
+            const TransitionAuditCandidate* right) {
+            const auto left_key = rank_key(*left);
+            const auto right_key = rank_key(*right);
+            if (left_key != right_key) {
+                return left_key > right_key;
+            }
+            if (left->transition.distance != right->transition.distance) {
+                return left->transition.distance > right->transition.distance;
+            }
+            return ParameterMd(left->source_parameter) <
+                   ParameterMd(right->source_parameter);
+        });
+    const int count =
+        std::min(max_rows, static_cast<int>(ranked.size()));
+    for (int index = 0; index < count; ++index) {
+        out_rows.push_back(ToTransitionMontageRow(
+            *ranked[static_cast<std::size_t>(index)], artifact,
+            source_node, target_node, config, category, index + 1,
+            next_manifest_index++));
+    }
+}
+
+std::string TransitionMontageConclusion(
+    const std::vector<TransitionAuditCandidate>& candidates,
+    float bad_threshold) {
+    int accepted_bad = 0;
+    int accepted_near_threshold = 0;
+    int rejected_jog_walk = 0;
+    for (const TransitionAuditCandidate& candidate : candidates) {
+        if (!candidate.accepted) {
+            if (candidate.jog_walk_pair) {
+                ++rejected_jog_walk;
+            }
+            continue;
+        }
+        if (candidate.transition.distance >= bad_threshold) {
+            ++accepted_bad;
+        } else if (candidate.transition.distance >= 0.9f * bad_threshold) {
+            ++accepted_near_threshold;
+        }
+    }
+    if (accepted_bad > 0) {
+        return "FAIL_VISIBLE_TRANSITION_POP";
+    }
+    if (rejected_jog_walk >= 8) {
+        return "FAIL_THRESHOLD_REJECTS_TOO_MUCH";
+    }
+    if (rejected_jog_walk > 0) {
+        return "WARN_JOG_TRANSITION_WEAK";
+    }
+    if (accepted_near_threshold > 0) {
+        return "WARN_MINOR_POP";
+    }
+    return "PASS_TRANSITIONS_VISUALLY_ACCEPTABLE";
+}
+
+TransitionMontageAuditData BuildTransitionMontageAudit(
+    const pmg::BuiltPmgArtifact& artifact,
+    const TransitionMontageAuditOptions& options) {
+    TransitionMontageAuditData data;
+    ReachableRegionAuditOptions reachable_options;
+    reachable_options.pmg_path = options.pmg_path;
+    reachable_options.output_csv = options.output_dir + "/_unused.csv";
+    reachable_options.output_md = options.output_dir + "/_unused.md";
+    reachable_options.output_dir = options.output_dir + "/_unused_maps";
+    reachable_options.source_node = options.source_node;
+    reachable_options.target_node = options.target_node;
+    reachable_options.samples_per_axis = options.samples_per_axis;
+
+    int edge_index = ResolveEdgeIndex(
+        artifact, reachable_options, data.source_node, data.target_node);
+    const pmg::PmgEdge& edge = artifact.graph.Edge(edge_index);
+    const pmg::PmgNode& source_node = artifact.graph.Node(edge.source_node);
+    const pmg::PmgNode& target_node = artifact.graph.Node(edge.target_node);
+    const pmg::EdgeBuildMetadata* edge_metadata =
+        FindEdgeBuildMetadata(artifact, data.source_node, data.target_node);
+    if (edge_metadata == nullptr) {
+        throw std::runtime_error(
+            "--audit-transition-montage: missing edge build metadata");
+    }
+    data.config = edge_metadata->config;
+    const ReachableRegionAuditData reachable_data =
+        BuildReachableRegionAudit(artifact, reachable_options);
+
+    std::filesystem::create_directories(options.output_dir);
+    std::filesystem::remove_all(reachable_options.output_dir);
+    const pmg::ParameterSupport* source_support =
+        source_node.motion_space.HasExplicitParameterSupport()
+            ? &*source_node.motion_space.ExplicitSupport()
+            : nullptr;
+    const pmg::ParameterSupport* target_support =
+        target_node.motion_space.HasExplicitParameterSupport()
+            ? &*target_node.motion_space.ExplicitSupport()
+            : nullptr;
+
+    std::vector<pmg::ParameterVector> source_samples =
+        BuildAuditParameterSamples(
+            source_node.motion_space, options.samples_per_axis);
+    std::vector<pmg::ParameterVector> target_samples =
+        BuildAuditParameterSamples(
+            target_node.motion_space, options.samples_per_axis);
+    if (target_support != nullptr && target_support->Dimension() == 2) {
+        AppendUniqueParameter(target_samples, {0.8f, 0.8f});
+    }
+
+    std::vector<TransitionAuditCandidate> candidates;
+    for (const pmg::ParameterVector& source_parameter : source_samples) {
+        for (const pmg::ParameterVector& target_parameter : target_samples) {
+            candidates.push_back(BuildTransitionAuditCandidate(
+                artifact, edge, source_node, target_node, data.config,
+                reachable_data, source_parameter, target_parameter,
+                source_support, target_support));
+        }
+    }
+
+    data.unique_transition_count = static_cast<int>(candidates.size());
+    data.accepted_count = static_cast<int>(std::count_if(
+        candidates.begin(), candidates.end(), [](const auto& candidate) {
+            return candidate.accepted;
+        }));
+    data.rejected_count = data.unique_transition_count - data.accepted_count;
+    data.rejected_jog_walk_count = static_cast<int>(std::count_if(
+        candidates.begin(), candidates.end(), [](const auto& candidate) {
+            return !candidate.accepted && candidate.jog_walk_pair;
+        }));
+    data.conclusion = TransitionMontageConclusion(
+        candidates, data.config.bad_transition_threshold);
+    data.manifest_csv_path =
+        options.output_dir + "/transition_montage_manifest.csv";
+
+    int next_manifest_index = 1;
+    AppendRankedTransitionRows(
+        candidates, artifact, source_node, target_node, data.config,
+        "worst_accepted_default", kWorstAcceptedSamples,
+        [](const auto& candidate) { return candidate.accepted; },
+        [](const auto& candidate) { return candidate.transition.distance; },
+        next_manifest_index, data.rows);
+    AppendRankedTransitionRows(
+        candidates, artifact, source_node, target_node, data.config,
+        "near_threshold_accepted", kNearThresholdSamples,
+        [](const auto& candidate) { return candidate.accepted; },
+        [&](const auto& candidate) {
+            return -std::abs(
+                candidate.transition.distance -
+                data.config.bad_transition_threshold);
+        },
+        next_manifest_index, data.rows);
+    AppendRankedTransitionRows(
+        candidates, artifact, source_node, target_node, data.config,
+        "rejected_high_d_jog_walk", kRejectedJogWalkSamples,
+        [](const auto& candidate) {
+            return !candidate.accepted && candidate.jog_walk_pair;
+        },
+        [](const auto& candidate) { return candidate.transition.distance; },
+        next_manifest_index, data.rows);
+    AppendRankedTransitionRows(
+        candidates, artifact, source_node, target_node, data.config,
+        "anchor_to_anchor", kAnchorToAnchorSamples,
+        [](const auto& candidate) {
+            return candidate.source_is_anchor &&
+                   candidate.requested_target_is_anchor;
+        },
+        [](const auto& candidate) { return candidate.transition.distance; },
+        next_manifest_index, data.rows);
+    AppendRankedTransitionRows(
+        candidates, artifact, source_node, target_node, data.config,
+        "outside_request_projected", kOutsideRequestSamples,
+        [](const auto& candidate) {
+            return candidate.requested_target_projected;
+        },
+        [](const auto& candidate) { return candidate.transition.distance; },
+        next_manifest_index, data.rows);
+    AppendRankedTransitionRows(
+        candidates, artifact, source_node, target_node, data.config,
+        "source_dependent_shrinkage", kShrinkageSamples,
+        [](const auto& candidate) {
+            return candidate.source_coverage > 0.0f &&
+                   (candidate.source_coverage <= 0.35f ||
+                    SameParameterWithin(
+                        candidate.source_parameter, {0.0f, 1.0f},
+                        kTransitionMontageAnchorTolerance));
+        },
+        [](const auto& candidate) {
+            return !candidate.accepted
+                       ? candidate.transition.distance + 1000.0f
+                       : candidate.transition.distance;
+        },
+        next_manifest_index, data.rows);
+    return data;
+}
+
+void WriteTransitionMontageManifestCsv(
+    const TransitionMontageAuditData& data) {
+    std::ofstream csv(data.manifest_csv_path);
+    if (!csv) {
+        throw std::runtime_error(
+            "--audit-transition-montage: cannot write manifest CSV");
+    }
+    csv << std::setprecision(9)
+        << "category,category_rank,montage_id,replay_id,source_parameter,"
+           "requested_target_parameter,effective_target_parameter,"
+           "source_phase,source_frame,target_phase,target_frame,"
+           "transition_metric_d,transition_class,root_jump,heading_jump,"
+           "velocity_jump,blend_frames,notes\n";
+    for (const TransitionMontageRow& row : data.rows) {
+        csv << row.category << ',' << row.category_rank << ','
+            << row.montage_id << ',' << row.replay_id << ','
+            << ParameterCsv(row.source_parameter) << ','
+            << ParameterCsv(row.requested_target_parameter) << ','
+            << ParameterCsv(row.effective_target_parameter) << ','
+            << row.source_phase << ',' << row.source_frame << ','
+            << row.target_phase << ',' << row.target_frame << ','
+            << row.transition_distance << ',' << row.transition_class << ','
+            << row.root_jump << ',' << row.heading_jump << ','
+            << row.velocity_jump << ',' << row.blend_frames << ",\""
+            << row.notes << "\"\n";
+    }
+}
+
+void WriteTransitionMontageMarkdown(
+    const TransitionMontageAuditOptions& options,
+    const TransitionMontageAuditData& data) {
+    std::ofstream md(options.output_md);
+    if (!md) {
+        throw std::runtime_error(
+            "--audit-transition-montage: cannot write markdown");
+    }
+    md << "# Transition Montage Audit\n\n";
+    md << "## Purpose\n\n";
+    md << "Report-only transition replay manifest for current PMG edge. "
+          "No PMG artifact, threshold, or runtime behavior change. "
+          "Conclusion uses current metric D plus root/heading/velocity seam "
+          "diagnostics as proxy for later manual replay review.\n\n";
+    md << "## Inputs\n\n";
+    md << "- Artifact: `" << options.pmg_path << "`\n";
+    md << "- Edge: `" << data.source_node << " -> " << data.target_node
+       << "`\n";
+    md << "- TGOOD/TBAD: `" << data.config.good_transition_threshold
+       << " / " << data.config.bad_transition_threshold << "`\n";
+    md << "- Blend frames: `" << data.config.distance_grid.window_size
+       << "`\n";
+    md << "- Unique source/target evaluations: " << data.unique_transition_count
+       << "\n";
+    md << "- Accepted / rejected requests: " << data.accepted_count << " / "
+       << data.rejected_count << "\n";
+    md << "- Rejected jog/walk requests: " << data.rejected_jog_walk_count
+       << "\n";
+    md << "- Conclusion: `" << data.conclusion << "`\n\n";
+    md << "## Contract\n\n";
+    md << "- `transition_metric_d` uses current offline build metric units.\n";
+    md << "- `source_phase` / `target_phase` come from measured transition search.\n";
+    md << "- `requested_target_parameter` is audited request.\n";
+    md << "- `effective_target_parameter` is current runtime clamp/project result.\n";
+    md << "- `REJECTED` means request fell outside interpolated target box for current source sample.\n";
+    md << "- Manifest ids are deterministic for identical artifact + sampling.\n\n";
+
+    const std::array<std::string, 6> categories = {
+        "worst_accepted_default",
+        "near_threshold_accepted",
+        "rejected_high_d_jog_walk",
+        "anchor_to_anchor",
+        "outside_request_projected",
+        "source_dependent_shrinkage"};
+    for (const std::string& category : categories) {
+        md << "## " << category << "\n\n";
+        md << "| Rank | Montage | Source p | Req target p | Eff target p | Src phase/frame | Tgt phase/frame | D | Class | Root jump | Heading jump | Velocity jump | Notes |\n";
+        md << "|---:|---|---|---|---|---|---|---:|---|---:|---:|---:|---|\n";
+        for (const TransitionMontageRow& row : data.rows) {
+            if (row.category != category) {
+                continue;
+            }
+            md << "| " << row.category_rank << " | `" << row.montage_id
+               << "` | " << ParameterMd(row.source_parameter) << " | "
+               << ParameterMd(row.requested_target_parameter) << " | "
+               << ParameterMd(row.effective_target_parameter) << " | "
+               << row.source_phase << " / " << row.source_frame << " | "
+               << row.target_phase << " / " << row.target_frame << " | "
+               << row.transition_distance << " | `" << row.transition_class
+               << "` | " << row.root_jump << " | " << row.heading_jump
+               << " | " << row.velocity_jump << " | " << row.notes
+               << " |\n";
+        }
+        md << "\n";
+    }
+    md << "## Artifacts\n\n";
+    md << "- Markdown report: `" << options.output_md << "`\n";
+    md << "- Manifest CSV: `" << data.manifest_csv_path << "`\n";
+    md << "- Montage directory: `" << options.output_dir << "`\n";
+}
+
+TransitionMontageAuditOptions ParseTransitionMontageAuditOptions(
+    int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error(
+            "--audit-transition-montage needs <graph.pmg>");
+    }
+    TransitionMontageAuditOptions options;
+    options.pmg_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--output-md") {
+            options.output_md = require_value("--output-md");
+        } else if (option == "--output-dir") {
+            options.output_dir = require_value("--output-dir");
+        } else if (option == "--source-node") {
+            options.source_node = require_value("--source-node");
+        } else if (option == "--target-node") {
+            options.target_node = require_value("--target-node");
+        } else if (option == "--samples") {
+            options.samples_per_axis = std::stoi(require_value("--samples"));
+        } else {
+            throw std::runtime_error(
+                "unknown audit-transition-montage option '" + option + "'");
+        }
+    }
+    if (options.output_md.empty()) {
+        throw std::runtime_error(
+            "--audit-transition-montage requires --output-md");
+    }
+    if (options.output_dir.empty()) {
+        throw std::runtime_error(
+            "--audit-transition-montage requires --output-dir");
+    }
+    if (options.samples_per_axis < 2) {
+        throw std::runtime_error(
+            "--audit-transition-montage: --samples must be at least 2");
+    }
+    return options;
+}
+
+int TransitionMontageAuditCommand(
+    const TransitionMontageAuditOptions& options) {
+    const pmg::BuiltPmgArtifact artifact =
+        pmg::LoadPmgArtifactText(options.pmg_path);
+    const TransitionMontageAuditData data =
+        BuildTransitionMontageAudit(artifact, options);
+    WriteTransitionMontageManifestCsv(data);
+    WriteTransitionMontageMarkdown(options, data);
+    std::cout << "transition_montage_rows=" << data.rows.size() << "\n";
+    std::cout << "transition_montage_md=" << options.output_md << "\n";
+    std::cout << "transition_montage_manifest=" << data.manifest_csv_path
+              << "\n";
+    std::cout << "transition_montage_conclusion=" << data.conclusion << "\n";
     return 0;
 }
 
@@ -3899,6 +4543,10 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
     if (command == "--audit-reachable-region" && argc >= 3) {
         return ReachableRegionAuditCommand(
             ParseReachableRegionAuditOptions(argc, argv));
+    }
+    if (command == "--audit-transition-montage" && argc >= 3) {
+        return TransitionMontageAuditCommand(
+            ParseTransitionMontageAuditOptions(argc, argv));
     }
     if (command == "--search-cyclic-recuts") {
         return CyclicRecutSearchCommand(

@@ -186,6 +186,16 @@ if(PMG_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg)
 
+    add_test(NAME cli_audit_transition_montage_walk_2d
+        COMMAND pmg_cli --audit-transition-montage
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --output-md
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/transition_montage_report.md
+            --output-dir
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/transition_montages)
+    set_tests_properties(cli_audit_transition_montage_walk_2d PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
     add_test(NAME cli_goto_walk_2d
         COMMAND pmg_cli --goto
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec 10 10

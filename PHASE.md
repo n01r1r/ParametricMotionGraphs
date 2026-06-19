@@ -309,6 +309,15 @@ Move from “PMG structure works” to “animation transitions are visually acc
 
 ### Phase B1 — Transition Montage Audit
 
+Status: COMPLETE (2026-06-19)
+
+Completed artifacts: `build/transition_montage_report.md` and
+`build/transition_montages/transition_montage_manifest.csv`. Result:
+`FAIL_VISIBLE_TRANSITION_POP` (52 ranked replay rows over 2756
+source/target evaluations; accepted BAD transition at `(0.1875, 0.375) ->
+(0.025, 0.875)` with `D=245.926`; 159 rejected jog/walk requests; no PMG
+artifact or runtime behavior change). CLI smoke test passed.
+
 Create a transition montage generator or viewer mode.
 
 Purpose:

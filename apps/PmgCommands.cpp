@@ -38,6 +38,8 @@ void PrintUsage() {
               << "      --output-csv out.csv --output-md out.md\n"
               << "  pmg_cli --audit-reachable-region graph.pmg\n"
               << "      --output-csv out.csv --output-md out.md --output-dir out_dir\n"
+              << "  pmg_cli --audit-transition-montage graph.pmg\n"
+              << "      --output-md out.md --output-dir out_dir\n"
               << "  pmg_cli --audit-parameter-response graph.pmg\n"
               << "      --output-csv out.csv --output-md out.md [--samples N]\n"
               << "  pmg_cli --random-walk graph_spec.txt|graph.pmg [--seconds S] [--walk-seed N]\n"
