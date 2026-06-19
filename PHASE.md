@@ -1,7 +1,7 @@
 # PMG Next Roadmap — Phase-by-Phase Prompts
 
 Current branch:
-`codex-viewer-runtime-lifecycle`
+`reachable-region-audit`
 
 Current status:
 
@@ -845,6 +845,61 @@ Conclusion:
 
 ---
 
+### Phase B1.5 ??Accepted-BAD Transition Root Cause Audit
+
+Implement report-only acceptance-consistency audit for current self-edge.
+
+Purpose:
+Explain why a transition can be accepted by interpolated edge region while its
+measured transition metric is already `>= TBAD`.
+
+Required outputs:
+
+```text
+build/transition_acceptance_consistency.csv
+build/transition_acceptance_consistency.md
+```
+
+Must report:
+
+* source parameter
+* requested target parameter
+* effective/projected target parameter
+* accepted-by-box flag
+* actual `D`
+* metric class `GOOD/NEUTRAL/BAD/REJECTED`
+* acceptance violation flag `accepted_by_box && D >= TBAD`
+* `D - TBAD`
+* source coverage from reachable-region audit if available
+* source/target phase and frame
+* root/heading/velocity jump
+* nearest source/target anchor labels
+* note for likely cause
+
+Must explicitly rank:
+
+* all accepted BAD transitions
+* near-threshold accepted transitions
+* known bad case around `(0.1875, 0.375) -> (0.025, 0.875)`
+* source-dependent shrinkage cases, especially source `(0, 1)`
+* jog/walk transition cases
+
+Conclusions:
+
+* `PASS_ACCEPTANCE_REGION_CONSISTENT`
+* `WARN_NEAR_BAD_ACCEPTED`
+* `FAIL_ACCEPTED_BAD_TRANSITION`
+* `FAIL_EDGE_BOX_OVERREACH`
+
+Non-goals:
+
+* do not change thresholds
+* do not change runtime semantics
+* do not add foot locking or IK
+* do not proceed to controller or multi-node work
+
+---
+
 ## Final order
 
 Run phases in this order:
@@ -856,6 +911,7 @@ A3 Reachable Target Region Audit
 A4 Threshold Visual Acceptance
 
 B1 Transition Montage Audit
+B1.5 Accepted-BAD Transition Root Cause Audit
 B2 Contact / Foot Sliding Audit
 B3 Blend Window Comparison
 B4 Optional Foot Locking / IK, only if justified

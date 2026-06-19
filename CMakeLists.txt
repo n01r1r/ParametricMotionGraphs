@@ -196,6 +196,17 @@ if(PMG_BUILD_TESTS)
     set_tests_properties(cli_audit_transition_montage_walk_2d PROPERTIES
         DEPENDS cli_build_artifact_walk_2d)
 
+    add_test(NAME cli_audit_transition_acceptance_consistency_walk_2d
+        COMMAND pmg_cli --audit-transition-acceptance-consistency
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --output-csv
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/transition_acceptance_consistency.csv
+            --output-md
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/transition_acceptance_consistency.md)
+    set_tests_properties(
+        cli_audit_transition_acceptance_consistency_walk_2d PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
     add_test(NAME cli_goto_walk_2d
         COMMAND pmg_cli --goto
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec 10 10

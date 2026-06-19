@@ -2233,6 +2233,15 @@ struct TransitionMontageAuditOptions {
     int samples_per_axis = 9;
 };
 
+struct TransitionAcceptanceConsistencyAuditOptions {
+    std::string pmg_path;
+    std::string output_csv;
+    std::string output_md;
+    std::string source_node;
+    std::string target_node;
+    int samples_per_axis = 9;
+};
+
 struct ReachableRegionAuditRow {
     pmg::ParameterVector source_parameter;
     pmg::ParameterAabb target_box;
@@ -2905,6 +2914,44 @@ struct TransitionMontageAuditData {
     std::string conclusion;
 };
 
+struct TransitionAcceptanceConsistencyRow {
+    pmg::ParameterVector source_parameter;
+    pmg::ParameterVector requested_target_parameter;
+    pmg::ParameterVector effective_target_parameter;
+    bool accepted_by_box = false;
+    float transition_distance = 0.0f;
+    std::string metric_class;
+    bool acceptance_violation = false;
+    float distance_over_tbad = 0.0f;
+    bool source_coverage_available = false;
+    float source_coverage = 0.0f;
+    float source_phase = 0.0f;
+    int source_frame = 0;
+    float target_phase = 0.0f;
+    int target_frame = 0;
+    float root_jump = 0.0f;
+    float heading_jump = 0.0f;
+    float velocity_jump = 0.0f;
+    std::string nearest_source_anchor_label;
+    std::string nearest_target_anchor_label;
+    bool jog_walk_pair = false;
+    std::string notes;
+};
+
+struct TransitionAcceptanceConsistencyAuditData {
+    std::string source_node;
+    std::string target_node;
+    pmg::PmgBuilderConfig config;
+    std::vector<TransitionAcceptanceConsistencyRow> rows;
+    int accepted_bad_count = 0;
+    int near_threshold_accepted_count = 0;
+    int jog_walk_row_count = 0;
+    int shrinkage_row_count = 0;
+    bool known_bad_case_found = false;
+    std::string consistency_conclusion;
+    std::string root_cause_conclusion;
+};
+
 constexpr float kTransitionMontageAnchorTolerance = 1.0e-5f;
 constexpr float kTransitionMontageProjectedNoteTolerance = 1.0e-4f;
 constexpr int kWorstAcceptedSamples = 8;
@@ -2984,6 +3031,7 @@ struct TransitionAuditCandidate {
     bool requested_target_projected = false;
     bool effective_target_projected = false;
     bool jog_walk_pair = false;
+    bool source_coverage_available = false;
     float source_coverage = 0.0f;
     std::string transition_class;
     std::string notes;
@@ -3052,6 +3100,7 @@ TransitionAuditCandidate BuildTransitionAuditCandidate(
         if (SameParameterWithin(
                 row.source_parameter, source_parameter,
                 kTransitionMontageAnchorTolerance)) {
+            candidate.source_coverage_available = true;
             candidate.source_coverage = row.support_coverage;
             break;
         }
@@ -3076,11 +3125,41 @@ TransitionAuditCandidate BuildTransitionAuditCandidate(
         notes << "; runtime target projects to "
               << ParameterMd(candidate.effective_target_parameter);
     }
-    if (candidate.source_coverage > 0.0f) {
+    if (candidate.source_coverage_available) {
         notes << "; source coverage " << candidate.source_coverage;
     }
     candidate.notes = notes.str();
     return candidate;
+}
+
+std::vector<TransitionAuditCandidate> BuildTransitionAuditCandidates(
+    const pmg::BuiltPmgArtifact& artifact,
+    const pmg::PmgEdge& edge,
+    const pmg::PmgNode& source_node,
+    const pmg::PmgNode& target_node,
+    const pmg::PmgBuilderConfig& config,
+    const ReachableRegionAuditData& reachable_data,
+    const pmg::ParameterSupport* source_support,
+    const pmg::ParameterSupport* target_support,
+    int samples_per_axis) {
+    std::vector<pmg::ParameterVector> source_samples =
+        BuildAuditParameterSamples(source_node.motion_space, samples_per_axis);
+    std::vector<pmg::ParameterVector> target_samples =
+        BuildAuditParameterSamples(target_node.motion_space, samples_per_axis);
+    if (target_support != nullptr && target_support->Dimension() == 2) {
+        AppendUniqueParameter(target_samples, {0.8f, 0.8f});
+    }
+
+    std::vector<TransitionAuditCandidate> candidates;
+    for (const pmg::ParameterVector& source_parameter : source_samples) {
+        for (const pmg::ParameterVector& target_parameter : target_samples) {
+            candidates.push_back(BuildTransitionAuditCandidate(
+                artifact, edge, source_node, target_node, config,
+                reachable_data, source_parameter, target_parameter,
+                source_support, target_support));
+        }
+    }
+    return candidates;
 }
 
 TransitionMontageRow ToTransitionMontageRow(
@@ -3248,25 +3327,11 @@ TransitionMontageAuditData BuildTransitionMontageAudit(
             ? &*target_node.motion_space.ExplicitSupport()
             : nullptr;
 
-    std::vector<pmg::ParameterVector> source_samples =
-        BuildAuditParameterSamples(
-            source_node.motion_space, options.samples_per_axis);
-    std::vector<pmg::ParameterVector> target_samples =
-        BuildAuditParameterSamples(
-            target_node.motion_space, options.samples_per_axis);
-    if (target_support != nullptr && target_support->Dimension() == 2) {
-        AppendUniqueParameter(target_samples, {0.8f, 0.8f});
-    }
-
-    std::vector<TransitionAuditCandidate> candidates;
-    for (const pmg::ParameterVector& source_parameter : source_samples) {
-        for (const pmg::ParameterVector& target_parameter : target_samples) {
-            candidates.push_back(BuildTransitionAuditCandidate(
-                artifact, edge, source_node, target_node, data.config,
-                reachable_data, source_parameter, target_parameter,
-                source_support, target_support));
-        }
-    }
+    const std::vector<TransitionAuditCandidate> candidates =
+        BuildTransitionAuditCandidates(
+            artifact, edge, source_node, target_node, data.config,
+            reachable_data, source_support, target_support,
+            options.samples_per_axis);
 
     data.unique_transition_count = static_cast<int>(candidates.size());
     data.accepted_count = static_cast<int>(std::count_if(
@@ -3329,7 +3394,7 @@ TransitionMontageAuditData BuildTransitionMontageAudit(
         candidates, artifact, source_node, target_node, data.config,
         "source_dependent_shrinkage", kShrinkageSamples,
         [](const auto& candidate) {
-            return candidate.source_coverage > 0.0f &&
+            return candidate.source_coverage_available &&
                    (candidate.source_coverage <= 0.35f ||
                     SameParameterWithin(
                         candidate.source_parameter, {0.0f, 1.0f},
@@ -3443,6 +3508,408 @@ void WriteTransitionMontageMarkdown(
     md << "- Montage directory: `" << options.output_dir << "`\n";
 }
 
+constexpr float kAcceptanceNearThresholdRatio = 0.9f;
+constexpr float kShrinkageCoverageWarnThreshold = 0.35f;
+constexpr float kKnownBadCaseTolerance = 1.0e-5f;
+
+bool IsKnownAcceptedBadCase(
+    const pmg::ParameterVector& source_parameter,
+    const pmg::ParameterVector& target_parameter) {
+    return SameParameterWithin(
+               source_parameter, {0.1875f, 0.375f}, kKnownBadCaseTolerance) &&
+           SameParameterWithin(
+               target_parameter, {0.025f, 0.875f}, kKnownBadCaseTolerance);
+}
+
+std::string BuildAcceptanceConsistencyNotes(
+    const TransitionAuditCandidate& candidate,
+    float bad_threshold) {
+    std::vector<std::string> notes;
+    if (candidate.accepted &&
+        candidate.transition.distance >= bad_threshold) {
+        notes.push_back(
+            "accepted by interpolated target box but measured D is BAD");
+        if (!candidate.effective_target_projected) {
+            notes.push_back(
+                "likely box overreach: acceptance gates box membership, not D");
+        }
+    } else if (candidate.accepted &&
+               candidate.transition.distance >=
+                   kAcceptanceNearThresholdRatio * bad_threshold) {
+        notes.push_back("accepted near TBAD; small box change may flip class");
+    }
+    if (candidate.source_coverage_available &&
+        candidate.source_coverage <= kShrinkageCoverageWarnThreshold) {
+        notes.push_back("source-dependent shrinkage from reachable-region audit");
+    }
+    if (candidate.jog_walk_pair) {
+        notes.push_back("jog/walk speed-mismatch case");
+    }
+    if (candidate.effective_target_projected) {
+        notes.push_back("runtime projects request inside current box/support");
+    }
+    if (IsKnownAcceptedBadCase(
+            candidate.source_parameter,
+            candidate.requested_target_parameter)) {
+        notes.push_back("known B1 failing case");
+    }
+    if (notes.empty()) {
+        notes.push_back("box and measured D agree");
+    }
+
+    std::ostringstream out;
+    for (std::size_t index = 0; index < notes.size(); ++index) {
+        if (index > 0) {
+            out << "; ";
+        }
+        out << notes[index];
+    }
+    return out.str();
+}
+
+TransitionAcceptanceConsistencyRow BuildAcceptanceConsistencyRow(
+    const TransitionAuditCandidate& candidate,
+    const pmg::BuiltPmgArtifact& artifact,
+    const pmg::PmgNode& source_node,
+    const pmg::PmgNode& target_node,
+    const pmg::PmgBuilderConfig& config,
+    const pmg::ParameterSupport* source_support,
+    const pmg::ParameterSupport* target_support) {
+    const pmg::MotionClip source_clip = source_node.motion_space.GenerateClip(
+        candidate.source_parameter, artifact.metadata.frames_per_second);
+    const pmg::MotionClip target_clip = target_node.motion_space.GenerateClip(
+        candidate.requested_target_parameter, artifact.metadata.frames_per_second);
+    const pmg::Pose source_pose = source_clip.frames[static_cast<std::size_t>(
+        candidate.transition.source_frame)];
+    const pmg::Pose aligned_target_pose = candidate.transition.alignment.Apply(
+        target_clip.frames[static_cast<std::size_t>(
+            candidate.transition.target_frame)]);
+
+    TransitionAcceptanceConsistencyRow row;
+    row.source_parameter = candidate.source_parameter;
+    row.requested_target_parameter = candidate.requested_target_parameter;
+    row.effective_target_parameter = candidate.effective_target_parameter;
+    row.accepted_by_box = candidate.accepted;
+    row.transition_distance = candidate.transition.distance;
+    row.metric_class = candidate.transition_class;
+    row.acceptance_violation =
+        candidate.accepted &&
+        candidate.transition.distance >= config.bad_transition_threshold;
+    row.distance_over_tbad =
+        candidate.transition.distance - config.bad_transition_threshold;
+    row.source_coverage_available = candidate.source_coverage_available;
+    row.source_coverage = candidate.source_coverage;
+    row.source_phase = candidate.transition.source_phase;
+    row.source_frame = candidate.transition.source_frame;
+    row.target_phase = candidate.transition.target_phase;
+    row.target_frame = candidate.transition.target_frame;
+    row.root_jump = RootJumpAtTransition(source_pose, aligned_target_pose);
+    row.heading_jump =
+        HeadingJumpAtTransition(source_pose, aligned_target_pose);
+    row.velocity_jump = VelocityJumpAtTransition(
+        source_clip, target_clip, candidate.transition.alignment,
+        candidate.transition.source_frame, candidate.transition.target_frame);
+    row.nearest_source_anchor_label =
+        source_support != nullptr
+            ? NearestAnchorLabel(*source_support, candidate.source_parameter)
+            : "";
+    row.nearest_target_anchor_label =
+        target_support != nullptr
+            ? NearestAnchorLabel(
+                  *target_support, candidate.requested_target_parameter)
+            : "";
+    row.jog_walk_pair = candidate.jog_walk_pair;
+    row.notes = BuildAcceptanceConsistencyNotes(
+        candidate, config.bad_transition_threshold);
+    return row;
+}
+
+template <typename Predicate, typename RankKey>
+void WriteAcceptanceConsistencySection(
+    std::ofstream& md,
+    const std::string& title,
+    const std::vector<TransitionAcceptanceConsistencyRow>& rows,
+    Predicate predicate,
+    RankKey rank_key) {
+    std::vector<const TransitionAcceptanceConsistencyRow*> ranked;
+    for (const TransitionAcceptanceConsistencyRow& row : rows) {
+        if (predicate(row)) {
+            ranked.push_back(&row);
+        }
+    }
+    std::sort(
+        ranked.begin(), ranked.end(),
+        [&](const TransitionAcceptanceConsistencyRow* left,
+            const TransitionAcceptanceConsistencyRow* right) {
+            const auto left_key = rank_key(*left);
+            const auto right_key = rank_key(*right);
+            if (left_key != right_key) {
+                return left_key > right_key;
+            }
+            if (left->transition_distance != right->transition_distance) {
+                return left->transition_distance > right->transition_distance;
+            }
+            return ParameterMd(left->source_parameter) <
+                   ParameterMd(right->source_parameter);
+        });
+
+    md << "## " << title << "\n\n";
+    if (ranked.empty()) {
+        md << "No rows.\n\n";
+        return;
+    }
+    md << "| Rank | Source p | Req target p | Eff target p | Accepted by box | D | Class | D-TBAD | Source coverage | Src phase/frame | Tgt phase/frame | Root jump | Heading jump | Velocity jump | Source anchor | Target anchor | Notes |\n";
+    md << "|---:|---|---|---|---|---:|---|---:|---:|---|---|---:|---:|---:|---|---|---|\n";
+    for (std::size_t index = 0; index < ranked.size(); ++index) {
+        const TransitionAcceptanceConsistencyRow& row =
+            *ranked[index];
+        md << "| " << (index + 1) << " | "
+           << ParameterMd(row.source_parameter) << " | "
+           << ParameterMd(row.requested_target_parameter) << " | "
+           << ParameterMd(row.effective_target_parameter) << " | "
+           << (row.accepted_by_box ? "`true`" : "`false`") << " | "
+           << row.transition_distance << " | `" << row.metric_class
+           << "` | " << row.distance_over_tbad << " | ";
+        if (row.source_coverage_available) {
+            md << row.source_coverage;
+        } else {
+            md << "n/a";
+        }
+        md << " | " << row.source_phase << " / " << row.source_frame
+           << " | " << row.target_phase << " / " << row.target_frame
+           << " | " << row.root_jump << " | " << row.heading_jump
+           << " | " << row.velocity_jump << " | "
+           << (row.nearest_source_anchor_label.empty()
+                   ? "-"
+                   : row.nearest_source_anchor_label)
+           << " | "
+           << (row.nearest_target_anchor_label.empty()
+                   ? "-"
+                   : row.nearest_target_anchor_label)
+           << " | " << row.notes << " |\n";
+    }
+    md << "\n";
+}
+
+TransitionAcceptanceConsistencyAuditData BuildTransitionAcceptanceConsistencyAudit(
+    const pmg::BuiltPmgArtifact& artifact,
+    const TransitionAcceptanceConsistencyAuditOptions& options) {
+    TransitionAcceptanceConsistencyAuditData data;
+    ReachableRegionAuditOptions reachable_options;
+    reachable_options.pmg_path = options.pmg_path;
+    const std::filesystem::path output_csv_path(options.output_csv);
+    const std::filesystem::path temp_root =
+        output_csv_path.has_parent_path()
+            ? output_csv_path.parent_path()
+            : std::filesystem::path(".");
+    reachable_options.output_csv =
+        (temp_root / "_acceptance_consistency_reachable_unused.csv").string();
+    reachable_options.output_md =
+        (temp_root / "_acceptance_consistency_reachable_unused.md").string();
+    reachable_options.output_dir =
+        (temp_root / "_acceptance_consistency_reachable_unused_maps").string();
+    reachable_options.source_node = options.source_node;
+    reachable_options.target_node = options.target_node;
+    reachable_options.samples_per_axis = options.samples_per_axis;
+
+    int edge_index = ResolveEdgeIndex(
+        artifact, reachable_options, data.source_node, data.target_node);
+    const pmg::PmgEdge& edge = artifact.graph.Edge(edge_index);
+    const pmg::PmgNode& source_node = artifact.graph.Node(edge.source_node);
+    const pmg::PmgNode& target_node = artifact.graph.Node(edge.target_node);
+    const pmg::EdgeBuildMetadata* edge_metadata =
+        FindEdgeBuildMetadata(artifact, data.source_node, data.target_node);
+    if (edge_metadata == nullptr) {
+        throw std::runtime_error(
+            "--audit-transition-acceptance-consistency: missing edge build metadata");
+    }
+    data.config = edge_metadata->config;
+    const ReachableRegionAuditData reachable_data =
+        BuildReachableRegionAudit(artifact, reachable_options);
+    std::filesystem::remove(reachable_options.output_csv);
+    std::filesystem::remove(reachable_options.output_md);
+    std::filesystem::remove_all(reachable_options.output_dir);
+    const pmg::ParameterSupport* source_support =
+        source_node.motion_space.HasExplicitParameterSupport()
+            ? &*source_node.motion_space.ExplicitSupport()
+            : nullptr;
+    const pmg::ParameterSupport* target_support =
+        target_node.motion_space.HasExplicitParameterSupport()
+            ? &*target_node.motion_space.ExplicitSupport()
+            : nullptr;
+    const std::vector<TransitionAuditCandidate> candidates =
+        BuildTransitionAuditCandidates(
+            artifact, edge, source_node, target_node, data.config,
+            reachable_data, source_support, target_support,
+            options.samples_per_axis);
+
+    bool any_box_overreach = false;
+    for (const TransitionAuditCandidate& candidate : candidates) {
+        TransitionAcceptanceConsistencyRow row =
+            BuildAcceptanceConsistencyRow(
+                candidate, artifact, source_node, target_node, data.config,
+                source_support, target_support);
+        data.accepted_bad_count += row.acceptance_violation ? 1 : 0;
+        data.near_threshold_accepted_count +=
+            row.accepted_by_box &&
+                    row.transition_distance <
+                        data.config.bad_transition_threshold &&
+                    row.transition_distance >=
+                        kAcceptanceNearThresholdRatio *
+                            data.config.bad_transition_threshold
+                ? 1
+                : 0;
+        data.jog_walk_row_count += row.jog_walk_pair ? 1 : 0;
+        data.shrinkage_row_count +=
+            row.source_coverage_available &&
+                    row.source_coverage <=
+                        kShrinkageCoverageWarnThreshold
+                ? 1
+                : 0;
+        data.known_bad_case_found =
+            data.known_bad_case_found ||
+            IsKnownAcceptedBadCase(
+                row.source_parameter, row.requested_target_parameter);
+        any_box_overreach =
+            any_box_overreach ||
+            (row.acceptance_violation &&
+             SameParameterWithin(
+                 row.requested_target_parameter,
+                 row.effective_target_parameter,
+                 kTransitionMontageProjectedNoteTolerance));
+        data.rows.push_back(std::move(row));
+    }
+
+    if (data.accepted_bad_count > 0) {
+        data.consistency_conclusion = "FAIL_ACCEPTED_BAD_TRANSITION";
+    } else if (data.near_threshold_accepted_count > 0) {
+        data.consistency_conclusion = "WARN_NEAR_BAD_ACCEPTED";
+    } else {
+        data.consistency_conclusion = "PASS_ACCEPTANCE_REGION_CONSISTENT";
+    }
+
+    if (any_box_overreach) {
+        data.root_cause_conclusion = "FAIL_EDGE_BOX_OVERREACH";
+    } else {
+        data.root_cause_conclusion = data.consistency_conclusion;
+    }
+    return data;
+}
+
+void WriteTransitionAcceptanceConsistencyCsv(
+    const TransitionAcceptanceConsistencyAuditOptions& options,
+    const TransitionAcceptanceConsistencyAuditData& data) {
+    std::ofstream csv(options.output_csv);
+    if (!csv) {
+        throw std::runtime_error(
+            "--audit-transition-acceptance-consistency: cannot write CSV");
+    }
+    csv << std::setprecision(9)
+        << "source_parameter,requested_target_parameter,effective_target_parameter,"
+           "accepted_by_box,transition_metric_d,metric_class,acceptance_violation,"
+           "distance_over_tbad,source_coverage,source_phase,source_frame,"
+           "target_phase,target_frame,root_jump,heading_jump,velocity_jump,"
+           "nearest_source_anchor_label,nearest_target_anchor_label,notes\n";
+    for (const TransitionAcceptanceConsistencyRow& row : data.rows) {
+        csv << ParameterCsv(row.source_parameter) << ','
+            << ParameterCsv(row.requested_target_parameter) << ','
+            << ParameterCsv(row.effective_target_parameter) << ','
+            << (row.accepted_by_box ? "true" : "false") << ','
+            << row.transition_distance << ',' << row.metric_class << ','
+            << (row.acceptance_violation ? "true" : "false") << ','
+            << row.distance_over_tbad << ',';
+        if (row.source_coverage_available) {
+            csv << row.source_coverage;
+        }
+        csv << ',' << row.source_phase << ',' << row.source_frame << ','
+            << row.target_phase << ',' << row.target_frame << ','
+            << row.root_jump << ',' << row.heading_jump << ','
+            << row.velocity_jump << ",\""
+            << row.nearest_source_anchor_label << "\",\""
+            << row.nearest_target_anchor_label << "\",\""
+            << row.notes << "\"\n";
+    }
+}
+
+void WriteTransitionAcceptanceConsistencyMarkdown(
+    const TransitionAcceptanceConsistencyAuditOptions& options,
+    const TransitionAcceptanceConsistencyAuditData& data) {
+    std::ofstream md(options.output_md);
+    if (!md) {
+        throw std::runtime_error(
+            "--audit-transition-acceptance-consistency: cannot write markdown");
+    }
+    md << "# Transition Acceptance Consistency Audit\n\n";
+    md << "## Purpose\n\n";
+    md << "Check whether interpolated edge acceptance agrees with measured "
+          "transition quality under current PMG artifact. Report only; no "
+          "threshold or runtime behavior change.\n\n";
+    md << "## Inputs\n\n";
+    md << "- Artifact: `" << options.pmg_path << "`\n";
+    md << "- Edge: `" << data.source_node << " -> " << data.target_node
+       << "`\n";
+    md << "- TGOOD/TBAD: `" << data.config.good_transition_threshold
+       << " / " << data.config.bad_transition_threshold << "`\n";
+    md << "- Evaluated source/target rows: " << data.rows.size() << "\n";
+    md << "- Accepted BAD transitions: " << data.accepted_bad_count << "\n";
+    md << "- Near-threshold accepted transitions: "
+       << data.near_threshold_accepted_count << "\n";
+    md << "- Known bad case found: "
+       << (data.known_bad_case_found ? "`yes`" : "`no`") << "\n";
+    md << "- Consistency conclusion: `" << data.consistency_conclusion
+       << "`\n";
+    md << "- Root-cause conclusion: `" << data.root_cause_conclusion
+       << "`\n\n";
+    md << "## Root Cause\n\n";
+    md << "- Acceptance currently means requested target lies inside "
+          "interpolated target box.\n";
+    md << "- Measured `D` is evaluated independently at requested target.\n";
+    md << "- Accepted BAD rows therefore indicate box coverage can extend into "
+          "parameter points whose measured `D` is already >= `TBAD`.\n";
+    md << "- Known failing case should show no projection, which points to box "
+          "overreach rather than support projection.\n\n";
+
+    WriteAcceptanceConsistencySection(
+        md, "Accepted BAD transitions", data.rows,
+        [](const auto& row) { return row.acceptance_violation; },
+        [](const auto& row) { return row.distance_over_tbad; });
+    WriteAcceptanceConsistencySection(
+        md, "Near-threshold accepted transitions", data.rows,
+        [&](const auto& row) {
+            return row.accepted_by_box &&
+                   row.transition_distance < data.config.bad_transition_threshold &&
+                   row.distance_over_tbad >=
+                       -(1.0f - kAcceptanceNearThresholdRatio) *
+                           data.config.bad_transition_threshold;
+        },
+        [](const auto& row) { return -std::abs(row.distance_over_tbad); });
+    WriteAcceptanceConsistencySection(
+        md, "Known bad case", data.rows,
+        [](const auto& row) {
+            return IsKnownAcceptedBadCase(
+                row.source_parameter, row.requested_target_parameter);
+        },
+        [](const auto& row) { return row.transition_distance; });
+    WriteAcceptanceConsistencySection(
+        md, "Source-dependent shrinkage focus", data.rows,
+        [](const auto& row) {
+            return (row.source_coverage_available &&
+                    row.source_coverage <=
+                        kShrinkageCoverageWarnThreshold) ||
+                   SameParameterWithin(
+                       row.source_parameter, {0.0f, 1.0f},
+                       kKnownBadCaseTolerance);
+        },
+        [](const auto& row) { return row.transition_distance; });
+    WriteAcceptanceConsistencySection(
+        md, "Jog/walk focus", data.rows,
+        [](const auto& row) { return row.jog_walk_pair; },
+        [](const auto& row) { return row.transition_distance; });
+    md << "## Artifacts\n\n";
+    md << "- CSV: `" << options.output_csv << "`\n";
+    md << "- Markdown: `" << options.output_md << "`\n";
+}
+
 TransitionMontageAuditOptions ParseTransitionMontageAuditOptions(
     int argc, char** argv) {
     if (argc < 3) {
@@ -3490,6 +3957,55 @@ TransitionMontageAuditOptions ParseTransitionMontageAuditOptions(
     return options;
 }
 
+TransitionAcceptanceConsistencyAuditOptions
+ParseTransitionAcceptanceConsistencyAuditOptions(
+    int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error(
+            "--audit-transition-acceptance-consistency needs <graph.pmg>");
+    }
+    TransitionAcceptanceConsistencyAuditOptions options;
+    options.pmg_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            ++index;
+            return argv[index];
+        };
+        if (option == "--output-csv") {
+            options.output_csv = require_value("--output-csv");
+        } else if (option == "--output-md") {
+            options.output_md = require_value("--output-md");
+        } else if (option == "--source-node") {
+            options.source_node = require_value("--source-node");
+        } else if (option == "--target-node") {
+            options.target_node = require_value("--target-node");
+        } else if (option == "--samples") {
+            options.samples_per_axis = std::stoi(require_value("--samples"));
+        } else {
+            throw std::runtime_error(
+                "unknown audit-transition-acceptance-consistency option '" +
+                option + "'");
+        }
+    }
+    if (options.output_csv.empty()) {
+        throw std::runtime_error(
+            "--audit-transition-acceptance-consistency requires --output-csv");
+    }
+    if (options.output_md.empty()) {
+        throw std::runtime_error(
+            "--audit-transition-acceptance-consistency requires --output-md");
+    }
+    if (options.samples_per_axis < 2) {
+        throw std::runtime_error(
+            "--audit-transition-acceptance-consistency: --samples must be at least 2");
+    }
+    return options;
+}
+
 int TransitionMontageAuditCommand(
     const TransitionMontageAuditOptions& options) {
     const pmg::BuiltPmgArtifact artifact =
@@ -3503,6 +4019,27 @@ int TransitionMontageAuditCommand(
     std::cout << "transition_montage_manifest=" << data.manifest_csv_path
               << "\n";
     std::cout << "transition_montage_conclusion=" << data.conclusion << "\n";
+    return 0;
+}
+
+int TransitionAcceptanceConsistencyAuditCommand(
+    const TransitionAcceptanceConsistencyAuditOptions& options) {
+    const pmg::BuiltPmgArtifact artifact =
+        pmg::LoadPmgArtifactText(options.pmg_path);
+    const TransitionAcceptanceConsistencyAuditData data =
+        BuildTransitionAcceptanceConsistencyAudit(artifact, options);
+    WriteTransitionAcceptanceConsistencyCsv(options, data);
+    WriteTransitionAcceptanceConsistencyMarkdown(options, data);
+    std::cout << "transition_acceptance_consistency_rows="
+              << data.rows.size() << "\n";
+    std::cout << "transition_acceptance_consistency_csv="
+              << options.output_csv << "\n";
+    std::cout << "transition_acceptance_consistency_md="
+              << options.output_md << "\n";
+    std::cout << "transition_acceptance_consistency_conclusion="
+              << data.consistency_conclusion << "\n";
+    std::cout << "transition_acceptance_consistency_root_cause="
+              << data.root_cause_conclusion << "\n";
     return 0;
 }
 
@@ -4547,6 +5084,10 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
     if (command == "--audit-transition-montage" && argc >= 3) {
         return TransitionMontageAuditCommand(
             ParseTransitionMontageAuditOptions(argc, argv));
+    }
+    if (command == "--audit-transition-acceptance-consistency" && argc >= 3) {
+        return TransitionAcceptanceConsistencyAuditCommand(
+            ParseTransitionAcceptanceConsistencyAuditOptions(argc, argv));
     }
     if (command == "--search-cyclic-recuts") {
         return CyclicRecutSearchCommand(
