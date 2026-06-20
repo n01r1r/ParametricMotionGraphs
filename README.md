@@ -69,6 +69,14 @@ as paper-equivalent without reporting its config.
 - Reader compatibility covers V2-V12; writer emits V12 only.
 - Viewer requires optional OpenGL dependencies enabled by `PMG_BUILD_VIEWER`.
 
+## Completion path
+
+Core paper mechanisms are implemented; current evidence stops at one
+parametric locomotion node with a self-edge. Remaining critical path:
+direct steering -> path following -> compatible second node -> inter-node edge
+-> random graph walk. `PHASE.md` records scope and deferrals. Exact paper
+corpus, timing, graph-size, and visual-result reproduction is not claimed.
+
 Start code exploration with [CONTEXT.md](CONTEXT.md). Supported specs:
 [specs/README.md](specs/README.md). Audit order and current decisions:
 [PHASE.md](PHASE.md).

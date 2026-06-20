@@ -58,3 +58,11 @@ window remains selected over 8 frames because the longer window adds latency,
 reduces accepted reachability, and does not remove the measured artifacts. See
 `PHASE.md` and `build/blend_window_comparison.md`.
 
+Paper-faithfulness status: core node/edge construction and runtime lookup are
+implemented, but only a single-node self-edge demo is evidenced. The shortest
+completion path is direct steering, path following, a compatible second motion
+space, an inter-node edge, then a random graph-walk demo. Replay export,
+controller comparison, and foot locking remain deferred unless evidence makes
+them necessary. Exact reproduction of the paper's unavailable corpus and
+reported performance is outside the functional-reimplementation target.
+

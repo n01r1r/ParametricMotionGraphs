@@ -917,6 +917,36 @@ Non-goals:
 
 ## Final order
 
+### Feasible paper-reimplementation path — DECIDED (2026-06-20)
+
+Current implementation already covers the paper's core mechanism: registered
+parametric motion spaces, sampled edge construction, double-threshold reachable
+target boxes, k-nearest edge lookup, and aligned runtime blending. Current
+evidence is limited to a single 2-D locomotion node and self-edge; it does not
+yet demonstrate the paper's multi-node graph or applications.
+
+Use this critical path:
+
+```text
+C1 Direct Steering Controller
+C2 Path Following Demo
+D1 Compatible BVH Corpus Audit
+D2 Second Parametric Node
+D3 Inter-node Edge
+D4 Graph Walk / Action Sequencing Demo
+```
+
+Defer C3, C4, and B4. Add them only if replay evidence, controller comparison,
+or measured contact artifacts require them. Acceptance target is a faithful
+functional reimplementation of the published method, not reproduction of the
+paper's unavailable corpus, exact timings, graph sizes, or visual results.
+
+Before new implementation, verify the existing multi-config build with:
+
+```powershell
+ctest --test-dir build -C Debug --output-on-failure
+```
+
 Run phases in this order:
 
 ```text
