@@ -60,10 +60,15 @@ as paper-equivalent without reporting its config.
 ## Known limitations
 
 - Demo support is sparse; missing 2-D corners are projected, not synthesized.
+- Current transition montage reports visible pops, and contact audit reports
+  common contact mismatch; diagnostics do not alter runtime acceptance.
+- Five-frame blending remains the demo default. Eight frames increased latency,
+  rejected more requests, and did not improve worst transition artifacts.
 - Builder may reject declared edges; all rejected edges make build fail.
 - Offline preparation still opens BVH filesystem paths.
 - Reader compatibility covers V2-V12; writer emits V12 only.
 - Viewer requires optional OpenGL dependencies enabled by `PMG_BUILD_VIEWER`.
 
 Start code exploration with [CONTEXT.md](CONTEXT.md). Supported specs:
-[specs/README.md](specs/README.md).
+[specs/README.md](specs/README.md). Audit order and current decisions:
+[PHASE.md](PHASE.md).

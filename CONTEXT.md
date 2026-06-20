@@ -52,3 +52,9 @@ Sparse demo support requires projection. Edge construction is sampling-based
 and may reject edges. Offline preparation still knows BVH paths. Artifact writes
 are V12-only. Viewer is optional and OpenGL-dependent.
 
+Current animation-quality evidence is report-only: accepted transitions still
+include visible-pop cases, and contact mismatch is common. The 5-frame blend
+window remains selected over 8 frames because the longer window adds latency,
+reduces accepted reachability, and does not remove the measured artifacts. See
+`PHASE.md` and `build/blend_window_comparison.md`.
+
