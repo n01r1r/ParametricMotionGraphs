@@ -425,6 +425,13 @@ Non-goals:
 
 ### Phase B3 — Blend Window Comparison
 
+Status: COMPLETE (2026-06-20)
+
+Completed artifact: `build/blend_window_comparison.md`. Decision:
+`KEEP_BLEND_5`. The 8-frame build rejected more sampled requests, retained
+accepted BAD transitions, increased worst skate distance, and adds 0.1 s of
+blend latency at 30 fps. No runtime policy change.
+
 Compare fixed blend windows and propose a policy.
 
 Use:
