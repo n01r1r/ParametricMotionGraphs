@@ -370,6 +370,14 @@ Non-goals:
 
 ### Phase B2 — Contact / Foot Sliding Report-Only Metric
 
+Status: COMPLETE (2026-06-20)
+
+Completed artifacts: `build/test_artifacts/walk_2d/contact_transition_audit.csv`
+and `build/test_artifacts/walk_2d/contact_transition_audit.md`. Result:
+`WARN_CONTACT_MISMATCH_COMMON` (2021 accepted transition pairs; smoothstep
+blend contact mismatch, contact-foot velocity, skate distance, and per-foot
+contact confidence reported). No runtime or transition rejection change.
+
 Implement report-only foot contact and foot sliding diagnostics.
 
 Purpose:
@@ -845,7 +853,7 @@ Conclusion:
 
 ---
 
-### Phase B1.5 ??Accepted-BAD Transition Root Cause Audit
+### Phase B1.5  Accepted-BAD Transition Root Cause Audit
 
 Implement report-only acceptance-consistency audit for current self-edge.
 

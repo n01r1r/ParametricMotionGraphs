@@ -12,6 +12,7 @@
 #include "pmg/MotionRegistration.h"
 #include "pmg/MotionSpacePreparation.h"
 #include "pmg/ParametricMotionGraph.h"
+#include "pmg/PoseBlend.h"
 #include "pmg/RuntimeController.h"
 #include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
@@ -2233,6 +2234,15 @@ struct TransitionMontageAuditOptions {
     int samples_per_axis = 9;
 };
 
+struct ContactTransitionAuditOptions {
+    std::string pmg_path;
+    std::string output_csv;
+    std::string output_md;
+    std::string source_node;
+    std::string target_node;
+    int samples_per_axis = 9;
+};
+
 struct TransitionAcceptanceConsistencyAuditOptions {
     std::string pmg_path;
     std::string output_csv;
@@ -3508,6 +3518,227 @@ void WriteTransitionMontageMarkdown(
     md << "- Montage directory: `" << options.output_dir << "`\n";
 }
 
+struct ContactTransitionRow {
+    pmg::ParameterVector source_parameter;
+    pmg::ParameterVector target_parameter;
+    float transition_distance = 0.0f;
+    int contact_mismatch_count = 0;
+    float max_contact_foot_velocity = 0.0f;
+    float total_skate_distance = 0.0f;
+    float left_contact_confidence = 0.0f;
+    float right_contact_confidence = 0.0f;
+};
+
+bool FrameInContact(
+    const std::vector<pmg::ContactInterval>& contacts, int joint, int frame) {
+    return std::any_of(contacts.begin(), contacts.end(), [&](const auto& contact) {
+        return contact.joint_index == joint && frame >= contact.first_frame &&
+               frame <= contact.last_frame;
+    });
+}
+
+std::vector<ContactTransitionRow> BuildContactTransitionRows(
+    const pmg::BuiltPmgArtifact& artifact,
+    const ContactTransitionAuditOptions& options) {
+    ReachableRegionAuditOptions reachable_options;
+    reachable_options.source_node = options.source_node;
+    reachable_options.target_node = options.target_node;
+    std::string source_name;
+    std::string target_name;
+    const int edge_index = ResolveEdgeIndex(
+        artifact, reachable_options, source_name, target_name);
+    const pmg::PmgEdge& edge = artifact.graph.Edge(edge_index);
+    const pmg::PmgNode& source_node = artifact.graph.Node(edge.source_node);
+    const pmg::PmgNode& target_node = artifact.graph.Node(edge.target_node);
+    const pmg::EdgeBuildMetadata* metadata =
+        FindEdgeBuildMetadata(artifact, source_name, target_name);
+    if (metadata == nullptr) {
+        throw std::runtime_error(
+            "--audit-contact-transitions: missing edge build metadata");
+    }
+    std::vector<int> contact_joints =
+        metadata->config.transition_metric.contact_joint_indices;
+    if (contact_joints.empty()) {
+        const auto registration = std::find_if(
+            artifact.metadata.node_registrations.begin(),
+            artifact.metadata.node_registrations.end(),
+            [&](const auto& value) { return value.node_name == source_name; });
+        if (registration != artifact.metadata.node_registrations.end()) {
+            for (const std::string& joint_name : registration->contact_joints) {
+                const int joint = ResolveJointIndex(artifact.skeleton, joint_name);
+                if (joint >= 0) {
+                    contact_joints.push_back(joint);
+                }
+            }
+        }
+    }
+    if (contact_joints.empty()) {
+        for (const char* joint_name : {"LeftAnkle", "RightAnkle"}) {
+            const int joint = ResolveJointIndex(artifact.skeleton, joint_name);
+            if (joint >= 0) {
+                contact_joints.push_back(joint);
+            }
+        }
+    }
+    if (contact_joints.size() < 2) {
+        throw std::runtime_error(
+            "--audit-contact-transitions: edge needs two contact joints");
+    }
+
+    std::vector<ContactTransitionRow> rows;
+    const auto source_samples = BuildAuditParameterSamples(
+        source_node.motion_space, options.samples_per_axis);
+    const auto target_samples = BuildAuditParameterSamples(
+        target_node.motion_space, options.samples_per_axis);
+    for (const auto& source_parameter : source_samples) {
+        for (const auto& target_parameter : target_samples) {
+            const auto lookup = edge.LookupInterpolated(
+                source_parameter, target_parameter);
+            if (!lookup.has_value() ||
+                !lookup->target_parameter_box.Contains(target_parameter)) {
+                continue;
+            }
+            const pmg::MotionClip source_clip = source_node.motion_space.GenerateClip(
+                source_parameter, artifact.metadata.frames_per_second);
+            const pmg::MotionClip target_clip = target_node.motion_space.GenerateClip(
+                target_parameter, artifact.metadata.frames_per_second);
+            const pmg::OptimalTransition transition = EvaluateConfiguredTransition(
+                artifact.skeleton, source_clip, target_clip, metadata->config);
+            const pmg::ContactDetectionSettings source_settings =
+                pmg::EstimateContactSettings(
+                    artifact.skeleton, source_clip, contact_joints);
+            const pmg::ContactDetectionSettings target_settings =
+                pmg::EstimateContactSettings(
+                    artifact.skeleton, target_clip, contact_joints);
+            const auto source_contacts = pmg::DetectContacts(
+                artifact.skeleton, source_clip, contact_joints, source_settings);
+            const auto target_contacts = pmg::DetectContacts(
+                artifact.skeleton, target_clip, contact_joints, target_settings);
+
+            ContactTransitionRow row;
+            row.source_parameter = source_parameter;
+            row.target_parameter = target_parameter;
+            row.transition_distance = transition.distance;
+            std::array<int, 2> contact_frames{};
+            std::array<int, 2> blend_frames{};
+            std::array<pmg::Vec3, 2> previous_positions{};
+            const int frame_count = metadata->config.distance_grid.window_size;
+            for (int blend_frame = 0; blend_frame < frame_count; ++blend_frame) {
+                const int source_frame = std::clamp(
+                    transition.source_frame + blend_frame, 0,
+                    source_clip.NumFrames() - 1);
+                const int target_frame = std::clamp(
+                    transition.target_frame - frame_count + 1 + blend_frame, 0,
+                    target_clip.NumFrames() - 1);
+                const float linear_alpha = frame_count == 1
+                    ? 1.0f
+                    : static_cast<float>(blend_frame) /
+                          static_cast<float>(frame_count - 1);
+                const float alpha = linear_alpha * linear_alpha *
+                                    (3.0f - 2.0f * linear_alpha);
+                const pmg::Pose blended = pmg::BlendPose(
+                    source_clip.frames[source_frame],
+                    transition.alignment.Apply(target_clip.frames[target_frame]),
+                    alpha);
+                const auto positions = pmg::ComputeJointWorldPositions(
+                    artifact.skeleton, blended);
+                for (int foot = 0; foot < 2; ++foot) {
+                    const int joint = contact_joints[foot];
+                    const bool source_contact = FrameInContact(
+                        source_contacts, joint, source_frame);
+                    const bool target_contact = FrameInContact(
+                        target_contacts, joint, target_frame);
+                    if (source_contact != target_contact) {
+                        ++row.contact_mismatch_count;
+                    }
+                    const bool in_contact = source_contact || target_contact;
+                    ++blend_frames[foot];
+                    if (in_contact) {
+                        ++contact_frames[foot];
+                    }
+                    if (blend_frame > 0 && in_contact) {
+                        const float step = HorizontalLength(
+                            positions[joint] - previous_positions[foot]);
+                        row.total_skate_distance += step;
+                        row.max_contact_foot_velocity = std::max(
+                            row.max_contact_foot_velocity,
+                            step * artifact.metadata.frames_per_second);
+                    }
+                    previous_positions[foot] = positions[joint];
+                }
+            }
+            row.left_contact_confidence = static_cast<float>(contact_frames[0]) /
+                                          static_cast<float>(blend_frames[0]);
+            row.right_contact_confidence = static_cast<float>(contact_frames[1]) /
+                                           static_cast<float>(blend_frames[1]);
+            rows.push_back(row);
+        }
+    }
+    return rows;
+}
+
+std::string ContactTransitionConclusion(
+    const std::vector<ContactTransitionRow>& rows) {
+    const int mismatched = static_cast<int>(std::count_if(
+        rows.begin(), rows.end(), [](const auto& row) {
+            return row.contact_mismatch_count > 0;
+        }));
+    if (mismatched > static_cast<int>(rows.size() / 2)) {
+        return "WARN_CONTACT_MISMATCH_COMMON";
+    }
+    if (mismatched > 0) {
+        return "WARN_FOOT_SLIDING_VISIBLE";
+    }
+    return "PASS_CONTACT_ARTIFACT_LOW";
+}
+
+void WriteContactTransitionAudit(
+    const ContactTransitionAuditOptions& options,
+    const std::vector<ContactTransitionRow>& rows) {
+    std::ofstream csv(options.output_csv);
+    std::ofstream md(options.output_md);
+    if (!csv || !md) {
+        throw std::runtime_error(
+            "--audit-contact-transitions: cannot write output");
+    }
+    csv << std::setprecision(9)
+        << "source_parameter,target_parameter,transition_metric_d,"
+           "contact_mismatch_count,max_contact_foot_velocity,"
+           "total_skate_distance,left_contact_confidence,"
+           "right_contact_confidence\n";
+    for (const auto& row : rows) {
+        csv << ParameterCsv(row.source_parameter) << ','
+            << ParameterCsv(row.target_parameter) << ','
+            << row.transition_distance << ',' << row.contact_mismatch_count << ','
+            << row.max_contact_foot_velocity << ',' << row.total_skate_distance
+            << ',' << row.left_contact_confidence << ','
+            << row.right_contact_confidence << '\n';
+    }
+    std::vector<ContactTransitionRow> ranked = rows;
+    std::sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
+        return left.total_skate_distance > right.total_skate_distance;
+    });
+    md << "# Contact Transition Audit\n\n"
+       << "Report-only contact/foot-slide diagnostics. Distances use motion "
+          "corpus units; velocity uses corpus units/s; confidence is contact "
+          "frame fraction over blend. Contact is estimated independently per "
+          "generated clip. No runtime or transition rejection change.\n\n"
+       << "- Evaluated accepted transitions: " << rows.size() << "\n"
+       << "- Conclusion: `" << ContactTransitionConclusion(rows) << "`\n\n"
+       << "| Rank | Source | Target | D | Mismatch frames | Max foot velocity | Skate distance | Left confidence | Right confidence |\n"
+       << "|---:|---|---|---:|---:|---:|---:|---:|---:|\n";
+    const int count = std::min(20, static_cast<int>(ranked.size()));
+    for (int index = 0; index < count; ++index) {
+        const auto& row = ranked[index];
+        md << "| " << index + 1 << " | " << ParameterMd(row.source_parameter)
+           << " | " << ParameterMd(row.target_parameter) << " | "
+           << row.transition_distance << " | " << row.contact_mismatch_count
+           << " | " << row.max_contact_foot_velocity << " | "
+           << row.total_skate_distance << " | " << row.left_contact_confidence
+           << " | " << row.right_contact_confidence << " |\n";
+    }
+}
+
 constexpr float kAcceptanceNearThresholdRatio = 0.9f;
 constexpr float kShrinkageCoverageWarnThreshold = 0.35f;
 constexpr float kKnownBadCaseTolerance = 1.0e-5f;
@@ -3957,6 +4188,39 @@ TransitionMontageAuditOptions ParseTransitionMontageAuditOptions(
     return options;
 }
 
+ContactTransitionAuditOptions ParseContactTransitionAuditOptions(
+    int argc, char** argv) {
+    if (argc < 3) {
+        throw std::runtime_error(
+            "--audit-contact-transitions needs <graph.pmg>");
+    }
+    ContactTransitionAuditOptions options;
+    options.pmg_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        if (index + 1 >= argc) {
+            throw std::runtime_error(option + " requires a value");
+        }
+        const std::string value = argv[++index];
+        if (option == "--output-csv") options.output_csv = value;
+        else if (option == "--output-md") options.output_md = value;
+        else if (option == "--source-node") options.source_node = value;
+        else if (option == "--target-node") options.target_node = value;
+        else if (option == "--samples") options.samples_per_axis = std::stoi(value);
+        else throw std::runtime_error(
+            "unknown audit-contact-transitions option '" + option + "'");
+    }
+    if (options.output_csv.empty() || options.output_md.empty()) {
+        throw std::runtime_error(
+            "--audit-contact-transitions requires --output-csv and --output-md");
+    }
+    if (options.samples_per_axis < 2) {
+        throw std::runtime_error(
+            "--audit-contact-transitions: --samples must be at least 2");
+    }
+    return options;
+}
+
 TransitionAcceptanceConsistencyAuditOptions
 ParseTransitionAcceptanceConsistencyAuditOptions(
     int argc, char** argv) {
@@ -4019,6 +4283,18 @@ int TransitionMontageAuditCommand(
     std::cout << "transition_montage_manifest=" << data.manifest_csv_path
               << "\n";
     std::cout << "transition_montage_conclusion=" << data.conclusion << "\n";
+    return 0;
+}
+
+int ContactTransitionAuditCommand(
+    const ContactTransitionAuditOptions& options) {
+    const pmg::BuiltPmgArtifact artifact =
+        pmg::LoadPmgArtifactText(options.pmg_path);
+    const auto rows = BuildContactTransitionRows(artifact, options);
+    WriteContactTransitionAudit(options, rows);
+    std::cout << "contact_transition_rows=" << rows.size() << "\n";
+    std::cout << "contact_transition_conclusion="
+              << ContactTransitionConclusion(rows) << "\n";
     return 0;
 }
 
@@ -5084,6 +5360,10 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
     if (command == "--audit-transition-montage" && argc >= 3) {
         return TransitionMontageAuditCommand(
             ParseTransitionMontageAuditOptions(argc, argv));
+    }
+    if (command == "--audit-contact-transitions" && argc >= 3) {
+        return ContactTransitionAuditCommand(
+            ParseContactTransitionAuditOptions(argc, argv));
     }
     if (command == "--audit-transition-acceptance-consistency" && argc >= 3) {
         return TransitionAcceptanceConsistencyAuditCommand(

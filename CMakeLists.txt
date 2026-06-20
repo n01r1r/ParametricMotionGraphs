@@ -196,6 +196,16 @@ if(PMG_BUILD_TESTS)
     set_tests_properties(cli_audit_transition_montage_walk_2d PROPERTIES
         DEPENDS cli_build_artifact_walk_2d)
 
+    add_test(NAME cli_audit_contact_transitions_walk_2d
+        COMMAND pmg_cli --audit-contact-transitions
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --output-csv
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/contact_transition_audit.csv
+            --output-md
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/contact_transition_audit.md)
+    set_tests_properties(cli_audit_contact_transitions_walk_2d PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
     add_test(NAME cli_audit_transition_acceptance_consistency_walk_2d
         COMMAND pmg_cli --audit-transition-acceptance-consistency
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
