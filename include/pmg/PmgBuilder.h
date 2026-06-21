@@ -26,10 +26,10 @@ struct PmgBuilderConfig {
     int generated_frame_count = 48;
     float generated_frames_per_second = 30.0f;
     // Raw weighted squared-sum units. These defaults preserve the previous
-    // 0.5/0.7 mean-squared scale for the repository's 31-joint, 5-frame
-    // baseline; other skeleton/window/weighting choices require calibration.
-    float good_transition_threshold = 80.0f;
-    float bad_transition_threshold = 110.0f;
+    // Canonical triangulated demo calibration. Other skeleton/window/weighting
+    // choices require corpus-specific calibration.
+    float good_transition_threshold = 120.0f;
+    float bad_transition_threshold = 234.0f;
     unsigned int seed = 1234u;
     float box_shrink_epsilon = 1.0e-4f;
     // Include authored examples in addition to random samples. This is an

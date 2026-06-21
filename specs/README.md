@@ -18,17 +18,14 @@ The primary demo uses a triangulated 2D scattered support over five authored loc
 The spec declares `parameter_support walk_2d triangulated_2d`, so loading validates the authored examples and the explicitly provided triangle indices.
 In the viewer, use Graph -> Coverage to see that triangulated mesh overlaid on the node's domain; the missing corners are marked as unsampled. Use Graph -> Runtime -> Transition to interact with the 2D canvas and compare the requested target parameter with the actual transition parameter projected into authored support and the current edge's reachable box.
 
-### `demo_walk_self_edge_minimal.pmg_spec`
+### `demo_walk_2d_triangle.pmg_spec`
 
-Minimal regression/demo spec.
+Legacy simplex fixture/demo.
 
-Use this when testing one 1-D walk motion space with a single self-edge. It is the smallest stable viewer sanity check.
+Use only for three-anchor simplex regression. It is not the canonical
+presentation or CTest demo.
 
 ## Regression / audit specs
-
-### `legacy_walk_curvature.pmg_spec`
-
-Retained for regression and audit commands only. Do not use it as the main presentation demo. The middle anchor is known to make the measured turn response non-monotone.
 
 ## Unit fixtures
 

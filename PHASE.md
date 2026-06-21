@@ -949,6 +949,30 @@ Non-goals:
 
 ---
 
+### Phase B1.6  Accepted-BAD Report-to-Policy Gate — NEXT
+
+Purpose: prevent runtime acceptance of a target whose independently sampled
+transition distance is `D >= TBAD`, without changing calibrated thresholds or
+adding foot locking.
+
+Evaluate, in order:
+
+1. interpolated target-box shrink;
+2. source-dependent accepted-region hull;
+3. runtime target validation against sampled `D < TBAD` support;
+4. stricter target-box construction in `PmgBuilder`.
+
+Required regression: canonical `demo_walk_2d_triangulated.pmg_spec` produces
+zero `accepted_by_box && D >= TBAD` rows while preserving deterministic seed,
+reported coverage, artifact metadata, and existing GOOD transitions. Record
+rejected count and coverage change; do not silently skip candidates.
+
+Policy selection rule: choose smallest representation/runtime change that
+eliminates accepted BAD rows. Keep report-only audit as verification oracle.
+Do not add foot locking or IK in this phase.
+
+---
+
 ## Final order
 
 ### Feasible paper-reimplementation path — DECIDED (2026-06-20)
@@ -991,6 +1015,7 @@ A4 Threshold Visual Acceptance
 
 B1 Transition Montage Audit
 B1.5 Accepted-BAD Transition Root Cause Audit
+B1.6 Accepted-BAD Report-to-Policy Gate
 B2 Contact / Foot Sliding Audit
 B3 Blend Window Comparison
 B4 Optional Foot Locking / IK, only if justified

@@ -179,11 +179,11 @@ if(PMG_BUILD_TESTS)
     # for the final clean repository.
     add_test(NAME cli_validate_demo_walk_2d
         COMMAND pmg_cli --validate-graph-spec
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec)
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec)
 
     add_test(NAME cli_build_artifact_walk_2d
         COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg)
 
     add_test(NAME cli_audit_transition_montage_walk_2d
@@ -219,7 +219,7 @@ if(PMG_BUILD_TESTS)
 
     add_test(NAME cli_goto_walk_2d
         COMMAND pmg_cli --goto
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec 10 10
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec 10 10
             --seconds 20
             --max-pop-ratio 8.0)
 
