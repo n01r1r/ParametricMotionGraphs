@@ -949,7 +949,27 @@ Non-goals:
 
 ---
 
-### Phase B1.6  Accepted-BAD Report-to-Policy Gate — NEXT
+### Phase B1.6  Accepted-BAD Report-to-Policy Gate — COMPLETE (2026-06-21)
+
+Selected policy: intersect target boxes from source samples with positive
+interpolation weight. Empty intersections expose no transition. This is the
+smallest evaluated representation change; it adds no metric evaluation or new
+artifact data at runtime.
+
+Canonical acceptance audit result:
+
+* accepted BAD transitions: `1 -> 0`;
+* accepted rows: `2512 -> 2456`;
+* rejected rows: `244 -> 300`;
+* accepted coverage: `91.1466% -> 89.1147%` (`-2.0319` percentage points);
+* conclusion: `WARN_NEAR_BAD_ACCEPTED` (five accepted rows remain below but
+  near `TBAD`);
+* known failing case `(0.1875, 0.375) -> (0.025, 0.875)` is rejected and
+  projected to `(0.025, 0.760583)`.
+
+Targeted checks: `test_edge_lookup` passed; canonical artifact build passed;
+acceptance-consistency audit evaluated all 2,756 rows and reported zero
+`accepted_by_box && D >= TBAD` violations.
 
 Purpose: prevent runtime acceptance of a target whose independently sampled
 transition distance is `D >= TBAD`, without changing calibrated thresholds or

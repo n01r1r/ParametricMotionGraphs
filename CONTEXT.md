@@ -58,6 +58,10 @@ window remains selected over 8 frames because the longer window adds latency,
 reduces accepted reachability, and does not remove the measured artifacts. See
 `PHASE.md` and `build/blend_window_comparison.md`.
 
+Runtime reachable boxes now intersect positively weighted source-sample boxes.
+Canonical acceptance audit rejects 300/2,756 rows, preserves 89.1147% sampled
+coverage, and reports zero accepted transitions with `D >= TBAD`.
+
 Paper-faithfulness status: core node/edge construction, runtime lookup, direct
 steering, and single-node waypoint path following are implemented. The corpus
 audit found only one clear cyclic run candidate, so second-node, inter-node-edge,

@@ -101,7 +101,7 @@ TransitionPhases ResolveTargetPhases(
     return phases;
 }
 
-InterpolatedTransition AverageSamples(
+std::optional<InterpolatedTransition> AverageSamples(
     const std::vector<const TransitionSample*>& selected_samples,
     const std::vector<float>& weights,
     const ParameterVector& desired_target_parameter) {
@@ -112,20 +112,34 @@ InterpolatedTransition AverageSamples(
     const int target_dimension = static_cast<int>(
         selected_samples.front()->target_parameter_box.min_corner.size());
     InterpolatedTransition result;
-    result.target_parameter_box.min_corner.assign(
-        static_cast<std::size_t>(target_dimension), 0.0f);
-    result.target_parameter_box.max_corner.assign(
-        static_cast<std::size_t>(target_dimension), 0.0f);
+    result.target_parameter_box = ParameterAabb::Empty(target_dimension);
+    bool has_target_box = false;
 
     for (std::size_t sample_index = 0; sample_index < selected_samples.size(); ++sample_index) {
         const TransitionSample& sample = *selected_samples[sample_index];
         const float weight = weights[sample_index];
-        for (int dimension = 0; dimension < target_dimension; ++dimension) {
-            result.target_parameter_box.min_corner[dimension] +=
-                weight * sample.target_parameter_box.min_corner[dimension];
-            result.target_parameter_box.max_corner[dimension] +=
-                weight * sample.target_parameter_box.max_corner[dimension];
+        if (weight <= 0.0f) {
+            continue;
         }
+        if (!has_target_box) {
+            result.target_parameter_box = sample.target_parameter_box;
+            has_target_box = true;
+            continue;
+        }
+        for (int dimension = 0; dimension < target_dimension; ++dimension) {
+            result.target_parameter_box.min_corner[dimension] = std::max(
+                result.target_parameter_box.min_corner[dimension],
+                sample.target_parameter_box.min_corner[dimension]);
+            result.target_parameter_box.max_corner[dimension] = std::min(
+                result.target_parameter_box.max_corner[dimension],
+                sample.target_parameter_box.max_corner[dimension]);
+        }
+    }
+
+    // ponytail: intersect existing sampled boxes; add a target-region hull only
+    // if measured coverage loss makes this conservative policy inadequate.
+    if (!has_target_box || result.target_parameter_box.IsEmpty()) {
+        return std::nullopt;
     }
 
     const ParameterVector target_parameter =

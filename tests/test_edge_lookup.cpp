@@ -85,7 +85,7 @@ int main() {
         assert(std::abs(result->target_parameter_box.max_corner[0] - 1.0f) < 1.0e-5f);
     }
 
-    // Duplicate exact samples are averaged explicitly.
+    // Duplicate exact samples keep only their common reachable target region.
     {
         pmg::PmgEdge duplicate_edge;
         duplicate_edge.source_node = 0;
@@ -94,16 +94,26 @@ int main() {
         duplicate_edge.samples.push_back(MakeSample(0.0f, 2.0f, 4.0f, 0.60f, 0.30f));
         duplicate_edge.samples[0].target_parameter_box.min_corner = {0.0f, 10.0f};
         duplicate_edge.samples[0].target_parameter_box.max_corner = {1.0f, 11.0f};
-        duplicate_edge.samples[1].target_parameter_box.min_corner = {2.0f, 20.0f};
+        duplicate_edge.samples[1].target_parameter_box.min_corner = {0.5f, 10.5f};
         duplicate_edge.samples[1].target_parameter_box.max_corner = {4.0f, 40.0f};
         const auto result =
             duplicate_edge.LookupInterpolated({0.0f}, {1.0f, 15.0f});
         assert(result.has_value());
-        assert(std::abs(result->target_parameter_box.min_corner[0] - 1.0f) < 1.0e-5f);
-        assert(std::abs(result->target_parameter_box.max_corner[0] - 2.5f) < 1.0e-5f);
-        assert(std::abs(result->target_parameter_box.min_corner[1] - 15.0f) < 1.0e-5f);
-        assert(std::abs(result->target_parameter_box.max_corner[1] - 25.5f) < 1.0e-5f);
+        assert(std::abs(result->target_parameter_box.min_corner[0] - 0.5f) < 1.0e-5f);
+        assert(std::abs(result->target_parameter_box.max_corner[0] - 1.0f) < 1.0e-5f);
+        assert(std::abs(result->target_parameter_box.min_corner[1] - 10.5f) < 1.0e-5f);
+        assert(std::abs(result->target_parameter_box.max_corner[1] - 11.0f) < 1.0e-5f);
         assert(std::abs(result->source_transition_phase - 0.70f) < 1.0e-5f);
+    }
+
+    // Disjoint source-dependent boxes expose no safe interpolated transition.
+    {
+        pmg::PmgEdge disjoint_edge;
+        disjoint_edge.samples.push_back(
+            MakeSample(0.0f, 0.0f, 1.0f, 0.80f, 0.10f));
+        disjoint_edge.samples.push_back(
+            MakeSample(0.0f, 2.0f, 3.0f, 0.60f, 0.30f));
+        assert(!disjoint_edge.LookupInterpolated({0.0f}, {1.5f}).has_value());
     }
 
     // Empty edge -> no interpolation.

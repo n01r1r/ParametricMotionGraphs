@@ -61,7 +61,9 @@ as paper-equivalent without reporting its config.
 
 - Demo support is sparse; missing 2-D corners are projected, not synthesized.
 - Current transition montage reports visible pops, and contact audit reports
-  common contact mismatch; diagnostics do not alter runtime acceptance.
+  common contact mismatch. The reachable-box intersection gate prevents the
+  measured accepted-BAD overreach case; visual/contact diagnostics remain
+  report-only.
 - Five-frame blending remains the demo default. Eight frames increased latency,
   rejected more requests, and did not improve worst transition artifacts.
 - Builder may reject declared edges; all rejected edges make build fail.
