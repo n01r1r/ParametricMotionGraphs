@@ -162,8 +162,9 @@ struct RandomWalkOptions {
     // box, clamped target, phases, pre-roll policy, alignment, build-time D, and
     // local pop around the transition). Empty = no dump.
     std::string dump_transitions_csv;
-    // Optional CLI-only ablation. A prospective controller copy measures the
-    // candidate before the live controller schedules it.
+    // Optional random-walk CLI-only ablation. A prospective controller copy
+    // measures the candidate before scheduling. Core RuntimeController and
+    // viewer scheduling remain unchanged.
     pmg::TransitionQualityGateConfig quality_gate;
 };
 
@@ -388,6 +389,8 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
               << options.quality_gate.max_yaw_rate_ratio
               << " max_contact_drift="
               << options.quality_gate.max_contact_drift
+              << " max_foot_height_delta="
+              << options.quality_gate.max_foot_height_delta
               << " reject_contact_mismatch="
               << (options.quality_gate.reject_contact_mismatch ? 1 : 0)
               << "\n";
@@ -980,6 +983,9 @@ RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
         } else if (option == "--max-contact-drift") {
             options.quality_gate.max_contact_drift =
                 std::stof(require_value("--max-contact-drift"));
+        } else if (option == "--max-foot-height-delta") {
+            options.quality_gate.max_foot_height_delta =
+                std::stof(require_value("--max-foot-height-delta"));
         } else if (option == "--reject-contact-mismatch") {
             options.quality_gate.reject_contact_mismatch = true;
         } else {

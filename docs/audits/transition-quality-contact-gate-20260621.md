@@ -6,6 +6,11 @@ Catch box-accepted transitions that satisfy geometric `D/TBAD` consistency but
 remain visually unsafe. This is a local diagnostic claim, not global visual
 quality validation.
 
+Status: this commit adds exact transition probing and quality-gated
+diagnostic/audit paths. It catches FAIL-VIS-001 as box-accepted but
+quality-rejected. It does not enforce the quality gate in core viewer/controller
+scheduling.
+
 ## FAIL-VIS-001
 
 - Source parameter: `(-0.04, 0.8)`
@@ -16,6 +21,8 @@ quality validation.
 - Why box consistency is insufficient: target lies inside conservative
   interpolated box and `D=232.051 < TBAD=234`; neither fact measures runtime
   speed/contact continuity.
+- Key evidence: source `(-0.04, 0.8)`, target `(0.5, 0)`, `D=232.051`,
+  `TBAD=234`, box accepted, quality rejected with reason `root_speed`.
 
 ## Exact Probe
 
@@ -67,7 +74,7 @@ Artifacts:
 
 - Gate evaluates reconstructed smoothstep transition windows from artifact
   clips; it does not prove perceptual quality beyond sampled cases.
-- Core `RuntimeController` scheduling is unchanged. Diagnostic proof now exists;
-  runtime enforcement needs controller-owned skeleton/contact context and must
-  be validated separately against live emitted poses.
+- Core `RuntimeController` / viewer scheduling is unchanged.
+- Random-walk CLI has an optional prospective quality-gate ablation only.
+- Probe and acceptance audits can evaluate quality-gate decisions.
 - Existing intersected target-box behavior remains unchanged.
