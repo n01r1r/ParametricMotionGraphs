@@ -217,6 +217,30 @@ if(PMG_BUILD_TESTS)
         cli_audit_transition_acceptance_consistency_walk_2d PROPERTIES
         DEPENDS cli_build_artifact_walk_2d)
 
+    add_test(NAME cli_probe_transition_fail_vis_001
+        COMMAND pmg_cli --probe-transition
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --source-param -0.04 0.8 --target-param 0.5 0
+            --frames-before 3 --frames-after 3 --expect-decision reject)
+    set_tests_properties(cli_probe_transition_fail_vis_001 PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
+    add_test(NAME cli_probe_transition_self_good
+        COMMAND pmg_cli --probe-transition
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --source-param 0 1 --target-param 0 1
+            --frames-before 3 --frames-after 3 --expect-decision accept)
+    set_tests_properties(cli_probe_transition_self_good PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
+    add_test(NAME cli_probe_transition_outside_projection
+        COMMAND pmg_cli --probe-transition
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --source-param 0 1 --target-param 0.5 0
+            --frames-before 3 --frames-after 3 --expect-decision reject)
+    set_tests_properties(cli_probe_transition_outside_projection PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
     add_test(NAME cli_goto_walk_2d
         COMMAND pmg_cli --goto
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec 10 10

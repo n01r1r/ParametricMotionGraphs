@@ -330,6 +330,31 @@ TransitionQualityRecord MeasureTransitionQuality(
     record.max_contact_drift =
         std::max(record.left_foot_drift, record.right_foot_drift);
 
+    const int before_pose = std::max(first_pose, transition_pose_index - 1);
+    const int after_pose = std::min(last_pose, transition_pose_index + 1);
+    const std::vector<Vec3> before_positions = ComputeJointWorldPositions(
+        skeleton, world_poses[static_cast<std::size_t>(before_pose)]);
+    const std::vector<Vec3> after_positions = ComputeJointWorldPositions(
+        skeleton, world_poses[static_cast<std::size_t>(after_pose)]);
+    if (context.left_foot_joint >= 0) {
+        record.left_foot_height_before =
+            before_positions[static_cast<std::size_t>(context.left_foot_joint)].y;
+        record.left_foot_height_after =
+            after_positions[static_cast<std::size_t>(context.left_foot_joint)].y;
+        record.left_foot_height_delta = std::abs(
+            record.left_foot_height_after - record.left_foot_height_before);
+    }
+    if (context.right_foot_joint >= 0) {
+        record.right_foot_height_before =
+            before_positions[static_cast<std::size_t>(context.right_foot_joint)].y;
+        record.right_foot_height_after =
+            after_positions[static_cast<std::size_t>(context.right_foot_joint)].y;
+        record.right_foot_height_delta = std::abs(
+            record.right_foot_height_after - record.right_foot_height_before);
+    }
+    record.max_foot_height_delta = std::max(
+        record.left_foot_height_delta, record.right_foot_height_delta);
+
     if (context.contact_settings.has_value()) {
         MotionClip window_clip;
         window_clip.frames_per_second = context.frames_per_second;
@@ -433,7 +458,16 @@ TransitionQualityGateDecision EvaluateTransitionQualityGate(
     if (record.yaw_rate_ratio > config.max_yaw_rate_ratio) {
         return {false, TransitionQualityGateReason::kYawRate};
     }
-    if (record.max_contact_drift > config.max_contact_drift) {
+    const bool left_stable_contact =
+        record.left_contact_before == TransitionContactState::kInContact &&
+        record.left_contact_after == TransitionContactState::kInContact;
+    const bool right_stable_contact =
+        record.right_contact_before == TransitionContactState::kInContact &&
+        record.right_contact_after == TransitionContactState::kInContact;
+    const float stable_contact_drift = std::max(
+        left_stable_contact ? record.left_foot_drift : 0.0f,
+        right_stable_contact ? record.right_foot_drift : 0.0f);
+    if (stable_contact_drift > config.max_contact_drift) {
         return {false, TransitionQualityGateReason::kContactDrift};
     }
 
@@ -444,6 +478,13 @@ TransitionQualityGateDecision EvaluateTransitionQualityGate(
     if (config.reject_contact_mismatch &&
         (left_contact_mismatch || right_contact_mismatch)) {
         return {false, TransitionQualityGateReason::kContactMismatch};
+    }
+    const float stable_contact_height_delta = std::max(
+        left_stable_contact ? record.left_foot_height_delta : 0.0f,
+        right_stable_contact ? record.right_foot_height_delta : 0.0f);
+    if (config.max_foot_height_delta >= 0.0f &&
+        stable_contact_height_delta > config.max_foot_height_delta) {
+        return {false, TransitionQualityGateReason::kFootHeight};
     }
     return {};
 }
@@ -461,6 +502,8 @@ const char* TransitionQualityGateReasonName(
             return "contact_drift";
         case TransitionQualityGateReason::kContactMismatch:
             return "contact_mismatch";
+        case TransitionQualityGateReason::kFootHeight:
+            return "foot_height";
         case TransitionQualityGateReason::kInsufficientData:
             return "insufficient_data";
     }

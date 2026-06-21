@@ -242,6 +242,49 @@ void TestInsufficientDataIsCountable() {
                decision.reason)) == "insufficient_data");
 }
 
+void TestFootHeightGateRejectsLargeDelta() {
+    pmg::TransitionQualityRecord record = GateRecord();
+    record.max_foot_height_delta = 2.1f;
+    record.left_foot_height_delta = 2.1f;
+    record.left_contact_before = pmg::TransitionContactState::kInContact;
+    record.left_contact_after = pmg::TransitionContactState::kInContact;
+    pmg::TransitionQualityGateConfig config;
+    config.enabled = true;
+    config.max_foot_height_delta = 2.0f;
+
+    const pmg::TransitionQualityGateDecision decision =
+        pmg::EvaluateTransitionQualityGate(record, config);
+
+    assert(!decision.accepted);
+    assert(decision.reason == pmg::TransitionQualityGateReason::kFootHeight);
+}
+
+void TestSwingFootDriftDoesNotRejectWithoutContact() {
+    pmg::TransitionQualityRecord record = GateRecord();
+    record.max_contact_drift = 10.0f;
+    record.left_contact_before = pmg::TransitionContactState::kNotInContact;
+    record.left_contact_after = pmg::TransitionContactState::kNotInContact;
+    pmg::TransitionQualityGateConfig config;
+    config.enabled = true;
+    config.max_contact_drift = 2.0f;
+
+    assert(pmg::EvaluateTransitionQualityGate(record, config).accepted);
+}
+
+void TestStableContactDriftRejects() {
+    pmg::TransitionQualityRecord record = GateRecord();
+    record.left_foot_drift = 2.1f;
+    record.left_contact_before = pmg::TransitionContactState::kInContact;
+    record.left_contact_after = pmg::TransitionContactState::kInContact;
+    pmg::TransitionQualityGateConfig config;
+    config.enabled = true;
+    config.max_contact_drift = 2.0f;
+
+    const auto decision = pmg::EvaluateTransitionQualityGate(record, config);
+    assert(!decision.accepted);
+    assert(decision.reason == pmg::TransitionQualityGateReason::kContactDrift);
+}
+
 }  // namespace
 
 int main() {
@@ -254,5 +297,8 @@ int main() {
     TestRootSpeedGateRejectsBadRecord();
     TestYawRateGateRejectsBadRecord();
     TestInsufficientDataIsCountable();
+    TestFootHeightGateRejectsLargeDelta();
+    TestSwingFootDriftDoesNotRejectWithoutContact();
+    TestStableContactDriftRejects();
     return 0;
 }

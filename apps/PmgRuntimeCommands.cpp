@@ -172,6 +172,7 @@ struct TransitionQualityGateCounts {
     int yaw_rate = 0;
     int contact_drift = 0;
     int contact_mismatch = 0;
+    int foot_height = 0;
     int insufficient_data = 0;
 
     void Add(pmg::TransitionQualityGateReason reason) {
@@ -189,6 +190,9 @@ struct TransitionQualityGateCounts {
                 return;
             case pmg::TransitionQualityGateReason::kContactMismatch:
                 ++contact_mismatch;
+                return;
+            case pmg::TransitionQualityGateReason::kFootHeight:
+                ++foot_height;
                 return;
             case pmg::TransitionQualityGateReason::kInsufficientData:
                 ++insufficient_data;
@@ -560,6 +564,8 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
               << quality_gate_counts.contact_drift << "\n";
     std::cout << "quality_gate_skipped_contact_mismatch="
               << quality_gate_counts.contact_mismatch << "\n";
+    std::cout << "quality_gate_skipped_foot_height="
+              << quality_gate_counts.foot_height << "\n";
     std::cout << "quality_gate_skipped_insufficient_data="
               << quality_gate_counts.insufficient_data << "\n";
 

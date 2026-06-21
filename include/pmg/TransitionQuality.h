@@ -31,6 +31,7 @@ enum class TransitionQualityGateReason {
     kYawRate,
     kContactDrift,
     kContactMismatch,
+    kFootHeight,
     kInsufficientData,
 };
 
@@ -61,6 +62,9 @@ struct TransitionQualityGateConfig {
     float max_yaw_rate_ratio = 2.5f;
     float max_contact_drift = 5.0f;
     bool reject_contact_mismatch = false;
+    // Maximum before/after foot-height change in motion corpus distance units.
+    // Negative disables this check.
+    float max_foot_height_delta = -1.0f;
 };
 
 struct TransitionQualityGateDecision {
@@ -108,6 +112,16 @@ struct TransitionQualityRecord {
     float left_foot_drift = 0.0f;
     float right_foot_drift = 0.0f;
     float max_contact_drift = 0.0f;
+
+    // World-space Y at frames immediately before/after transition. Values are
+    // available when corresponding foot joint indices are configured.
+    float left_foot_height_before = 0.0f;
+    float left_foot_height_after = 0.0f;
+    float left_foot_height_delta = 0.0f;
+    float right_foot_height_before = 0.0f;
+    float right_foot_height_after = 0.0f;
+    float right_foot_height_delta = 0.0f;
+    float max_foot_height_delta = 0.0f;
 
     TransitionContactState left_contact_before =
         TransitionContactState::kUnknown;
