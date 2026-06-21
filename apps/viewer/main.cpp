@@ -127,6 +127,20 @@ void PollCameraFly(GLFWwindow* window, pmgviewer::ViewerHost& app, float delta_s
     app.Camera().Pan(right * step, forward * step);
 }
 
+void PollDirectSteering(GLFWwindow* window, pmgviewer::ViewerHost& app) {
+    if (ImGui::GetIO().WantCaptureKeyboard) {
+        app.SetDirectSteeringInput(0.0f, 0.0f);
+        return;
+    }
+    const float turn =
+        static_cast<float>(glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) -
+        static_cast<float>(glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS);
+    const float speed =
+        static_cast<float>(glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) -
+        static_cast<float>(glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS);
+    app.SetDirectSteeringInput(turn, speed);
+}
+
 void ScrollCallback(GLFWwindow* window, double x_offset, double y_offset) {
     ImGui_ImplGlfw_ScrollCallback(window, x_offset, y_offset);
     auto* input = static_cast<InputState*>(glfwGetWindowUserPointer(window));
@@ -232,6 +246,7 @@ int main(int argc, char** argv) {
             ImGui::NewFrame();
 
             PollCameraFly(window, app, delta_seconds);
+            PollDirectSteering(window, app);
             app.Update(delta_seconds);
             app.BuildUi();
 

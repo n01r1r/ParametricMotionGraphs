@@ -71,11 +71,12 @@ as paper-equivalent without reporting its config.
 
 ## Completion path
 
-Core paper mechanisms are implemented; current evidence stops at one
-parametric locomotion node with a self-edge. Remaining critical path:
-direct steering -> path following -> compatible second node -> inter-node edge
--> random graph walk. `PHASE.md` records scope and deferrals. Exact paper
-corpus, timing, graph-size, and visual-result reproduction is not claimed.
+Core paper mechanisms, direct steering, and single-node waypoint path following
+are implemented. A reproducible corpus audit found only one clear cyclic run
+candidate, so the required compatible second node—and therefore inter-node
+edges and graph-walk demo—remain blocked by source data. `PHASE.md` records the
+evidence and deferrals. Exact paper corpus, timing, graph-size, and visual-result
+reproduction is not claimed.
 
 Start code exploration with [CONTEXT.md](CONTEXT.md). Supported specs:
 [specs/README.md](specs/README.md). Audit order and current decisions:

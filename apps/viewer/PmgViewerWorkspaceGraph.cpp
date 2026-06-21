@@ -1865,6 +1865,29 @@ void PmgViewerWorkspace::BuildGraphRuntimeTab() {
     DrawTransitionPipeline();
 
     ImGui::Separator();
+    if (ImGui::Checkbox("Direct Steering Mode", &direct_steering_active_)) {
+        ResetGotoState(direct_steering_active_
+            ? "Arrow keys: left/right steer, up/down set speed."
+            : "Direct steering disabled.");
+        if (direct_steering_active_ && !steering_.has_value()) {
+            CalibrateSteering();
+        }
+    }
+    ImGui::TextDisabled("Arrow keys steer; no input holds last safe request.");
+    if (ImGui::Checkbox("Path Following Mode", &path_following_active_)) {
+        path_waypoints_.clear();
+        path_waypoint_index_ = 0;
+        ResetGotoState(path_following_active_
+            ? "Right-click floor to append path waypoints."
+            : "Path following disabled.");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear Path")) {
+        path_waypoints_.clear();
+        path_waypoint_index_ = 0;
+        ResetGotoState("Path cleared.");
+    }
+    ImGui::Text("Path: %zu waypoints", path_waypoints_.size());
     ImGui::TextDisabled("Steering: right-click floor to set target");
     if (ImGui::Button(
             steering_.has_value() ? "Recalibrate" : "Calibrate steering")) {

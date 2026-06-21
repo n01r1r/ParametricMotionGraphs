@@ -5,6 +5,10 @@ Current branch:
 
 Current status:
 
+* `reachable-region-audit` completes A1-A4 and B1-B3 as report-only
+  validation/diagnostic phases for a single-node `walk_2d` self-edge PMG. B1.5,
+  C1, C2, and D1 are phase-closed. D1 found insufficient cyclic run data, so
+  conditional phases D2-D4 are not authorized by their corpus gate.
 * Architecture / ADR / README / CONTEXT checkpoint is complete.
 * CTest is passing.
 * ViewerRuntimeModule / paper-first architecture is considered the stable baseline.
@@ -519,7 +523,13 @@ Decision:
 Goal:
 Turn the PMG from a parameter-debug tool into an animation-control system.
 
-### Phase C1 — Direct Steering Controller
+### Phase C1 — Direct Steering Controller — COMPLETE (2026-06-21)
+
+Completed artifact: `build/direct_steering_demo_report.md`. Result:
+`PASS_DIRECT_STEERING_DEMO`. Arrow-key direction/speed input maps through the
+existing calibrated `GoalDirectedLocomotion` controller, projects requests to
+node support, and preserves the parameter canvas as debug control. Targeted
+goal-directed/viewer tests passed (3/3).
 
 Implement direct steering control on top of the current `walk_2d` node.
 
@@ -581,7 +591,12 @@ Conclusion:
 
 ---
 
-### Phase C2 — Path Following Demo
+### Phase C2 — Path Following Demo — COMPLETE (2026-06-21)
+
+Completed artifact: `build/path_following_demo_report.md`. Result:
+`PASS_SINGLE_NODE_PATH_FOLLOWING`. Viewer path mode appends right-clicked
+waypoints, renders the polyline, and advances through it with the existing
+calibrated single-node goal controller.
 
 Implement simple lookahead path following using the current single-node PMG.
 
@@ -708,7 +723,12 @@ Decision:
 Goal:
 Move from a single-node parametric locomotion space to a more paper-faithful multi-node PMG.
 
-### Phase D1 — Compatible BVH Corpus Audit
+### Phase D1 — Compatible BVH Corpus Audit — COMPLETE (2026-06-21)
+
+Completed artifacts: `build/compatible_bvh_corpus_audit.csv` and
+`build/compatible_bvh_corpus_audit.md`. Decision:
+`ONLY_SINGLE_NODE_IS_JUSTIFIED`. The 41-file corpus contains only one clear
+cyclic run candidate; `walkToJog.bvh` is transitional. D2-D4 remain gated.
 
 Do not add a second node until this audit passes.
 
@@ -860,7 +880,21 @@ Conclusion:
 
 ---
 
-### Phase B1.5  Accepted-BAD Transition Root Cause Audit
+### Phase B1.5  Accepted-BAD Transition Root Cause Audit — COMPLETE (2026-06-20)
+
+Completed artifacts: `build/transition_acceptance_consistency.csv` and
+`build/transition_acceptance_consistency.md`. Result:
+`FAIL_ACCEPTED_BAD_TRANSITION` / `FAIL_EDGE_BOX_OVERREACH` (2,756 evaluated
+rows; one accepted BAD transition at `(0.1875, 0.375) -> (0.025, 0.875)`,
+`D=245.926`, `TBAD=234`). Requested and effective target parameters match, so
+support projection/interpolation artifact is not the cause. The fixed threshold
+correctly classifies the measured transition as BAD, so a loose threshold is not
+the cause. Jog/walk source-dependent shrinkage rejects and projects other cases;
+it does not explain this accepted row. Root cause: interpolated edge-box
+membership extends beyond the independently measured `D < TBAD` region.
+
+Targeted CTest:
+`cli_audit_transition_acceptance_consistency_walk_2d` passed (1/1).
 
 Implement report-only acceptance-consistency audit for current self-edge.
 

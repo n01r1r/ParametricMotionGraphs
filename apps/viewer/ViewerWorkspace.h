@@ -22,6 +22,10 @@ public:
     virtual void Initialize(const std::string& bootstrap_path) = 0;
     virtual void Update(float delta_seconds) = 0;
     virtual void BuildUi() = 0;
+    virtual void SetDirectSteeringInput(float turn, float speed) {
+        (void)turn;
+        (void)speed;
+    }
     virtual bool HandleGroundClick(
         const glm::vec3& ray_origin, const glm::vec3& ray_direction) = 0;
     virtual const RenderScene& Scene() const = 0;
