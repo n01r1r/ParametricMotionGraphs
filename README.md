@@ -3,6 +3,11 @@
 BVH-based Parametric Motion Graph offline builder, runtime, CLI, and optional
 OpenGL viewer.
 
+This project implements the core PMG mechanism on a sparse, hand-authored,
+single-node walking motion space: offline sampled transition construction, V12
+artifact persistence, phase-gated runtime lookup, conservative reachable-box
+intersection, direct steering, and single-node path following.
+
 ## Current demo
 
 `specs/demo_walk_2d_triangulated.pmg_spec` defines one 2-D locomotion space,

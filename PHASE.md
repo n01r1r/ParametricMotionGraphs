@@ -883,15 +883,12 @@ Conclusion:
 ### Phase B1.5  Accepted-BAD Transition Root Cause Audit — COMPLETE (2026-06-20)
 
 Completed artifacts: `build/transition_acceptance_consistency.csv` and
-`build/transition_acceptance_consistency.md`. Result:
-`FAIL_ACCEPTED_BAD_TRANSITION` / `FAIL_EDGE_BOX_OVERREACH` (2,756 evaluated
-rows; one accepted BAD transition at `(0.1875, 0.375) -> (0.025, 0.875)`,
-`D=245.926`, `TBAD=234`). Requested and effective target parameters match, so
-support projection/interpolation artifact is not the cause. The fixed threshold
-correctly classifies the measured transition as BAD, so a loose threshold is not
-the cause. Jog/walk source-dependent shrinkage rejects and projects other cases;
-it does not explain this accepted row. Root cause: interpolated edge-box
-membership extends beyond the independently measured `D < TBAD` region.
+`build/transition_acceptance_consistency.md`. B1.5 originally detected
+accepted-BAD edge-box overreach. Resolved in Phase E by conservative target-box
+intersection and acceptance consistency gating.
+
+The original audit evaluated 2,756 rows and found one accepted BAD transition at
+`(0.1875, 0.375) -> (0.025, 0.875)`, with `D=245.926` and `TBAD=234`.
 
 Targeted CTest:
 `cli_audit_transition_acceptance_consistency_walk_2d` passed (1/1).
@@ -990,6 +987,42 @@ rejected count and coverage change; do not silently skip candidates.
 Policy selection rule: choose smallest representation/runtime change that
 eliminates accepted BAD rows. Keep report-only audit as verification oracle.
 Do not add foot locking or IK in this phase.
+
+---
+
+## Phase E  Transition Acceptance Consistency Gate — COMPLETE (2026-06-21)
+
+Result: `PASS_BUT_COVERAGE_SHRUNK`.
+
+Commit:
+
+`b3b7dd5 gate transition acceptance consistency`
+
+Implementation:
+
+* `PmgEdge::LookupInterpolated` now intersects contributing sampled target boxes.
+* Runtime-accepted target region is now conservative with respect to sampled boxes.
+* Acceptance consistency audit reports accepted transitions with `D >= TBAD`.
+* Audit command returns nonzero if `accepted_bad_count > 0`.
+
+Canonical audit evaluated 2,756 rows. Accepted BAD transitions fell from one to
+zero. Accepted coverage changed from 91.1466% to 89.1147%, a 2.0319 percentage
+point reduction, so result records material coverage shrinkage rather than an
+unqualified pass. Outputs: `build/transition_acceptance_consistency.csv` and
+`build/transition_acceptance_consistency.md`.
+
+Motivation:
+
+* Previous averaged/interpolated target boxes could overreach measured valid regions.
+* A known accepted-BAD transition had `D >= TBAD` while still lying in the interpolated runtime target box.
+* New policy prevents the measured accepted-BAD overreach case.
+
+Limitations:
+
+* This is a conservative sparse-data implementation choice, not a literal reproduction of continuous dense PMG edge interpolation.
+* Visual transition pops remain a separate animation-quality issue.
+* Contact mismatch / foot sliding diagnostics remain report-only unless later promoted to policy.
+* This does not add multi-node PMG support.
 
 ---
 

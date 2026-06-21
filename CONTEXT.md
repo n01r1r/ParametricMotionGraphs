@@ -48,6 +48,24 @@ Paper symbol map:
 
 ## Current limits
 
+Implemented:
+
+- single-node `walk_2d` PMG;
+- triangulated 2-D support;
+- sampled self-edge construction;
+- conservative target-box intersection;
+- transition acceptance consistency gate;
+- direct steering;
+- single-node path following.
+
+Not implemented / limited:
+
+- full multi-node PMG;
+- paper dataset reproduction;
+- guaranteed visual transition quality;
+- contact-aware runtime rejection;
+- foot locking / IK as default policy.
+
 Sparse demo support requires projection. Edge construction is sampling-based
 and may reject edges. Offline preparation still knows BVH paths. Artifact writes
 are V12-only. Viewer is optional and OpenGL-dependent.

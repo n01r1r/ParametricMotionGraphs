@@ -126,8 +126,13 @@ int main() {
             MakeSample(0.0f, 0.0f, 1.0f, 0.80f, 0.10f));
         consistency_edge.samples.push_back(
             MakeSample(1.0f, 0.0f, 0.6f, 0.80f, 0.10f));
+        consistency_edge.samples.push_back(
+            MakeSample(2.0f, 0.0f, 1.0f, 0.80f, 0.10f));
+        consistency_edge.samples[0].source_parameter = {0.0f, 0.0f};
+        consistency_edge.samples[1].source_parameter = {0.6f, 0.0f};
+        consistency_edge.samples[2].source_parameter = {1.0f, 1.0f};
         const auto result =
-            consistency_edge.LookupInterpolated({0.25f}, {0.8f});
+            consistency_edge.LookupInterpolated({0.2f, 0.1f}, {0.8f});
         assert(result.has_value());
         assert(!result->target_parameter_box.Contains({0.8f}));
         assert(result->target_parameter_box.Contains({0.5f}));
