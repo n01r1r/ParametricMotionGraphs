@@ -116,6 +116,23 @@ int main() {
         assert(!disjoint_edge.LookupInterpolated({0.0f}, {1.5f}).has_value());
     }
 
+    // Regression: averaging source-dependent boxes used to accept target 0.8
+    // between samples even though one sampled box excludes it (known
+    // accepted-BAD/edge-box-overreach failure mode). Intersection keeps runtime
+    // acceptance within every contributing sampled region.
+    {
+        pmg::PmgEdge consistency_edge;
+        consistency_edge.samples.push_back(
+            MakeSample(0.0f, 0.0f, 1.0f, 0.80f, 0.10f));
+        consistency_edge.samples.push_back(
+            MakeSample(1.0f, 0.0f, 0.6f, 0.80f, 0.10f));
+        const auto result =
+            consistency_edge.LookupInterpolated({0.25f}, {0.8f});
+        assert(result.has_value());
+        assert(!result->target_parameter_box.Contains({0.8f}));
+        assert(result->target_parameter_box.Contains({0.5f}));
+    }
+
     // Empty edge -> no interpolation.
     {
         const pmg::PmgEdge empty_edge;

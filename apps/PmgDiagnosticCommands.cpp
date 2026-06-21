@@ -2928,6 +2928,7 @@ struct TransitionAcceptanceConsistencyRow {
     pmg::ParameterVector source_parameter;
     pmg::ParameterVector requested_target_parameter;
     pmg::ParameterVector effective_target_parameter;
+    pmg::ParameterAabb interpolated_target_box;
     bool accepted_by_box = false;
     float transition_distance = 0.0f;
     std::string metric_class;
@@ -2944,6 +2945,9 @@ struct TransitionAcceptanceConsistencyRow {
     float velocity_jump = 0.0f;
     std::string nearest_source_anchor_label;
     std::string nearest_target_anchor_label;
+    std::string nearest_good_evidence;
+    std::string nearest_bad_evidence;
+    std::string overreach_origin;
     bool jog_walk_pair = false;
     std::string notes;
 };
@@ -3034,6 +3038,7 @@ struct TransitionAuditCandidate {
     pmg::ParameterVector source_parameter;
     pmg::ParameterVector requested_target_parameter;
     pmg::ParameterVector effective_target_parameter;
+    pmg::ParameterAabb interpolated_target_box;
     pmg::OptimalTransition transition;
     bool accepted = false;
     bool source_is_anchor = false;
@@ -3070,6 +3075,7 @@ TransitionAuditCandidate BuildTransitionAuditCandidate(
     candidate.requested_target_parameter = requested_target_parameter;
     candidate.effective_target_parameter =
         interpolated->target_parameter_box.Clamp(requested_target_parameter);
+    candidate.interpolated_target_box = interpolated->target_parameter_box;
     if (target_support != nullptr) {
         candidate.effective_target_parameter =
             target_support->ProjectInside(
@@ -3820,6 +3826,7 @@ TransitionAcceptanceConsistencyRow BuildAcceptanceConsistencyRow(
     row.source_parameter = candidate.source_parameter;
     row.requested_target_parameter = candidate.requested_target_parameter;
     row.effective_target_parameter = candidate.effective_target_parameter;
+    row.interpolated_target_box = candidate.interpolated_target_box;
     row.accepted_by_box = candidate.accepted;
     row.transition_distance = candidate.transition.distance;
     row.metric_class = candidate.transition_class;
@@ -3853,6 +3860,66 @@ TransitionAcceptanceConsistencyRow BuildAcceptanceConsistencyRow(
     row.notes = BuildAcceptanceConsistencyNotes(
         candidate, config.bad_transition_threshold);
     return row;
+}
+
+std::string NearestMetricEvidence(
+    const TransitionAcceptanceConsistencyRow& row,
+    const std::vector<TransitionAuditCandidate>& candidates,
+    float good_threshold,
+    float bad_threshold,
+    bool find_good) {
+    const TransitionAuditCandidate* nearest = nullptr;
+    float nearest_distance = std::numeric_limits<float>::infinity();
+    for (const TransitionAuditCandidate& candidate : candidates) {
+        if (!SameParameterWithin(
+                candidate.source_parameter, row.source_parameter,
+                kTransitionMontageAnchorTolerance)) {
+            continue;
+        }
+        const bool matches = find_good
+                                 ? candidate.transition.distance <= good_threshold
+                                 : candidate.transition.distance >= bad_threshold;
+        const float parameter_distance = pmg::SquaredDistance(
+            candidate.requested_target_parameter,
+            row.requested_target_parameter);
+        if (matches && parameter_distance < nearest_distance) {
+            nearest = &candidate;
+            nearest_distance = parameter_distance;
+        }
+    }
+    if (nearest == nullptr) {
+        return "none";
+    }
+    std::ostringstream evidence;
+    evidence << "p=" << ParameterMd(nearest->requested_target_parameter)
+             << ", D=" << nearest->transition.distance;
+    return evidence.str();
+}
+
+std::string OverreachOrigin(
+    const TransitionAcceptanceConsistencyRow& row,
+    const pmg::PmgEdge& edge) {
+    if (!row.acceptance_violation) {
+        return "none";
+    }
+    float nearest_source_distance = std::numeric_limits<float>::infinity();
+    for (const pmg::TransitionSample& sample : edge.samples) {
+        nearest_source_distance = std::min(
+            nearest_source_distance,
+            pmg::SquaredDistance(
+                sample.source_parameter, row.source_parameter));
+    }
+    for (const pmg::TransitionSample& sample : edge.samples) {
+        const float source_distance = pmg::SquaredDistance(
+            sample.source_parameter, row.source_parameter);
+        if (std::abs(source_distance - nearest_source_distance) <=
+                kTransitionMontageAnchorTolerance &&
+            sample.target_parameter_box.Contains(
+                row.requested_target_parameter)) {
+            return "box_construction";
+        }
+    }
+    return "interpolation";
 }
 
 template <typename Predicate, typename RankKey>
@@ -3889,35 +3956,28 @@ void WriteAcceptanceConsistencySection(
         md << "No rows.\n\n";
         return;
     }
-    md << "| Rank | Source p | Req target p | Eff target p | Accepted by box | D | Class | D-TBAD | Source coverage | Src phase/frame | Tgt phase/frame | Root jump | Heading jump | Velocity jump | Source anchor | Target anchor | Notes |\n";
-    md << "|---:|---|---|---|---|---:|---|---:|---:|---|---|---:|---:|---:|---|---|---|\n";
+    md << "| Rank | Source p | Req target p | Target box | Accepted by box | D | Class | D-TBAD | Nearest GOOD | Nearest BAD | Origin | Source coverage | Notes |\n";
+    md << "|---:|---|---|---|---|---:|---|---:|---|---|---|---:|---|\n";
     for (std::size_t index = 0; index < ranked.size(); ++index) {
         const TransitionAcceptanceConsistencyRow& row =
             *ranked[index];
         md << "| " << (index + 1) << " | "
            << ParameterMd(row.source_parameter) << " | "
            << ParameterMd(row.requested_target_parameter) << " | "
-           << ParameterMd(row.effective_target_parameter) << " | "
+           << ParameterMd(row.interpolated_target_box.min_corner) << " .. "
+           << ParameterMd(row.interpolated_target_box.max_corner) << " | "
            << (row.accepted_by_box ? "`true`" : "`false`") << " | "
            << row.transition_distance << " | `" << row.metric_class
-           << "` | " << row.distance_over_tbad << " | ";
+           << "` | " << row.distance_over_tbad << " | "
+           << row.nearest_good_evidence << " | "
+           << row.nearest_bad_evidence << " | `"
+           << row.overreach_origin << "` | ";
         if (row.source_coverage_available) {
             md << row.source_coverage;
         } else {
             md << "n/a";
         }
-        md << " | " << row.source_phase << " / " << row.source_frame
-           << " | " << row.target_phase << " / " << row.target_frame
-           << " | " << row.root_jump << " | " << row.heading_jump
-           << " | " << row.velocity_jump << " | "
-           << (row.nearest_source_anchor_label.empty()
-                   ? "-"
-                   : row.nearest_source_anchor_label)
-           << " | "
-           << (row.nearest_target_anchor_label.empty()
-                   ? "-"
-                   : row.nearest_target_anchor_label)
-           << " | " << row.notes << " |\n";
+        md << " | " << row.notes << " |\n";
     }
     md << "\n";
 }
@@ -3980,6 +4040,13 @@ TransitionAcceptanceConsistencyAuditData BuildTransitionAcceptanceConsistencyAud
             BuildAcceptanceConsistencyRow(
                 candidate, artifact, source_node, target_node, data.config,
                 source_support, target_support);
+        row.nearest_good_evidence = NearestMetricEvidence(
+            row, candidates, data.config.good_transition_threshold,
+            data.config.bad_transition_threshold, true);
+        row.nearest_bad_evidence = NearestMetricEvidence(
+            row, candidates, data.config.good_transition_threshold,
+            data.config.bad_transition_threshold, false);
+        row.overreach_origin = OverreachOrigin(row, edge);
         data.accepted_bad_count += row.acceptance_violation ? 1 : 0;
         data.near_threshold_accepted_count +=
             row.accepted_by_box &&
@@ -4012,11 +4079,11 @@ TransitionAcceptanceConsistencyAuditData BuildTransitionAcceptanceConsistencyAud
     }
 
     if (data.accepted_bad_count > 0) {
-        data.consistency_conclusion = "FAIL_ACCEPTED_BAD_TRANSITION";
-    } else if (data.near_threshold_accepted_count > 0) {
-        data.consistency_conclusion = "WARN_NEAR_BAD_ACCEPTED";
+        data.consistency_conclusion = "FAIL_OVERREACH_REMAINS";
+    } else if (data.shrinkage_row_count > 0) {
+        data.consistency_conclusion = "PASS_BUT_COVERAGE_SHRUNK";
     } else {
-        data.consistency_conclusion = "PASS_ACCEPTANCE_REGION_CONSISTENT";
+        data.consistency_conclusion = "PASS_NO_ACCEPTED_BAD_TRANSITIONS";
     }
 
     if (any_box_overreach) {
@@ -4037,14 +4104,18 @@ void WriteTransitionAcceptanceConsistencyCsv(
     }
     csv << std::setprecision(9)
         << "source_parameter,requested_target_parameter,effective_target_parameter,"
+           "interpolated_target_box_min,interpolated_target_box_max,"
            "accepted_by_box,transition_metric_d,metric_class,acceptance_violation,"
            "distance_over_tbad,source_coverage,source_phase,source_frame,"
            "target_phase,target_frame,root_jump,heading_jump,velocity_jump,"
-           "nearest_source_anchor_label,nearest_target_anchor_label,notes\n";
+           "nearest_source_anchor_label,nearest_target_anchor_label,"
+           "nearest_good_evidence,nearest_bad_evidence,overreach_origin,notes\n";
     for (const TransitionAcceptanceConsistencyRow& row : data.rows) {
         csv << ParameterCsv(row.source_parameter) << ','
             << ParameterCsv(row.requested_target_parameter) << ','
             << ParameterCsv(row.effective_target_parameter) << ','
+            << ParameterCsv(row.interpolated_target_box.min_corner) << ','
+            << ParameterCsv(row.interpolated_target_box.max_corner) << ','
             << (row.accepted_by_box ? "true" : "false") << ','
             << row.transition_distance << ',' << row.metric_class << ','
             << (row.acceptance_violation ? "true" : "false") << ','
@@ -4058,6 +4129,9 @@ void WriteTransitionAcceptanceConsistencyCsv(
             << row.velocity_jump << ",\""
             << row.nearest_source_anchor_label << "\",\""
             << row.nearest_target_anchor_label << "\",\""
+            << row.nearest_good_evidence << "\",\""
+            << row.nearest_bad_evidence << "\","
+            << row.overreach_origin << ",\""
             << row.notes << "\"\n";
     }
 }
@@ -4072,9 +4146,9 @@ void WriteTransitionAcceptanceConsistencyMarkdown(
     }
     md << "# Transition Acceptance Consistency Audit\n\n";
     md << "## Purpose\n\n";
-    md << "Check whether interpolated edge acceptance agrees with measured "
-          "transition quality under current PMG artifact. Report only; no "
-          "threshold or runtime behavior change.\n\n";
+    md << "Gate interpolated edge acceptance against sampled transition "
+          "quality under current PMG artifact. Any accepted row with "
+          "D >= TBAD fails command.\n\n";
     md << "## Inputs\n\n";
     md << "- Artifact: `" << options.pmg_path << "`\n";
     md << "- Edge: `" << data.source_node << " -> " << data.target_node
@@ -4092,13 +4166,13 @@ void WriteTransitionAcceptanceConsistencyMarkdown(
     md << "- Root-cause conclusion: `" << data.root_cause_conclusion
        << "`\n\n";
     md << "## Root Cause\n\n";
-    md << "- Acceptance currently means requested target lies inside "
-          "interpolated target box.\n";
+    md << "- Acceptance means requested target lies inside interpolated "
+          "target box.\n";
     md << "- Measured `D` is evaluated independently at requested target.\n";
-    md << "- Accepted BAD rows therefore indicate box coverage can extend into "
-          "parameter points whose measured `D` is already >= `TBAD`.\n";
-    md << "- Known failing case should show no projection, which points to box "
-          "overreach rather than support projection.\n\n";
+    md << "- Each row reports interpolated box, nearest sampled GOOD/BAD "
+          "evidence at same source parameter, and overreach origin.\n";
+    md << "- `box_construction` means target is inside a stored sampled box; "
+          "`interpolation` means only interpolated lookup introduced it.\n\n";
 
     WriteAcceptanceConsistencySection(
         md, "Accepted BAD transitions", data.rows,
@@ -4316,7 +4390,7 @@ int TransitionAcceptanceConsistencyAuditCommand(
               << data.consistency_conclusion << "\n";
     std::cout << "transition_acceptance_consistency_root_cause="
               << data.root_cause_conclusion << "\n";
-    return 0;
+    return data.accepted_bad_count == 0 ? 0 : 1;
 }
 
 int CyclicRecutSearchCommand(
