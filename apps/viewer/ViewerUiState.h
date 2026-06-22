@@ -1,0 +1,47 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+namespace pmgviewer {
+
+enum class ViewerPlaybackMode { ClipPlayback, ParametricBlend, GraphRuntime };
+
+// UI-only snapshot. Values are copied; no mutable PMG object crosses this seam.
+struct ViewerUiState {
+    ViewerPlaybackMode playback_mode = ViewerPlaybackMode::ClipPlayback;
+    bool playing = false;
+    bool motion_space_ready = false;
+    bool graph_runtime_ready = false;
+    bool graph_runtime_active = false;
+    bool path_preview_enabled = false;
+    int path_preview_count = 5;
+    float playback_speed = 1.0f;
+    float phase = 0.0f;
+    float skeleton_scale = 1.0f;
+    float display_scale = 10.0f;
+    int selected_clip_index = -1;
+    int selected_spec_index = -1;
+    std::string status_message;
+};
+
+enum class ViewerUiCommandType {
+    LoadClip, SelectClip, SetPlaybackMode, TogglePlayback, ResetPlayback,
+    StepFrame, SetPlaybackSpeed, SetPhase, SetPathPreviewEnabled,
+    SetPathPreviewCount, SetSkeletonScale, SetDisplayScale,
+    SetScalarParameter, SetVectorParameter, RebuildMotionSpace,
+    RecomputeHeatmap, SaveHeatmapCsv, BuildGraphRuntime, ResetGraphRuntime,
+    SetDesiredRuntimeNode, SetDirectSteeringMode, SetGotoMode, SaveArtifact,
+    LoadGraphArtifact, BuildArtifactFromSpec
+};
+
+struct ViewerUiCommand {
+    ViewerUiCommandType type;
+    int index = -1;
+    float x = 0.0f;
+    float y = 0.0f;
+    std::string text;
+    std::vector<float> values;
+};
+
+}  // namespace pmgviewer

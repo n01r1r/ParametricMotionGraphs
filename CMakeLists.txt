@@ -356,6 +356,7 @@ if(PMG_BUILD_VIEWER)
     target_compile_definitions(viewer_host PUBLIC GLEW_STATIC)
 
     add_library(pmg_viewer_workspace STATIC
+        apps/viewer/ImGuiViewerUi.cpp
         apps/viewer/PmgViewerWorkspace.cpp
         apps/viewer/PmgViewerWorkspaceGraph.cpp
         apps/viewer/ViewerRuntimeModule.cpp
@@ -402,5 +403,10 @@ if(PMG_BUILD_VIEWER)
         target_include_directories(test_viewer_runtime_module PRIVATE apps/viewer include)
         target_link_libraries(test_viewer_runtime_module PRIVATE pmg_viewer_workspace pmg_core)
         add_test(NAME test_viewer_runtime_module COMMAND test_viewer_runtime_module)
+
+        add_executable(test_viewer_ui_commands tests/test_viewer_ui_commands.cpp)
+        target_include_directories(test_viewer_ui_commands PRIVATE apps/viewer include)
+        target_link_libraries(test_viewer_ui_commands PRIVATE pmg_viewer_workspace pmg_core)
+        add_test(NAME test_viewer_ui_commands COMMAND test_viewer_ui_commands)
     endif()
 endif()

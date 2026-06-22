@@ -19,7 +19,9 @@
 #include "pmg/Skeleton.h"
 
 #include "GraphAuthoringModel.h"
+#include "ImGuiViewerUi.h"
 #include "ViewerRuntimeModule.h"
+#include "ViewerUiState.h"
 #include "ViewerWorkspace.h"
 
 namespace pmgviewer {
@@ -29,12 +31,6 @@ namespace pmgviewer {
 //   ParametricBlend - evaluate the live ParametricMotionSpace blend.
 //   GraphRuntime    - stream motion from a ParametricMotionGraph via
 //                     RuntimeController (self-edge transitions, paper Sec 4-5).
-enum class ViewerPlaybackMode {
-    ClipPlayback,
-    ParametricBlend,
-    GraphRuntime,
-};
-
 // PMG Adapter: owns loaded BVH motion, playback, graph diagnostics, and the
 // conversion from pmg_core data into an algorithm-neutral RenderScene.
 //
@@ -59,6 +55,9 @@ public:
 
     void Update(float delta_seconds) override;
     void BuildUi() override;
+    ViewerUiState MakeUiState() const;
+    void ApplyUiCommand(const ViewerUiCommand& command);
+    void ApplyUiCommands(const std::vector<ViewerUiCommand>& commands);
 
     // Ray pick (display-space, e.g. from a right-click unprojected by main):
     // intersects the ground plane and, in graph runtime, places the goto
@@ -205,6 +204,8 @@ private:
     void ResetPlayback();
     bool ParametricBlendActive() const;
     bool GraphRuntimeActive() const;
+
+    ImGuiViewerUi imgui_ui_;
 
     std::vector<std::filesystem::path> bvh_files_;
     int selected_file_index_ = -1;

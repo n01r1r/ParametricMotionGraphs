@@ -11,6 +11,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <stdexcept>
 #include <string>
 
 #include "pmg/ForwardKinematics.h"
@@ -979,41 +980,99 @@ void PmgViewerWorkspace::RegeneratePreviewClip() {
 
 void PmgViewerWorkspace::BuildUi() {
     HandleShortcuts();
+    const ViewerUiState state = MakeUiState();
+    const std::vector<ViewerUiCommand> commands = imgui_ui_.Build(state, [this] {
+        if (ImGui::BeginTabBar("##viewer_tabs")) {
+            if (ImGui::BeginTabItem("Inputs")) {
+                BuildInputsSection();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Motion Space")) {
+                BuildMotionSpaceSection();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Transition Grid")) {
+                BuildDistanceGridSection();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("PMG Runtime")) {
+                BuildGraphSection();
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+    });
+    ApplyUiCommands(commands);
+}
 
-    ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(520.0f, 780.0f), ImGuiCond_FirstUseEver);
-    ImGui::Begin("PMG Viewer");
+ViewerUiState PmgViewerWorkspace::MakeUiState() const {
+    ViewerUiState state;
+    state.playback_mode = mode_;
+    state.playing = playing_;
+    state.motion_space_ready = pmg_space_ready_;
+    state.graph_runtime_ready = runtime_.Ready();
+    state.graph_runtime_active = GraphRuntimeActive();
+    state.path_preview_enabled = path_preview_enabled_;
+    state.path_preview_count = path_preview_count_;
+    state.playback_speed = playback_speed_;
+    state.phase = state.graph_runtime_active ? runtime_.Snapshot().current_phase
+                                             : current_phase_;
+    state.skeleton_scale = skeleton_scale_;
+    state.display_scale = display_scale_;
+    state.selected_clip_index = selected_file_index_;
+    state.selected_spec_index = selected_spec_index_;
+    state.status_message = status_message_;
+    return state;
+}
 
-    BuildWorkflowSection();
-    ImGui::Separator();
-    BuildTransportSection();
-    ImGui::Separator();
+void PmgViewerWorkspace::ApplyUiCommands(
+    const std::vector<ViewerUiCommand>& commands) {
+    for (const ViewerUiCommand& command : commands) ApplyUiCommand(command);
+}
 
-    if (ImGui::BeginTabBar("##viewer_tabs")) {
-        if (ImGui::BeginTabItem("Inputs")) {
-            BuildInputsSection();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Motion Space")) {
-            BuildMotionSpaceSection();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Transition Grid")) {
-            BuildDistanceGridSection();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("PMG Runtime")) {
-            BuildGraphSection();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Display")) {
-            BuildDisplaySection();
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
+void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
+    switch (command.type) {
+    case ViewerUiCommandType::LoadClip:
+    case ViewerUiCommandType::SelectClip: LoadClip(command.index); break;
+    case ViewerUiCommandType::SetPlaybackMode:
+        if (command.index < 0 || command.index > 2)
+            throw std::invalid_argument("playback mode index must be in [0, 2]");
+        mode_ = static_cast<ViewerPlaybackMode>(command.index); break;
+    case ViewerUiCommandType::TogglePlayback: playing_ = !playing_; break;
+    case ViewerUiCommandType::ResetPlayback: ResetPlayback(); break;
+    case ViewerUiCommandType::StepFrame: StepFrame(command.index); break;
+    case ViewerUiCommandType::SetPlaybackSpeed:
+        playback_speed_ = std::clamp(command.x, 0.1f, 3.0f); break;
+    case ViewerUiCommandType::SetPhase:
+        current_phase_ = std::clamp(command.x, 0.0f, 1.0f); playing_ = false; break;
+    case ViewerUiCommandType::SetPathPreviewEnabled:
+        path_preview_enabled_ = command.index != 0; break;
+    case ViewerUiCommandType::SetPathPreviewCount:
+        path_preview_count_ = std::clamp(command.index, 2, 12); break;
+    case ViewerUiCommandType::SetSkeletonScale:
+        skeleton_scale_ = std::clamp(command.x, 0.1f, 5.0f); break;
+    case ViewerUiCommandType::SetDisplayScale:
+        display_scale_ = std::clamp(command.x, 1.0f, 40.0f); break;
+    case ViewerUiCommandType::SetScalarParameter:
+        if (command.index < 0 || command.index >= static_cast<int>(pmg_parameter_.size()))
+            throw std::out_of_range("scalar parameter index is outside parameter vector");
+        pmg_parameter_[command.index] = command.x; break;
+    case ViewerUiCommandType::SetVectorParameter:
+        pmg_parameter_ = command.values; pmg_preview_dirty_ = true; break;
+    case ViewerUiCommandType::RebuildMotionSpace: RebuildPmgSpace(); break;
+    case ViewerUiCommandType::RecomputeHeatmap: RecomputeHeatmap(); break;
+    case ViewerUiCommandType::SaveHeatmapCsv: SaveHeatmapCsv(); break;
+    case ViewerUiCommandType::BuildGraphRuntime: BuildGraphRuntime(); break;
+    case ViewerUiCommandType::ResetGraphRuntime: ResetGraphRuntimeSession(false); break;
+    case ViewerUiCommandType::SetDesiredRuntimeNode: SetDesiredRuntimeNode(command.index); break;
+    case ViewerUiCommandType::SetDirectSteeringMode:
+        direct_steering_active_ = command.index != 0; break;
+    case ViewerUiCommandType::SetGotoMode:
+        goto_active_ = command.index != 0; break;
+    case ViewerUiCommandType::SaveArtifact: SaveArtifact(command.text); break;
+    case ViewerUiCommandType::LoadGraphArtifact: LoadGraphArtifact(command.text); break;
+    case ViewerUiCommandType::BuildArtifactFromSpec: BuildArtifactFromSpec(command.text); break;
     }
-
-    ImGui::End();
 }
 
 void PmgViewerWorkspace::HandleShortcuts() {
