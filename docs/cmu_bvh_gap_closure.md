@@ -24,7 +24,7 @@ Obtain `cmubvh` separately. Keep corpus outside this repository.
 pmg_cli audit-corpus --corpus-root /path/to/cmubvh --out outputs/cmu_audit
 ```
 
-Optional: `--max-files N`, `--include "**/*.bvh"`, `--category-hints`, `--verbose`.
+Optional: `--max-files N`, `--include "**/*.bvh"`, `--category-hints`. Path hints are enabled by default and remain soft evidence.
 
 ## Output files
 

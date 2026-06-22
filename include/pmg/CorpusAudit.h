@@ -29,8 +29,12 @@ struct BvhFileAudit {
     double root_start[3]{};
     double root_end[3]{};
     double root_displacement[3]{};
+    double horizontal_displacement = 0.0;
     double root_path_length = 0.0;
     double mean_speed = 0.0;
+    double heading_change_degrees = 0.0;
+    double turning_score = 0.0;  // Mean absolute trajectory turn, normalized to [0, 1].
+    double locomotion_score = 0.0;  // Root-path straightness times moving-frame ratio, [0, 1].
     std::string category_hint_from_path;
     std::vector<std::string> candidate_labels;
     std::string recommended_use;

@@ -37,7 +37,7 @@ int AuditCorpus(int argc, char** argv) {
     pmg::CorpusAuditConfig config;
     for (int index = 2; index < argc; ++index) {
         const std::string option = argv[index];
-        if (option == "--category-hints" || option == "--candidate-windows" || option == "--verbose") continue;
+        if (option == "--category-hints") { config.category_hints = true; continue; }
         if (index + 1 >= argc) throw std::runtime_error("missing value for option: " + option);
         const std::string value = argv[++index];
         if (option == "--corpus-root") config.corpus_root = value;
