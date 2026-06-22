@@ -80,8 +80,11 @@ as paper-equivalent without reporting its config.
 
 Core paper mechanisms, direct steering, and single-node waypoint path following
 are implemented. A reproducible corpus audit found only one clear cyclic run
-candidate, so the required compatible second node—and therefore inter-node
-edges and graph-walk demo—remain blocked by source data. `PHASE.md` records the
+candidate, so the required compatible second node and therefore inter-node
+edges and graph-walk demo remain blocked by source data. A 2026-06-22 recut
+follow-up kept that gate closed: `jogCurve_recut_000_024.bvh` is only a single
+barely viable cyclic run sample, while `walkToJog_recut_005_034.bvh` still
+shows seam contact mismatch and remains transitional. `PHASE.md` records the
 evidence and deferrals. Exact paper corpus, timing, graph-size, and visual-result
 reproduction is not claimed.
 
