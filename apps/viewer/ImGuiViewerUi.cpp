@@ -2,11 +2,74 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+#include <cctype>
+#include <string>
+
 namespace pmgviewer {
 namespace {
 void Push(std::vector<ViewerUiCommand>& commands, ViewerUiCommandType type,
           int index = -1, float x = 0.0f) {
     commands.push_back({type, index, x});
+}
+
+void BuildInputs(const ViewerUiState& state, char* clip_filter,
+                 std::vector<ViewerUiCommand>& commands) {
+    ImGui::Text("%zu BVH files", state.clip_names.size());
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputTextWithHint("##clip_filter", "filter by name...", clip_filter, 64);
+
+    std::string needle = clip_filter;
+    std::transform(needle.begin(), needle.end(), needle.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (ImGui::BeginListBox("##clips", ImVec2(-1.0f, 220.0f))) {
+        for (int i = 0; i < static_cast<int>(state.clip_names.size()); ++i) {
+            std::string hay = state.clip_names[i];
+            std::transform(hay.begin(), hay.end(), hay.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (!needle.empty() && hay.find(needle) == std::string::npos) continue;
+            if (ImGui::Selectable(state.clip_names[i].c_str(),
+                                  i == state.selected_clip_index))
+                Push(commands, ViewerUiCommandType::LoadClip, i);
+        }
+        ImGui::EndListBox();
+    }
+
+    if (state.loaded_frame_count > 0) {
+        ImGui::TextDisabled("Loaded: %d frames @ %.0f fps, %zu joints",
+                            state.loaded_frame_count, state.loaded_frames_per_second,
+                            state.loaded_joints.size());
+        if (ImGui::CollapsingHeader("BVH skeleton / channel diagnostics")) {
+            for (const ViewerJointUiState& joint : state.loaded_joints)
+                ImGui::BulletText("%s  parent=%d  channels=%d", joint.name.c_str(),
+                                  joint.parent_index, joint.channel_count);
+            ImGui::TextDisabled("Units: %s", state.artifact_units.c_str());
+        }
+    }
+
+    ImGui::Separator();
+    int dimension = state.motion_space_dimension;
+    ImGui::BeginDisabled(state.has_motion_samples);
+    ImGui::SetNextItemWidth(120.0f);
+    if (ImGui::InputInt("Parameter dimension", &dimension)) {
+        dimension = std::clamp(dimension, 1, 4);
+        Push(commands, ViewerUiCommandType::SetMotionSpaceDimension,
+             dimension);
+    }
+    ImGui::EndDisabled();
+
+    std::vector<float> parameter = state.next_sample_parameter;
+    parameter.resize(static_cast<std::size_t>(std::max(1, dimension)), 0.0f);
+    ImGui::SetNextItemWidth(220.0f);
+    if (ImGui::InputScalarN("Blend parameter", ImGuiDataType_Float,
+                            parameter.data(), dimension)) {
+        ViewerUiCommand command{ViewerUiCommandType::SetNextSampleParameter};
+        command.values = std::move(parameter);
+        commands.push_back(std::move(command));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Add motion sample"))
+        Push(commands, ViewerUiCommandType::AddMotionSample);
 }
 }  // namespace
 
@@ -51,7 +114,14 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
             Push(commands, ViewerUiCommandType::SetPhase, -1, phase);
     }
 
-    build_legacy_tabs();  // ponytail: migrate remaining complex tabs incrementally.
+    if (ImGui::BeginTabBar("##viewer_tabs")) {
+        if (ImGui::BeginTabItem("Inputs")) {
+            BuildInputs(state, clip_filter_, commands);
+            ImGui::EndTabItem();
+        }
+        build_legacy_tabs();  // ponytail: migrate remaining complex tabs incrementally.
+        ImGui::EndTabBar();
+    }
     ImGui::Separator();
     float skeleton_scale = state.skeleton_scale;
     if (ImGui::SliderFloat("Skeleton scale", &skeleton_scale, 0.1f, 5.0f, "%.2fx"))

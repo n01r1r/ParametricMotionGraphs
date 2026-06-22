@@ -982,11 +982,6 @@ void PmgViewerWorkspace::BuildUi() {
     HandleShortcuts();
     const ViewerUiState state = MakeUiState();
     const std::vector<ViewerUiCommand> commands = imgui_ui_.Build(state, [this] {
-        if (ImGui::BeginTabBar("##viewer_tabs")) {
-            if (ImGui::BeginTabItem("Inputs")) {
-                BuildInputsSection();
-                ImGui::EndTabItem();
-            }
             if (ImGui::BeginTabItem("Motion Space")) {
                 BuildMotionSpaceSection();
                 ImGui::EndTabItem();
@@ -999,8 +994,6 @@ void PmgViewerWorkspace::BuildUi() {
                 BuildGraphSection();
                 ImGui::EndTabItem();
             }
-            ImGui::EndTabBar();
-        }
     });
     ApplyUiCommands(commands);
 }
@@ -1022,6 +1015,18 @@ ViewerUiState PmgViewerWorkspace::MakeUiState() const {
     state.selected_clip_index = selected_file_index_;
     state.selected_spec_index = selected_spec_index_;
     state.status_message = status_message_;
+    for (const std::filesystem::path& path : bvh_files_)
+        state.clip_names.push_back(path.filename().string());
+    state.loaded_frame_count = clip_.NumFrames();
+    state.loaded_frames_per_second = clip_.frames_per_second;
+    for (const pmg::Joint& joint : skeleton_.joints) {
+        state.loaded_joints.push_back(
+            {joint.name, joint.parent_index, static_cast<int>(joint.channels.size())});
+    }
+    state.artifact_units = artifact_units_;
+    state.motion_space_dimension = pmg_dimension_;
+    state.has_motion_samples = !pmg_examples_.empty();
+    state.next_sample_parameter = next_example_parameter_;
     return state;
 }
 
@@ -1072,6 +1077,18 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
     case ViewerUiCommandType::SaveArtifact: SaveArtifact(command.text); break;
     case ViewerUiCommandType::LoadGraphArtifact: LoadGraphArtifact(command.text); break;
     case ViewerUiCommandType::BuildArtifactFromSpec: BuildArtifactFromSpec(command.text); break;
+    case ViewerUiCommandType::SetMotionSpaceDimension:
+        if (!pmg_examples_.empty()) break;
+        pmg_dimension_ = std::clamp(command.index, 1, 4);
+        ResizeParameterVectors();
+        break;
+    case ViewerUiCommandType::SetNextSampleParameter:
+        next_example_parameter_ = command.values;
+        ResizeParameterVectors();
+        break;
+    case ViewerUiCommandType::AddMotionSample:
+        AddCurrentClipToSpace(next_example_parameter_);
+        break;
     }
 }
 
@@ -1252,71 +1269,6 @@ void PmgViewerWorkspace::BuildTransportSection() {
             ImGui::SameLine();
             ImGui::TextDisabled("(cyan=start -> amber=end)");
         }
-    }
-}
-
-void PmgViewerWorkspace::BuildInputsSection() {
-    ImGui::Text("%zu BVH files", bvh_files_.size());
-
-    ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputTextWithHint("##clip_filter", "filter by name...", clip_filter_,
-                             sizeof(clip_filter_));
-
-    std::string needle = clip_filter_;
-    std::transform(needle.begin(), needle.end(), needle.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-    if (ImGui::BeginListBox("##clips", ImVec2(-1.0f, 220.0f))) {
-        for (int i = 0; i < static_cast<int>(bvh_files_.size()); ++i) {
-            const std::string name = bvh_files_[i].filename().string();
-            if (!needle.empty()) {
-                std::string hay = name;
-                std::transform(hay.begin(), hay.end(), hay.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (hay.find(needle) == std::string::npos) {
-                    continue;
-                }
-            }
-            const bool selected = (i == selected_file_index_);
-            if (ImGui::Selectable(name.c_str(), selected)) {
-                LoadClip(i);
-            }
-        }
-        ImGui::EndListBox();
-    }
-
-    if (clip_.NumFrames() > 0) {
-        ImGui::TextDisabled("Loaded: %d frames @ %.0f fps, %d joints", clip_.NumFrames(),
-                            clip_.frames_per_second, skeleton_.NumJoints());
-        if (ImGui::CollapsingHeader("BVH skeleton / channel diagnostics")) {
-            for (int joint_index = 0; joint_index < skeleton_.NumJoints(); ++joint_index) {
-                const pmg::Joint& joint = skeleton_.joints[joint_index];
-                ImGui::BulletText("%s  parent=%d  channels=%zu",
-                                  joint.name.c_str(), joint.parent_index,
-                                  joint.channels.size());
-            }
-            ImGui::TextDisabled("Units: %s", artifact_units_.c_str());
-        }
-    }
-
-    ImGui::Separator();
-    // Parameter dimension is locked once the space has samples (every sample
-    // must share one dimension); edit it only on an empty space.
-    ImGui::BeginDisabled(!pmg_examples_.empty());
-    ImGui::SetNextItemWidth(120.0f);
-    if (ImGui::InputInt("Parameter dimension", &pmg_dimension_)) {
-        pmg_dimension_ = std::clamp(pmg_dimension_, 1, 4);
-        ResizeParameterVectors();
-    }
-    ImGui::EndDisabled();
-
-    ResizeParameterVectors();  // keep next_example_parameter_ sized to dimension
-    ImGui::SetNextItemWidth(220.0f);
-    ImGui::InputScalarN("Blend parameter", ImGuiDataType_Float,
-                        next_example_parameter_.data(), pmg_dimension_);
-    ImGui::SameLine();
-    if (ImGui::Button("Add motion sample")) {
-        AddCurrentClipToSpace(next_example_parameter_);
     }
 }
 

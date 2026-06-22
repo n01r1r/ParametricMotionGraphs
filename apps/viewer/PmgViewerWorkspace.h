@@ -126,7 +126,6 @@ private:
 
     void BuildWorkflowSection();
     void BuildTransportSection();
-    void BuildInputsSection();
     void BuildDisplaySection();
     void BuildMotionSpaceSection();
     void BuildDistanceGridSection();
@@ -209,7 +208,6 @@ private:
 
     std::vector<std::filesystem::path> bvh_files_;
     int selected_file_index_ = -1;
-    char clip_filter_[64] = "";  // case-insensitive substring filter for the clip list
     std::string status_message_ = "No clip loaded.";
     pmg::CyclicContinuityGraphSummary graph_cyclic_summary_;
     std::string graph_cyclic_warning_;

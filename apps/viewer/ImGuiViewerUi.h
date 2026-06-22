@@ -13,6 +13,9 @@ public:
     std::vector<ViewerUiCommand> Build(
         const ViewerUiState& state,
         const std::function<void()>& build_legacy_tabs);
+
+private:
+    char clip_filter_[64] = "";
 };
 
 }  // namespace pmgviewer

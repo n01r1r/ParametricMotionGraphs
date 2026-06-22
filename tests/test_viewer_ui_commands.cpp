@@ -58,11 +58,26 @@ void TestInvalidPlaybackModeRejected() {
     assert(threw);
 }
 
+void TestInputCommandsUpdateSnapshot() {
+    pmgviewer::PmgViewerWorkspace workspace;
+    workspace.ApplyUiCommand(
+        Command(pmgviewer::ViewerUiCommandType::SetMotionSpaceDimension, 3));
+    pmgviewer::ViewerUiCommand parameter =
+        Command(pmgviewer::ViewerUiCommandType::SetNextSampleParameter);
+    parameter.values = {1.0f, 2.0f, 3.0f};
+    workspace.ApplyUiCommand(parameter);
+
+    const pmgviewer::ViewerUiState state = workspace.MakeUiState();
+    assert(state.motion_space_dimension == 3);
+    assert(state.next_sample_parameter == parameter.values);
+}
+
 }  // namespace
 
 int main() {
     TestRepresentativeCommandsUpdateUiState();
     TestTogglePlaybackUpdatesUiState();
     TestInvalidPlaybackModeRejected();
+    TestInputCommandsUpdateSnapshot();
     return 0;
 }

@@ -5,6 +5,12 @@
 
 namespace pmgviewer {
 
+struct ViewerJointUiState {
+    std::string name;
+    int parent_index = -1;
+    int channel_count = 0;
+};
+
 enum class ViewerPlaybackMode { ClipPlayback, ParametricBlend, GraphRuntime };
 
 // UI-only snapshot. Values are copied; no mutable PMG object crosses this seam.
@@ -23,6 +29,14 @@ struct ViewerUiState {
     int selected_clip_index = -1;
     int selected_spec_index = -1;
     std::string status_message;
+    std::vector<std::string> clip_names;
+    int loaded_frame_count = 0;
+    float loaded_frames_per_second = 0.0f;
+    std::vector<ViewerJointUiState> loaded_joints;
+    std::string artifact_units;
+    int motion_space_dimension = 1;
+    bool has_motion_samples = false;
+    std::vector<float> next_sample_parameter;
 };
 
 enum class ViewerUiCommandType {
@@ -32,7 +46,8 @@ enum class ViewerUiCommandType {
     SetScalarParameter, SetVectorParameter, RebuildMotionSpace,
     RecomputeHeatmap, SaveHeatmapCsv, BuildGraphRuntime, ResetGraphRuntime,
     SetDesiredRuntimeNode, SetDirectSteeringMode, SetGotoMode, SaveArtifact,
-    LoadGraphArtifact, BuildArtifactFromSpec
+    LoadGraphArtifact, BuildArtifactFromSpec, SetMotionSpaceDimension,
+    SetNextSampleParameter, AddMotionSample
 };
 
 struct ViewerUiCommand {
