@@ -12,6 +12,7 @@ void PrintUsage() {
               << "  pmg_cli --list-bvh-joints path/to/file.bvh\n"
               << "  pmg_cli --extract-candidate-windows file.bvh --min-frames N --max-frames N\n"
               << "      --stride N --top-k K --output-md out.md --output-csv out.csv\n"
+              << "      [--output-candidates out.pmg_candidates.json]\n"
               << "  pmg_cli --inspect-transition source.bvh target.bvh\n"
               << "  pmg_cli --compare-transition-conventions source.bvh target.bvh\n"
               << "  pmg_cli --dump-distance-grid source.bvh target.bvh out.csv\n"

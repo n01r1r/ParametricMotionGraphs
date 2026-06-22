@@ -4,6 +4,7 @@
 #include "pmg/Skeleton.h"
 
 #include <string>
+#include <iosfwd>
 #include <vector>
 
 namespace pmg {
@@ -37,5 +38,13 @@ std::vector<CandidateMotionWindow> ExtractCandidateMotionWindows(
     const Skeleton& skeleton,
     const MotionClip& clip,
     const CandidateWindowExtractionConfig& config = {});
+
+// Writes a human-inspectable, spec-authoring intermediate. This preserves
+// provenance only; it does not create GraphSpec nodes or examples.
+void WriteCandidateWindowsJson(
+    std::ostream& output,
+    const std::string& source_bvh_path,
+    const CandidateWindowExtractionConfig& config,
+    const std::vector<CandidateMotionWindow>& candidates);
 
 }  // namespace pmg

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <sstream>
+#include <iomanip>
 #include <stdexcept>
 
 namespace pmg {
@@ -28,6 +29,28 @@ void Validate(const CandidateWindowExtractionConfig& config) {
         config.max_heading_delta_radians < 0.0f || config.heading_score_weight < 0.0f) {
         throw std::invalid_argument("candidate extraction: thresholds and score weights must be non-negative");
     }
+}
+
+std::string JsonString(const std::string& text) {
+    std::ostringstream escaped;
+    escaped << '"';
+    for (const unsigned char character : text) {
+        switch (character) {
+            case '"': escaped << "\\\""; break;
+            case '\\': escaped << "\\\\"; break;
+            case '\n': escaped << "\\n"; break;
+            case '\r': escaped << "\\r"; break;
+            case '\t': escaped << "\\t"; break;
+            default:
+                if (character < 0x20) {
+                    escaped << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                            << static_cast<int>(character) << std::dec;
+                } else {
+                    escaped << static_cast<char>(character);
+                }
+        }
+    }
+    return escaped.str() + '"';
 }
 
 }  // namespace
@@ -93,6 +116,39 @@ std::vector<CandidateMotionWindow> ExtractCandidateMotionWindows(
         candidates.resize(static_cast<std::size_t>(config.top_k));
     }
     return candidates;
+}
+
+void WriteCandidateWindowsJson(
+    std::ostream& output,
+    const std::string& source_bvh_path,
+    const CandidateWindowExtractionConfig& config,
+    const std::vector<CandidateMotionWindow>& candidates) {
+    output << "{\n  \"schema\": \"pmg_candidate_windows_v1\",\n"
+           << "  \"source_bvh_path\": " << JsonString(source_bvh_path) << ",\n"
+           << "  \"extraction_config\": {\n"
+           << "    \"min_frames\": " << config.min_length_frames << ",\n"
+           << "    \"max_frames\": " << config.max_length_frames << ",\n"
+           << "    \"stride_frames\": " << config.stride_frames << ",\n"
+           << "    \"top_k\": " << config.top_k << ",\n"
+           << "    \"prefer_cyclic\": " << (config.prefer_cyclic ? "true" : "false") << ",\n"
+           << "    \"endpoint_window_frames\": " << config.endpoint_window_frames << ",\n"
+           << "    \"max_normalized_pose_distance\": " << config.max_normalized_pose_distance << ",\n"
+           << "    \"max_heading_delta_radians\": " << config.max_heading_delta_radians << ",\n"
+           << "    \"heading_score_weight\": " << config.heading_score_weight << "\n  },\n"
+           << "  \"candidates\": [";
+    for (std::size_t index = 0; index < candidates.size(); ++index) {
+        const auto& candidate = candidates[index];
+        output << (index == 0 ? "\n" : ",\n")
+               << "    {\"source_bvh_path\": " << JsonString(source_bvh_path)
+               << ", \"start_frame\": " << candidate.start_frame
+               << ", \"end_frame\": " << candidate.end_frame
+               << ", \"score\": " << candidate.score
+               << ", \"reason\": " << JsonString(candidate.reason)
+               << ", \"root_displacement\": " << candidate.root_displacement
+               << ", \"heading_delta_radians\": " << candidate.heading_delta << "}";
+    }
+    output << (candidates.empty() ? "]\n}\n" : "\n  ]\n}\n");
+    if (!output) throw std::runtime_error("failed to write candidate JSON output");
 }
 
 }  // namespace pmg

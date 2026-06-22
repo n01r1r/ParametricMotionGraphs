@@ -1,9 +1,8 @@
-#include "pmg_test.h"
-
 #include "pmg/BvhLoader.h"
 #include "pmg/CandidateWindowExtractor.h"
 
 #include <cassert>
+#include <sstream>
 
 int main() {
     const pmg::BvhData data = pmg::BvhLoader::Load(PMG_SOURCE_DIR "/BVH/WalkLoopA.bvh");
@@ -30,5 +29,19 @@ int main() {
     pmg::MotionClip short_clip = data.clip;
     short_clip.frames.resize(3);
     assert(pmg::ExtractCandidateMotionWindows(data.skeleton, short_clip, config).empty());
+
+    std::ostringstream exported;
+    pmg::WriteCandidateWindowsJson(exported, "clips/Walk\\\"A.bvh", config, first);
+    const std::string json = exported.str();
+    assert(json.find("pmg_candidate_windows_v1") != std::string::npos);
+    assert(json.find("clips/Walk\\\\\\\"A.bvh") != std::string::npos);
+    assert(json.find("\"start_frame\": " + std::to_string(first.front().start_frame)) != std::string::npos);
+    assert(json.find("\"end_frame\": " + std::to_string(first.front().end_frame)) != std::string::npos);
+    assert(json.find("\"score\":") != std::string::npos);
+    assert(json.find("\"reason\":") != std::string::npos);
+
+    std::ostringstream empty_export;
+    pmg::WriteCandidateWindowsJson(empty_export, "short.bvh", config, {});
+    assert(empty_export.str().find("\"candidates\": []") != std::string::npos);
     return 0;
 }
