@@ -26,6 +26,8 @@ struct ViewerMotionSampleUiState {
 
 enum class ViewerPlaybackMode { ClipPlayback, ParametricBlend, GraphRuntime };
 
+enum class ViewerSkeletonPoseMode { Current, Frame0, Rest };
+
 // UI-only snapshot. Values are copied; no mutable PMG object crosses this seam.
 struct ViewerUiState {
     ViewerPlaybackMode playback_mode = ViewerPlaybackMode::ClipPlayback;
@@ -69,6 +71,12 @@ struct ViewerUiState {
     int motion_space_calibration_sample_count = 0;
     int motion_space_calibration_samples_per_axis = 0;
     std::vector<ViewerMotionSampleUiState> motion_samples;
+    bool show_joint_names = false;
+    bool show_end_sites_separately = false;
+    bool hide_end_sites = false;
+    bool draw_local_joint_axes = false;
+    bool mark_likely_foot_joints = false;
+    ViewerSkeletonPoseMode skeleton_pose_mode = ViewerSkeletonPoseMode::Current;
 };
 
 enum class ViewerUiCommandType {
@@ -81,7 +89,9 @@ enum class ViewerUiCommandType {
     LoadGraphArtifact, BuildArtifactFromSpec, SetMotionSpaceDimension,
     SetNextSampleParameter, AddMotionSample, SetMotionSpaceViewAxis,
     SetMotionSpacePreviewInPlace, SetMotionSampleParameter,
-    RemoveMotionSample, ClearMotionSpace
+    RemoveMotionSample, ClearMotionSpace, SetShowJointNames,
+    SetShowEndSitesSeparately, SetHideEndSites, SetDrawLocalJointAxes,
+    SetMarkLikelyFootJoints, SetSkeletonPoseMode
 };
 
 struct ViewerUiCommand {

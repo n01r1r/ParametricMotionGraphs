@@ -46,9 +46,59 @@ void BuildInputs(const ViewerUiState& state, char* clip_filter,
                             state.loaded_frame_count, state.loaded_frames_per_second,
                             state.loaded_joints.size());
         if (ImGui::CollapsingHeader("BVH skeleton / channel diagnostics")) {
-            for (const ViewerJointUiState& joint : state.loaded_joints)
-                ImGui::BulletText("%s  parent=%d  channels=%d", joint.name.c_str(),
-                                  joint.parent_index, joint.channel_count);
+            bool show_joint_names = state.show_joint_names;
+            if (ImGui::Checkbox("Show joint names", &show_joint_names)) {
+                Push(commands, ViewerUiCommandType::SetShowJointNames,
+                     show_joint_names ? 1 : 0);
+            }
+            bool show_end_sites = state.show_end_sites_separately;
+            if (ImGui::Checkbox("Show end sites separately", &show_end_sites)) {
+                Push(commands, ViewerUiCommandType::SetShowEndSitesSeparately,
+                     show_end_sites ? 1 : 0);
+            }
+            bool hide_end_sites = state.hide_end_sites;
+            if (ImGui::Checkbox("Hide end sites", &hide_end_sites)) {
+                Push(commands, ViewerUiCommandType::SetHideEndSites,
+                     hide_end_sites ? 1 : 0);
+            }
+            bool draw_axes = state.draw_local_joint_axes;
+            if (ImGui::Checkbox("Draw local joint axes", &draw_axes)) {
+                Push(commands, ViewerUiCommandType::SetDrawLocalJointAxes,
+                     draw_axes ? 1 : 0);
+            }
+            bool mark_feet = state.mark_likely_foot_joints;
+            if (ImGui::Checkbox("Mark likely foot joints", &mark_feet)) {
+                Push(commands, ViewerUiCommandType::SetMarkLikelyFootJoints,
+                     mark_feet ? 1 : 0);
+            }
+            int pose_mode = static_cast<int>(state.skeleton_pose_mode);
+            ImGui::TextDisabled("Pose view");
+            ImGui::RadioButton("Current frame", &pose_mode,
+                               static_cast<int>(ViewerSkeletonPoseMode::Current));
+            ImGui::SameLine();
+            ImGui::RadioButton("Frame 0", &pose_mode,
+                               static_cast<int>(ViewerSkeletonPoseMode::Frame0));
+            ImGui::SameLine();
+            ImGui::RadioButton("Rest pose", &pose_mode,
+                               static_cast<int>(ViewerSkeletonPoseMode::Rest));
+            if (pose_mode != static_cast<int>(state.skeleton_pose_mode)) {
+                Push(commands, ViewerUiCommandType::SetSkeletonPoseMode, pose_mode);
+            }
+            if (state.show_joint_names) {
+                ImGui::Separator();
+                for (const ViewerJointUiState& joint : state.loaded_joints) {
+                    const char* kind = joint.channel_count == 0 ? "end" : "joint";
+                    ImGui::BulletText("%s (%s) parent=%d channels=%d",
+                                      joint.name.c_str(), kind, joint.parent_index,
+                                      joint.channel_count);
+                }
+            } else {
+                for (std::size_t index = 0; index < state.loaded_joints.size(); ++index) {
+                    const ViewerJointUiState& joint = state.loaded_joints[index];
+                    ImGui::BulletText("joint %zu parent=%d channels=%d", index,
+                                      joint.parent_index, joint.channel_count);
+                }
+            }
             ImGui::TextDisabled("Units: %s", state.artifact_units.c_str());
         }
     }

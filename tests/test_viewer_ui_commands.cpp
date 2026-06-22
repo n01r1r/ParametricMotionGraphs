@@ -26,6 +26,12 @@ void TestRepresentativeCommandsUpdateUiState() {
         Command(pmgviewer::ViewerUiCommandType::SetPathPreviewCount, 99),
         Command(pmgviewer::ViewerUiCommandType::SetSkeletonScale, -1, 0.05f),
         Command(pmgviewer::ViewerUiCommandType::SetDisplayScale, -1, 99.0f),
+        Command(pmgviewer::ViewerUiCommandType::SetShowJointNames, 1),
+        Command(pmgviewer::ViewerUiCommandType::SetShowEndSitesSeparately, 1),
+        Command(pmgviewer::ViewerUiCommandType::SetHideEndSites, 1),
+        Command(pmgviewer::ViewerUiCommandType::SetDrawLocalJointAxes, 1),
+        Command(pmgviewer::ViewerUiCommandType::SetMarkLikelyFootJoints, 1),
+        Command(pmgviewer::ViewerUiCommandType::SetSkeletonPoseMode, 2),
     });
 
     const pmgviewer::ViewerUiState state = workspace.MakeUiState();
@@ -36,6 +42,12 @@ void TestRepresentativeCommandsUpdateUiState() {
     assert(state.path_preview_count == 12);
     assert(state.skeleton_scale == 0.1f);
     assert(state.display_scale == 40.0f);
+    assert(state.show_joint_names);
+    assert(!state.show_end_sites_separately);
+    assert(state.hide_end_sites);
+    assert(state.draw_local_joint_axes);
+    assert(state.mark_likely_foot_joints);
+    assert(state.skeleton_pose_mode == pmgviewer::ViewerSkeletonPoseMode::Rest);
 }
 
 void TestTogglePlaybackUpdatesUiState() {

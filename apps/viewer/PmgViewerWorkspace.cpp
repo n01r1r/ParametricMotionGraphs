@@ -214,6 +214,28 @@ pmg::Pose PmgViewerWorkspace::CurrentPose() const {
     return clip_.SampleNormalizedPhase(current_phase_);
 }
 
+pmg::Pose PmgViewerWorkspace::DisplayPose() const {
+    if (GraphRuntimeActive()) {
+        return CurrentPose();
+    }
+    if (skeleton_pose_mode_ == ViewerSkeletonPoseMode::Current) {
+        return CurrentPose();
+    }
+    if (clip_.NumFrames() == 0) {
+        return CurrentPose();
+    }
+    if (skeleton_pose_mode_ == ViewerSkeletonPoseMode::Frame0) {
+        return clip_.frames.front();
+    }
+
+    pmg::Pose rest_pose;
+    rest_pose.local_rotations.assign(
+        static_cast<std::size_t>(ActiveSkeleton().NumJoints()),
+        pmg::Quaternion::Identity());
+    rest_pose.root_position = clip_.frames.front().root_position;
+    return rest_pose;
+}
+
 void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     const pmg::Skeleton& skeleton = ActiveSkeleton();
     if (pose.NumJoints() != skeleton.NumJoints() || skeleton.NumJoints() == 0) {
@@ -224,27 +246,102 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
         (ParametricBlendActive() || GraphRuntimeActive()) ? pmg_ground_offset_ : ground_offset_;
     const std::vector<glm::vec3> world_positions =
         PoseWorldPositions(pose, skeleton, ground_offset);
+    const std::vector<pmg::JointWorldState> world_states =
+        pmg::ComputeForwardKinematics(skeleton, pose);
 
     glm::vec3 centroid(0.0f);
     scene_.joints.clear();
+    scene_.bones.clear();
     scene_.joints.reserve(world_positions.size());
-    for (const glm::vec3& world_position : world_positions) {
-        centroid += world_position;
-        scene_.joints.push_back(world_position);
+    const bool separate_end_sites = show_end_sites_separately_ && !hide_end_sites_;
+    const float axis_length = 0.35f * display_scale_ * skeleton_scale_;
+    const float point_radius = 0.06f * display_scale_ * skeleton_scale_;
+    const float end_site_radius = 0.045f * display_scale_ * skeleton_scale_;
+    const float line_radius = 0.018f * display_scale_ * skeleton_scale_;
+    for (int joint_index = 0; joint_index < skeleton.NumJoints(); ++joint_index) {
+        const pmg::Joint& joint = skeleton.joints[static_cast<std::size_t>(joint_index)];
+        const bool is_end_site = joint.channels.empty() && joint.parent_index >= 0;
+        const std::string joint_name_lower = [&joint] {
+            std::string lower = joint.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch) {
+                return static_cast<char>(std::tolower(ch));
+            });
+            return lower;
+        }();
+        const bool is_likely_foot =
+            mark_likely_foot_joints_ &&
+            (joint_name_lower.find("foot") != std::string::npos ||
+             joint_name_lower.find("ankle") != std::string::npos ||
+             joint_name_lower.find("toe") != std::string::npos ||
+             joint_name_lower.find("ball") != std::string::npos);
+        const glm::vec3 position = world_positions[static_cast<std::size_t>(joint_index)];
+        centroid += position;
+
+        if (is_end_site) {
+            if (!hide_end_sites_ && separate_end_sites) {
+                constexpr glm::vec3 kEndSiteColor(0.95f, 0.55f, 0.15f);
+                scene_.diagnostic_points.push_back({position, kEndSiteColor, end_site_radius});
+                if (joint.parent_index >= 0) {
+                    scene_.diagnostic_lines.push_back({
+                        world_positions[static_cast<std::size_t>(joint.parent_index)],
+                        position,
+                        kEndSiteColor,
+                        line_radius,
+                    });
+                }
+            } else if (!hide_end_sites_) {
+                scene_.joints.push_back(position);
+                if (joint.parent_index >= 0) {
+                    scene_.bones.push_back({
+                        world_positions[static_cast<std::size_t>(joint.parent_index)],
+                        position});
+                }
+            }
+        } else {
+            scene_.joints.push_back(position);
+            if (joint.parent_index >= 0) {
+                scene_.bones.push_back({
+                    world_positions[static_cast<std::size_t>(joint.parent_index)],
+                    position});
+            }
+        }
+
+        if (draw_local_joint_axes_) {
+            const pmg::JointWorldState& state =
+                world_states[static_cast<std::size_t>(joint_index)];
+            const pmg::Vec3 axis_x_native = pmg::Rotate(state.rotation, {1.0f, 0.0f, 0.0f});
+            const pmg::Vec3 axis_y_native = pmg::Rotate(state.rotation, {0.0f, 1.0f, 0.0f});
+            const pmg::Vec3 axis_z_native = pmg::Rotate(state.rotation, {0.0f, 0.0f, 1.0f});
+            scene_.diagnostic_lines.push_back({
+                position,
+                position + glm::vec3(
+                    axis_x_native.x, axis_x_native.y, axis_x_native.z) * axis_length,
+                glm::vec3(0.95f, 0.30f, 0.25f),
+                line_radius,
+            });
+            scene_.diagnostic_lines.push_back({
+                position,
+                position + glm::vec3(
+                    axis_y_native.x, axis_y_native.y, axis_y_native.z) * axis_length,
+                glm::vec3(0.25f, 0.90f, 0.35f),
+                line_radius,
+            });
+            scene_.diagnostic_lines.push_back({
+                position,
+                position + glm::vec3(
+                    axis_z_native.x, axis_z_native.y, axis_z_native.z) * axis_length,
+                glm::vec3(0.25f, 0.55f, 0.95f),
+                line_radius,
+            });
+        }
+
+        if (is_likely_foot) {
+            scene_.diagnostic_points.push_back({
+                position, glm::vec3(0.95f, 0.80f, 0.20f), point_radius * 1.25f});
+        }
     }
     if (!world_positions.empty()) {
         centroid /= static_cast<float>(world_positions.size());
-    }
-
-    scene_.bones.clear();
-    for (int joint_index = 0; joint_index < skeleton.NumJoints(); ++joint_index) {
-        const int parent = skeleton.joints[joint_index].parent_index;
-        if (parent < 0) {
-            continue;
-        }
-        scene_.bones.push_back(
-            {world_positions[static_cast<std::size_t>(parent)],
-             world_positions[static_cast<std::size_t>(joint_index)]});
     }
 
     // Goto target gizmo: ground sphere plus a beacon roughly character-tall
@@ -711,7 +808,7 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
     const pmg::Pose pose = CurrentPose();
     UpdateRootMotionDiagnostics(
         pose, playing_ ? delta_seconds * playback_speed_ : 0.0f);
-    RebuildScene(pose);
+    RebuildScene(DisplayPose());
 }
 
 void PmgViewerWorkspace::AddCurrentClipToSpace(const pmg::ParameterVector& parameter) {
@@ -1064,6 +1161,12 @@ ViewerUiState PmgViewerWorkspace::MakeUiState() const {
         }
         state.motion_samples.push_back(std::move(sample_state));
     }
+    state.show_joint_names = show_joint_names_;
+    state.show_end_sites_separately = show_end_sites_separately_;
+    state.hide_end_sites = hide_end_sites_;
+    state.draw_local_joint_axes = draw_local_joint_axes_;
+    state.mark_likely_foot_joints = mark_likely_foot_joints_;
+    state.skeleton_pose_mode = skeleton_pose_mode_;
     return state;
 }
 
@@ -1132,6 +1235,33 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
         break;
     case ViewerUiCommandType::SetMotionSpacePreviewInPlace:
         pmg_preview_in_place_ = command.index != 0;
+        break;
+    case ViewerUiCommandType::SetShowJointNames:
+        show_joint_names_ = command.index != 0;
+        break;
+    case ViewerUiCommandType::SetShowEndSitesSeparately:
+        show_end_sites_separately_ = command.index != 0;
+        if (show_end_sites_separately_) {
+            hide_end_sites_ = false;
+        }
+        break;
+    case ViewerUiCommandType::SetHideEndSites:
+        hide_end_sites_ = command.index != 0;
+        if (hide_end_sites_) {
+            show_end_sites_separately_ = false;
+        }
+        break;
+    case ViewerUiCommandType::SetDrawLocalJointAxes:
+        draw_local_joint_axes_ = command.index != 0;
+        break;
+    case ViewerUiCommandType::SetMarkLikelyFootJoints:
+        mark_likely_foot_joints_ = command.index != 0;
+        break;
+    case ViewerUiCommandType::SetSkeletonPoseMode:
+        if (command.index < 0 || command.index > 2) {
+            throw std::invalid_argument("skeleton pose mode index must be in [0, 2]");
+        }
+        skeleton_pose_mode_ = static_cast<ViewerSkeletonPoseMode>(command.index);
         break;
     case ViewerUiCommandType::SetMotionSampleParameter:
         if (command.index < 0 ||
@@ -1302,6 +1432,19 @@ void PmgViewerWorkspace::BuildTransportSection() {
 }
 
 void PmgViewerWorkspace::BuildDisplaySection() {
+    ImGui::TextDisabled("Skeleton pose");
+    int pose_mode = static_cast<int>(skeleton_pose_mode_);
+    ImGui::RadioButton("Current frame", &pose_mode,
+                       static_cast<int>(ViewerSkeletonPoseMode::Current));
+    ImGui::SameLine();
+    ImGui::RadioButton("Frame 0", &pose_mode,
+                       static_cast<int>(ViewerSkeletonPoseMode::Frame0));
+    ImGui::SameLine();
+    ImGui::RadioButton("Rest pose", &pose_mode,
+                       static_cast<int>(ViewerSkeletonPoseMode::Rest));
+    if (pose_mode != static_cast<int>(skeleton_pose_mode_)) {
+        skeleton_pose_mode_ = static_cast<ViewerSkeletonPoseMode>(pose_mode);
+    }
     ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
     ImGui::SliderFloat("Display scale", &display_scale_, 1.0f, 40.0f, "%.1fx");
 }

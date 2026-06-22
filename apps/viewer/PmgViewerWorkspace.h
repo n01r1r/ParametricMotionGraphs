@@ -87,6 +87,7 @@ private:
     void DiscoverBvhFiles();
     void LoadClip(int file_index);
     pmg::Pose CurrentPose() const;
+    pmg::Pose DisplayPose() const;
     const pmg::Skeleton& ActiveSkeleton() const;
     void RebuildScene(const pmg::Pose& pose);
     // Transform a pose's joints into render/world space (ground lift, then the
@@ -310,6 +311,12 @@ private:
     bool show_graph_transition_markers_ = true;
     bool show_root_canonicalization_markers_ = false;
     bool show_anchor_root_trajectories_ = false;
+    bool show_joint_names_ = false;
+    bool show_end_sites_separately_ = false;
+    bool hide_end_sites_ = false;
+    bool draw_local_joint_axes_ = false;
+    bool mark_likely_foot_joints_ = false;
+    ViewerSkeletonPoseMode skeleton_pose_mode_ = ViewerSkeletonPoseMode::Current;
     GraphOrigin graph_origin_ = GraphOrigin::None;
     bool graph_open_runtime_tab_ = false;
     float graph_desired_parameter_ = 0.0f;
