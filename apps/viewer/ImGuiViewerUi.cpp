@@ -74,7 +74,9 @@ void BuildInputs(const ViewerUiState& state, char* clip_filter,
 }  // namespace
 
 std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
-    const ViewerUiState& state, const std::function<void()>& build_legacy_tabs) {
+    const ViewerUiState& state,
+    const std::function<void()>& build_motion_space,
+    const std::function<void()>& build_legacy_tabs) {
     std::vector<ViewerUiCommand> commands;
     ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(520.0f, 780.0f), ImGuiCond_FirstUseEver);
@@ -119,7 +121,11 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
             BuildInputs(state, clip_filter_, commands);
             ImGui::EndTabItem();
         }
-        build_legacy_tabs();  // ponytail: migrate remaining complex tabs incrementally.
+        if (ImGui::BeginTabItem("Motion Space")) {
+            build_motion_space();
+            ImGui::EndTabItem();
+        }
+        build_legacy_tabs();  // ponytail: migrate remaining tabs incrementally.
         ImGui::EndTabBar();
     }
     ImGui::Separator();

@@ -981,11 +981,8 @@ void PmgViewerWorkspace::RegeneratePreviewClip() {
 void PmgViewerWorkspace::BuildUi() {
     HandleShortcuts();
     const ViewerUiState state = MakeUiState();
-    const std::vector<ViewerUiCommand> commands = imgui_ui_.Build(state, [this] {
-            if (ImGui::BeginTabItem("Motion Space")) {
-                BuildMotionSpaceSection();
-                ImGui::EndTabItem();
-            }
+    const std::vector<ViewerUiCommand> commands = imgui_ui_.Build(
+        state, [this] { BuildMotionSpaceSection(); }, [this] {
             if (ImGui::BeginTabItem("Transition Grid")) {
                 BuildDistanceGridSection();
                 ImGui::EndTabItem();
@@ -994,7 +991,7 @@ void PmgViewerWorkspace::BuildUi() {
                 BuildGraphSection();
                 ImGui::EndTabItem();
             }
-    });
+        });
     ApplyUiCommands(commands);
 }
 

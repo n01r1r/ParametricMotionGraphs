@@ -12,6 +12,7 @@ class ImGuiViewerUi {
 public:
     std::vector<ViewerUiCommand> Build(
         const ViewerUiState& state,
+        const std::function<void()>& build_motion_space,
         const std::function<void()>& build_legacy_tabs);
 
 private:
