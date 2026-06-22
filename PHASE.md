@@ -730,14 +730,12 @@ Completed artifacts: `build/compatible_bvh_corpus_audit.csv` and
 `ONLY_SINGLE_NODE_IS_JUSTIFIED`. The 41-file corpus contains only one clear
 cyclic run candidate; `walkToJog.bvh` is transitional. D2-D4 remain gated.
 Follow-up recut diagnostics on 2026-06-22 kept the gate closed:
-`build/diag_recut_run_gate/jogCurve_recut_000_024/loop_audit.md` reports
-cycle score `0.976369` with contact mismatch `0`, so
-`jogCurve_recut_000_024.bvh` is at most a single barely viable cyclic run
-sample. `build/diag_recut_run_gate/walkToJog_recut_005_034/loop_audit.md`
-reports cycle score `1.34915` with contact mismatch `1`, so
-`walkToJog_recut_005_034.bvh` remains transitional rather than an independent
-cyclic run anchor. `run_1d` stays blocked because corpus still lacks a coherent
-multi-clip run family.
+`jogCurve_recut_000_024.bvh` measured cycle score `0.976369` with contact
+mismatch `0`, so it is at most a single barely viable cyclic run sample.
+`walkToJog_recut_005_034.bvh` measured cycle score `1.34915` with contact
+mismatch `1`, so it remains transitional rather than an independent cyclic run
+anchor. `run_1d` stays blocked because corpus still lacks a coherent multi-clip
+run family.
 
 Do not add a second node until this audit passes.
 

@@ -39,7 +39,5 @@ PASS requires reviewed structural, motion, contact, and window evidence. Parsed 
 Review shared-skeleton candidates; annotate windows; compare with `walk_2d`;
 run cyclic/contact diagnostics on extracted recuts; then generate `run_1d`
 spec and bidirectional edge experiments only if a coherent multi-clip run
-family passes. Current local follow-up still fails that gate:
-`jogCurve_recut_000_024.bvh` is only a single barely viable cyclic run sample,
-and `walkToJog_recut_005_034.bvh` remains transitional because seam contact
-state does not match.
+family passes. Keep repo-local gate status in `PHASE.md` so this CMU corpus
+note stays scoped to external-corpus evaluation.
