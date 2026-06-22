@@ -14,6 +14,7 @@ add_library(pmg_core
     src/CandidateWindowExtractor.cpp
     src/ContactDetection.cpp
     src/CorpusAudit.cpp
+    src/Diagnostics.cpp
     src/CyclicContinuity.cpp
     src/FootLocking.cpp
     src/ForwardKinematics.cpp
@@ -112,6 +113,10 @@ if(PMG_BUILD_TESTS)
         tests/test_transition_quality.cpp)
     target_link_libraries(test_transition_quality PRIVATE pmg_core)
     add_test(NAME test_transition_quality COMMAND test_transition_quality)
+
+    add_executable(test_diagnostics tests/test_diagnostics.cpp)
+    target_link_libraries(test_diagnostics PRIVATE pmg_core)
+    add_test(NAME test_diagnostics COMMAND test_diagnostics)
 
     add_executable(test_cyclic_continuity
         tests/test_cyclic_continuity.cpp)
@@ -271,6 +276,16 @@ if(PMG_BUILD_TESTS)
         COMMAND pmg_cli --build-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixtures/fixture_transition_box_shrink.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
+
+    add_test(NAME cli_diagnostics_smoke
+        COMMAND ${CMAKE_COMMAND}
+            -DPMG_CLI=$<TARGET_FILE:pmg_cli>
+            -DBVH_PATH=${CMAKE_CURRENT_SOURCE_DIR}/BVH/WalkLoopA.bvh
+            -DPMG_PATH=${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            -DOUT_ROOT=${PMG_TEST_ARTIFACT_ROOT}/cli_diagnostics_smoke
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_diagnostics_smoke.cmake)
+    set_tests_properties(cli_diagnostics_smoke PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
 endif()
 
 # ---------------------------------------------------------------------------

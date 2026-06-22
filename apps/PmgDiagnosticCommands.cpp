@@ -1,5 +1,6 @@
 #include "PmgCommandModules.h"
 
+#include "pmg/Diagnostics.h"
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
 #include "pmg/CyclicContinuity.h"
@@ -2269,6 +2270,24 @@ struct TransitionProbeOptions {
     std::string expected_decision;
     pmg::TransitionQualityGateConfig quality_gate{
         true, 1.5f, 50.0f, 2.0f, false, 2.0f};
+};
+
+struct SkeletonAuditOptions {
+    std::string bvh_path;
+    std::filesystem::path out_dir;
+};
+
+struct LoopAuditOptions {
+    std::string bvh_path;
+    std::filesystem::path out_dir;
+    int start_frame = -1;
+    int end_frame = -1;
+};
+
+struct TransitionPopAuditOptions {
+    std::string pmg_path;
+    std::filesystem::path out_dir;
+    int worst_k = 8;
 };
 
 struct ReachableRegionAuditRow {
@@ -4598,6 +4617,93 @@ ParseTransitionAcceptanceConsistencyAuditOptions(
     return options;
 }
 
+SkeletonAuditOptions ParseSkeletonAuditOptions(int argc, char** argv) {
+    if (argc < 5) {
+        throw std::runtime_error(
+            "usage: pmg_cli inspect-skeleton input.bvh --out outputs/skeleton_report");
+    }
+    SkeletonAuditOptions options;
+    options.bvh_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        if (option != "--out") {
+            throw std::runtime_error("inspect-skeleton: unknown option '" + option + "'");
+        }
+        if (index + 1 >= argc) {
+            throw std::runtime_error("inspect-skeleton: --out requires a value");
+        }
+        options.out_dir = argv[++index];
+    }
+    if (options.out_dir.empty()) {
+        throw std::runtime_error("inspect-skeleton requires --out");
+    }
+    return options;
+}
+
+LoopAuditOptions ParseLoopAuditOptions(int argc, char** argv) {
+    if (argc < 5) {
+        throw std::runtime_error(
+            "usage: pmg_cli audit-loop input.bvh --out outputs/loop_audit");
+    }
+    LoopAuditOptions options;
+    options.bvh_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            return argv[++index];
+        };
+        if (option == "--out") {
+            options.out_dir = require_value("--out");
+        } else if (option == "--start-frame") {
+            options.start_frame = std::stoi(require_value("--start-frame"));
+        } else if (option == "--end-frame") {
+            options.end_frame = std::stoi(require_value("--end-frame"));
+        } else {
+            throw std::runtime_error("audit-loop: unknown option '" + option + "'");
+        }
+    }
+    if (options.out_dir.empty()) {
+        throw std::runtime_error("audit-loop requires --out");
+    }
+    return options;
+}
+
+TransitionPopAuditOptions ParseTransitionPopAuditOptions(int argc, char** argv) {
+    if (argc < 5) {
+        throw std::runtime_error(
+            "usage: pmg_cli audit-transition-pop artifact.pmg --out outputs/transition_pop_audit");
+    }
+    TransitionPopAuditOptions options;
+    options.pmg_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            return argv[++index];
+        };
+        if (option == "--out") {
+            options.out_dir = require_value("--out");
+        } else if (option == "--worst-k") {
+            options.worst_k = std::stoi(require_value("--worst-k"));
+        } else {
+            throw std::runtime_error(
+                "audit-transition-pop: unknown option '" + option + "'");
+        }
+    }
+    if (options.out_dir.empty()) {
+        throw std::runtime_error("audit-transition-pop requires --out");
+    }
+    if (options.worst_k < 1) {
+        throw std::runtime_error("audit-transition-pop: --worst-k must be positive");
+    }
+    return options;
+}
+
 int TransitionMontageAuditCommand(
     const TransitionMontageAuditOptions& options) {
     const pmg::BuiltPmgArtifact artifact =
@@ -4611,6 +4717,38 @@ int TransitionMontageAuditCommand(
     std::cout << "transition_montage_manifest=" << data.manifest_csv_path
               << "\n";
     std::cout << "transition_montage_conclusion=" << data.conclusion << "\n";
+    return 0;
+}
+
+int SkeletonAuditCommand(const SkeletonAuditOptions& options) {
+    const pmg::BvhData data = pmg::BvhLoader::Load(options.bvh_path);
+    const pmg::SkeletonInspectionReport report =
+        pmg::InspectSkeleton(data, options.bvh_path);
+    pmg::WriteSkeletonInspectionArtifacts(report, options.out_dir);
+    std::cout << "skeleton_report=" << (options.out_dir / "skeleton_report.md").string()
+              << "\n";
+    return 0;
+}
+
+int LoopAuditCommand(const LoopAuditOptions& options) {
+    const pmg::BvhData data = pmg::BvhLoader::Load(options.bvh_path);
+    pmg::LoopAuditReport report =
+        pmg::AuditLoop(data, options.start_frame, options.end_frame);
+    report.source_path = options.bvh_path;
+    const std::filesystem::path out_path = options.out_dir / "loop_audit.md";
+    pmg::WriteLoopAuditReport(report, out_path);
+    std::cout << "loop_audit=" << out_path.string() << "\n";
+    return 0;
+}
+
+int TransitionPopAuditCommand(const TransitionPopAuditOptions& options) {
+    const pmg::BuiltPmgArtifact artifact = pmg::LoadPmgArtifactText(options.pmg_path);
+    const pmg::TransitionPopAuditReport report =
+        pmg::AuditTransitionPop(artifact, options.worst_k);
+    const std::filesystem::path out_path =
+        options.out_dir / "transition_pop_audit.md";
+    pmg::WriteTransitionPopAuditReport(report, out_path);
+    std::cout << "transition_pop_audit=" << out_path.string() << "\n";
     return 0;
 }
 
@@ -5754,6 +5892,17 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
     if (command == "--audit-transition-montage" && argc >= 3) {
         return TransitionMontageAuditCommand(
             ParseTransitionMontageAuditOptions(argc, argv));
+    }
+    if ((command == "audit-loop" || command == "--audit-loop") && argc >= 5) {
+        return LoopAuditCommand(ParseLoopAuditOptions(argc, argv));
+    }
+    if ((command == "audit-transition-pop" || command == "--audit-transition-pop") &&
+        argc >= 5) {
+        return TransitionPopAuditCommand(ParseTransitionPopAuditOptions(argc, argv));
+    }
+    if ((command == "inspect-skeleton" || command == "--inspect-skeleton") &&
+        argc >= 5) {
+        return SkeletonAuditCommand(ParseSkeletonAuditOptions(argc, argv));
     }
     if (command == "--probe-transition" && argc >= 3) {
         return TransitionProbeCommand(ParseTransitionProbeOptions(argc, argv));
