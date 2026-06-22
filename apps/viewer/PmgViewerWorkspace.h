@@ -127,21 +127,18 @@ private:
     void BuildWorkflowSection();
     void BuildTransportSection();
     void BuildDisplaySection();
-    void BuildMotionSpaceSection();
     void BuildDistanceGridSection();
     void BuildGraphSection();
     void BuildGraphAuthorTab();
     void BuildGraphSpecTab();
     void BuildGraphQuickTab();
     void BuildGraphRuntimeTab();
-    void DrawParameterSpace(int axis);
     // 2-D scatter of a node's example parameters with the parameter-box corners,
     // marking corners no example reaches. Makes a declared N-D space that is
     // really a lower-dimensional simplex (e.g. the missing tight-jog corner)
     // visible instead of implied. Mirrors the spec `expect corner_coverage`
     // check in the viewer.
     void DrawParameterCoverage();
-    void DrawPhaseTimeline(float canonical_phase);
     void DrawGraphCanvas();
     void DrawTransitionPipeline();
 
@@ -192,11 +189,6 @@ private:
     void SetDesiredRuntimeNode(int node);
     void PlaceGotoTarget(const glm::vec2& target);
     void UpdateRootMotionDiagnostics(const pmg::Pose& pose, float delta_seconds);
-
-    // SliderFloat plus tick marks at the example parameters, so the user can
-    // see where the real clips sit on the blend axis.
-    bool ParameterSliderWithTicks(const char* label, float* value,
-                                  float min_value, float max_value, int axis);
 
     void HandleShortcuts();
     void StepFrame(int direction);  // +1 / -1 frame; clip & blend modes only

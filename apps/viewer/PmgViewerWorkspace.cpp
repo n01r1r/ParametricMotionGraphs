@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <cfloat>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -27,8 +26,6 @@ namespace pmgviewer {
 
 namespace {
 constexpr float kEpsilon = 1.0e-6f;
-constexpr float kParameterCanvasHeight = 88.0f;
-constexpr float kPhaseRowHeight = 26.0f;
 constexpr int kSteeringCurveSamples = 24;  // turn-rate plot resolution
 
 glm::vec3 ToGlm(const pmg::Vec3& v) { return glm::vec3(v.x, v.y, v.z); }
@@ -77,26 +74,6 @@ ImU32 HeatColor(float t) {
     return IM_COL32(static_cast<int>(r * 255.0f),
                     static_cast<int>(g * 255.0f),
                     static_cast<int>(b * 255.0f), 255);
-}
-
-float ParameterToCanvasX(float parameter, float min_parameter, float max_parameter,
-                         float left, float width) {
-    const float span = std::max(max_parameter - min_parameter, kEpsilon);
-    const float alpha = std::clamp(
-        (parameter - min_parameter) / span, 0.0f, 1.0f);
-    return left + alpha * width;
-}
-
-void DrawPhaseMarker(ImDrawList* draw_list, float phase, float left, float top,
-                     float width, float height, ImU32 color) {
-    const float x = left + std::clamp(phase, 0.0f, 1.0f) * width;
-    draw_list->AddTriangleFilled(
-        ImVec2(x, top),
-        ImVec2(x - 5.0f, top - 7.0f),
-        ImVec2(x + 5.0f, top - 7.0f),
-        color);
-    draw_list->AddLine(
-        ImVec2(x, top), ImVec2(x, top + height), color, 1.5f);
 }
 
 }  // namespace
@@ -982,7 +959,7 @@ void PmgViewerWorkspace::BuildUi() {
     HandleShortcuts();
     const ViewerUiState state = MakeUiState();
     const std::vector<ViewerUiCommand> commands = imgui_ui_.Build(
-        state, [this] { BuildMotionSpaceSection(); }, [this] {
+        state, [this] {
             if (ImGui::BeginTabItem("Transition Grid")) {
                 BuildDistanceGridSection();
                 ImGui::EndTabItem();
@@ -1024,6 +1001,69 @@ ViewerUiState PmgViewerWorkspace::MakeUiState() const {
     state.motion_space_dimension = pmg_dimension_;
     state.has_motion_samples = !pmg_examples_.empty();
     state.next_sample_parameter = next_example_parameter_;
+    state.motion_space_name = pmg_space_ready_ ? pmg_space_.Name() : "";
+    state.motion_space_blend_error = pmg_space_blend_error_;
+    state.motion_space_parameter = pmg_parameter_;
+    state.motion_space_parameter_min = pmg_parameter_min_;
+    state.motion_space_parameter_max = pmg_parameter_max_;
+    state.motion_space_view_axis = pmg_view_axis_;
+    state.motion_space_preview_in_place = pmg_preview_in_place_;
+    state.motion_space_turn_rate_curve = steering_turn_rate_curve_;
+    state.motion_space_travel_speed_curve = steering_travel_speed_curve_;
+    if (pmg_preview_clip_.NumFrames() >= 2) {
+        try {
+            state.motion_space_current_blend_turn_rate = pmg::MeasureParameterMetric(
+                pmg::ParameterMetric::kTurnRate, pmg_preview_clip_);
+            state.motion_space_current_blend_travel_speed = pmg::MeasureParameterMetric(
+                pmg::ParameterMetric::kTravelSpeed, pmg_preview_clip_);
+            state.motion_space_current_blend_metrics_valid = true;
+        } catch (const std::exception&) {
+            state.motion_space_current_blend_metrics_valid = false;
+        }
+    }
+    if (pmg_space_ready_ && !pmg_examples_.empty()) {
+        try {
+            state.motion_space_local_blend_weights =
+                pmg_space_.ComputeLocalBlendWeights(pmg_parameter_);
+        } catch (const std::exception& error) {
+            state.motion_space_weight_error = error.what();
+        }
+        if (pmg_space_.HasParameterCalibration()) {
+            const pmg::ParameterCalibration& calibration =
+                pmg_space_.ParameterCalibrationData();
+            state.motion_space_has_parameter_calibration = true;
+            state.motion_space_calibration_metric_count =
+                static_cast<int>(calibration.metrics.size());
+            state.motion_space_calibration_sample_count =
+                static_cast<int>(calibration.samples.size());
+            state.motion_space_calibration_samples_per_axis =
+                calibration.samples_per_axis;
+        }
+    }
+    const bool has_warps = pmg_space_ready_ && pmg_space_.HasExampleTimeWarps();
+    const std::vector<pmg::TimeWarp>* warps =
+        has_warps ? &pmg_space_.ExampleTimeWarps() : nullptr;
+    for (std::size_t index = 0; index < pmg_examples_.size(); ++index) {
+        const PmgExample& example = pmg_examples_[index];
+        ViewerMotionSampleUiState sample_state;
+        sample_state.label = example.label;
+        sample_state.parameter = example.parameter;
+        const bool sample_has_warp =
+            has_warps && index < warps->size();
+        sample_state.registered_phase =
+            sample_has_warp ? (*warps)[index].Evaluate(state.phase) : state.phase;
+        if (sample_has_warp) {
+            sample_state.registration_anchor_phases =
+                (*warps)[index].InteriorToPhases();
+        }
+        sample_state.contacts.reserve(example.contact_intervals.size());
+        for (const pmg::ContactInterval& contact : example.contact_intervals) {
+            sample_state.contacts.push_back(
+                {contact.StrikePhase(example.clip.NumFrames()),
+                 contact.LiftPhase(example.clip.NumFrames())});
+        }
+        state.motion_samples.push_back(std::move(sample_state));
+    }
     return state;
 }
 
@@ -1086,6 +1126,35 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
     case ViewerUiCommandType::AddMotionSample:
         AddCurrentClipToSpace(next_example_parameter_);
         break;
+    case ViewerUiCommandType::SetMotionSpaceViewAxis:
+        pmg_view_axis_ = std::clamp(command.index, 0, std::max(0, pmg_dimension_ - 1));
+        RecomputeSteeringCurve();
+        break;
+    case ViewerUiCommandType::SetMotionSpacePreviewInPlace:
+        pmg_preview_in_place_ = command.index != 0;
+        break;
+    case ViewerUiCommandType::SetMotionSampleParameter:
+        if (command.index < 0 ||
+            command.index >= static_cast<int>(pmg_examples_.size()))
+            throw std::out_of_range("motion sample index is outside sample list");
+        if (static_cast<int>(command.values.size()) != pmg_dimension_)
+            throw std::invalid_argument("motion sample parameter dimension mismatch");
+        pmg_examples_[command.index].parameter = command.values;
+        RebuildPmgSpace();
+        break;
+    case ViewerUiCommandType::RemoveMotionSample:
+        if (command.index < 0 ||
+            command.index >= static_cast<int>(pmg_examples_.size()))
+            throw std::out_of_range("motion sample index is outside sample list");
+        pmg_examples_.erase(pmg_examples_.begin() + command.index);
+        RebuildPmgSpace();
+        status_message_ = "Removed motion sample.";
+        break;
+    case ViewerUiCommandType::ClearMotionSpace:
+        pmg_examples_.clear();
+        RebuildPmgSpace();
+        status_message_ = "Cleared parametric space.";
+        break;
     }
 }
 
@@ -1126,43 +1195,6 @@ void PmgViewerWorkspace::StepFrame(int direction) {
     const float frame_phase = 1.0f / static_cast<float>(frame_count - 1);
     current_phase_ =
         WrapPhase(current_phase_ + static_cast<float>(direction) * frame_phase);
-}
-
-bool PmgViewerWorkspace::ParameterSliderWithTicks(const char* label, float* value,
-                                         float min_value, float max_value, int axis) {
-    const float frame_width = ImGui::CalcItemWidth();
-    const bool changed = ImGui::SliderFloat(label, value, min_value, max_value, "%.3f");
-
-    // Tick marks at the example parameters along the slider frame's bottom
-    // edge, so the user sees where real clips sit on this blend axis.
-    const float span = max_value - min_value;
-    if (span > kEpsilon && !pmg_examples_.empty()) {
-        const ImVec2 rect_min = ImGui::GetItemRectMin();
-        const float bottom = ImGui::GetItemRectMax().y;
-        ImDrawList* draw_list = ImGui::GetWindowDrawList();
-        for (const PmgExample& example : pmg_examples_) {
-            if (axis >= static_cast<int>(example.parameter.size())) {
-                continue;
-            }
-            const float alpha =
-                std::clamp((example.parameter[axis] - min_value) / span, 0.0f, 1.0f);
-            const float x = rect_min.x + alpha * frame_width;
-            draw_list->AddLine(ImVec2(x, bottom - 4.0f), ImVec2(x, bottom + 2.0f),
-                               IM_COL32(255, 255, 255, 170), 1.0f);
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::BeginTooltip();
-            ImGui::TextDisabled("ticks = example clips (ctrl+click to type)");
-            for (const PmgExample& example : pmg_examples_) {
-                const float tick = axis < static_cast<int>(example.parameter.size())
-                                       ? example.parameter[axis]
-                                       : 0.0f;
-                ImGui::Text("%.3f  %s", tick, example.label.c_str());
-            }
-            ImGui::EndTooltip();
-        }
-    }
-    return changed;
 }
 
 void PmgViewerWorkspace::BuildWorkflowSection() {
@@ -1272,338 +1304,6 @@ void PmgViewerWorkspace::BuildTransportSection() {
 void PmgViewerWorkspace::BuildDisplaySection() {
     ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
     ImGui::SliderFloat("Display scale", &display_scale_, 1.0f, 40.0f, "%.1fx");
-}
-
-void PmgViewerWorkspace::BuildMotionSpaceSection() {
-    ImGui::Text("Space: %s   dimension: %d   samples: %zu",
-                pmg_space_ready_ ? pmg_space_.Name().c_str() : "(none)",
-                pmg_space_ready_ ? pmg_space_.ParameterDimension() : 0,
-                pmg_examples_.size());
-    ImGui::TextDisabled(
-        "Graph NODE = this parametric motion space: a blend of its sample clips.");
-    ImGui::TextDisabled(
-        "Graph EDGES = sampled transitions between nodes (see the Graph tab).");
-
-    if (!pmg_space_blend_error_.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.55f, 0.25f, 1.0f));
-        ImGui::TextWrapped("Blend space rejected: %s",
-                           pmg_space_blend_error_.c_str());
-        ImGui::PopStyleColor();
-    }
-
-    if (pmg_space_ready_) {
-        ImGui::Separator();
-        ImGui::TextDisabled("Evaluation parameter");
-        const int dim = std::max(1, pmg_dimension_);
-        for (int axis = 0; axis < dim; ++axis) {
-            if (axis >= static_cast<int>(pmg_parameter_.size()) ||
-                axis >= static_cast<int>(pmg_parameter_min_.size())) {
-                break;
-            }
-            ImGui::PushID(axis);
-            const std::string label =
-                "Blend parameter [" + std::to_string(axis) + "]";
-            ParameterSliderWithTicks(label.c_str(), &pmg_parameter_[axis],
-                                     pmg_parameter_min_[axis],
-                                     pmg_parameter_max_[axis], axis);
-            ImGui::PopID();
-        }
-        if (dim > 1) {
-            ImGui::SetNextItemWidth(120.0f);
-            if (ImGui::InputInt("View axis (1-D plots)", &pmg_view_axis_)) {
-                pmg_view_axis_ = std::clamp(pmg_view_axis_, 0, dim - 1);
-                RecomputeSteeringCurve();
-            }
-        }
-        DrawParameterSpace(std::clamp(pmg_view_axis_, 0, dim - 1));
-
-        // Preview comes from GenerateClip (root-delta integration). The toggle
-        // chooses whether the character traces that integrated trajectory or
-        // cycles in place for pose inspection.
-        ImGui::Checkbox("In-place preview", &pmg_preview_in_place_);
-        ImGui::SameLine();
-        ImGui::TextDisabled(pmg_preview_in_place_
-                                ? "(root locked: cycle in place)"
-                                : "(trajectory: integrated root path)");
-
-        // Steering diagnostic: measured locomotion metrics across the parameter
-        // axis. Smooth steering reads as monotone, spike-free curves; the marker
-        // shows where the current blend parameter sits on that response.
-        if (steering_turn_rate_curve_.size() >= 2) {
-            const int axis =
-                std::clamp(pmg_view_axis_, 0, std::max(0, pmg_dimension_ - 1));
-            const float axis_min = axis < static_cast<int>(pmg_parameter_min_.size())
-                                       ? pmg_parameter_min_[axis] : 0.0f;
-            const float axis_max = axis < static_cast<int>(pmg_parameter_max_.size())
-                                       ? pmg_parameter_max_[axis] : 1.0f;
-            const float axis_val = axis < static_cast<int>(pmg_parameter_.size())
-                                       ? pmg_parameter_[axis] : 0.0f;
-            const float span = std::max(axis_max - axis_min, kEpsilon);
-            const float marker_alpha =
-                std::clamp((axis_val - axis_min) / span, 0.0f, 1.0f);
-
-            const auto plot_with_marker =
-                [marker_alpha](const char* id, const char* caption,
-                               const std::vector<float>& curve) {
-                    ImGui::TextDisabled("%s", caption);
-                    ImGui::PlotLines(id, curve.data(),
-                                     static_cast<int>(curve.size()), 0, nullptr,
-                                     FLT_MAX, FLT_MAX, ImVec2(0.0f, 48.0f));
-                    const ImVec2 plot_min = ImGui::GetItemRectMin();
-                    const ImVec2 plot_max = ImGui::GetItemRectMax();
-                    const float marker_x =
-                        plot_min.x + marker_alpha * (plot_max.x - plot_min.x);
-                    ImGui::GetWindowDrawList()->AddLine(
-                        ImVec2(marker_x, plot_min.y), ImVec2(marker_x, plot_max.y),
-                        IM_COL32(245, 180, 65, 255), 1.5f);
-                };
-
-            plot_with_marker("##steering_turn_rate",
-                             "Turn rate vs parameter (rad/s) -- smooth = monotone",
-                             steering_turn_rate_curve_);
-            plot_with_marker("##steering_travel_speed",
-                             "Travel speed vs parameter (units/s)",
-                             steering_travel_speed_curve_);
-
-            if (pmg_preview_clip_.NumFrames() >= 2) {
-                float turn_rate = 0.0f;
-                float travel_speed = 0.0f;
-                try {
-                    turn_rate = pmg::MeasureParameterMetric(
-                        pmg::ParameterMetric::kTurnRate, pmg_preview_clip_);
-                    travel_speed = pmg::MeasureParameterMetric(
-                        pmg::ParameterMetric::kTravelSpeed, pmg_preview_clip_);
-                } catch (const std::exception&) {
-                    turn_rate = 0.0f;
-                    travel_speed = 0.0f;
-                }
-                ImGui::TextDisabled("current blend: %.3f rad/s, %.3f units/s",
-                                    turn_rate, travel_speed);
-            }
-        }
-
-        const float canonical_phase =
-            GraphRuntimeActive()
-                ? runtime_.Snapshot().current_phase
-                : current_phase_;
-        DrawPhaseTimeline(canonical_phase);
-
-        if (!ParametricBlendActive()) {
-            ImGui::TextDisabled(
-                "Switch mode to Parametric blend to render this evaluation parameter.");
-        }
-    } else {
-        ImGui::TextDisabled("Add motion samples from Inputs.");
-    }
-
-    if (!pmg_examples_.empty()) {
-        ImGui::Separator();
-        ImGui::TextDisabled("Samples (edit parameter / remove)");
-        int remove_index = -1;
-        bool params_changed = false;
-        for (int i = 0; i < static_cast<int>(pmg_examples_.size()); ++i) {
-            ImGui::PushID(i);
-            pmg::ParameterVector& sample = pmg_examples_[i].parameter;
-            sample.resize(static_cast<std::size_t>(std::max(1, pmg_dimension_)), 0.0f);
-            ImGui::SetNextItemWidth(60.0f * pmg_dimension_);
-            // EnterReturnsTrue: rebuild on commit, not on every per-frame edit.
-            if (ImGui::InputScalarN("##param", ImGuiDataType_Float, sample.data(),
-                                    pmg_dimension_, nullptr, nullptr, "%.3f",
-                                    ImGuiInputTextFlags_EnterReturnsTrue)) {
-                params_changed = true;
-            }
-            ImGui::SameLine();
-            if (ImGui::SmallButton("x")) {
-                remove_index = i;
-            }
-            ImGui::SameLine();
-            ImGui::TextUnformatted(pmg_examples_[i].label.c_str());
-            ImGui::PopID();
-        }
-        if (remove_index >= 0) {
-            pmg_examples_.erase(pmg_examples_.begin() + remove_index);
-            RebuildPmgSpace();
-            status_message_ = "Removed motion sample.";
-        } else if (params_changed) {
-            RebuildPmgSpace();
-        }
-    }
-
-    ImGui::Separator();
-    if (ImGui::Button("Clear motion space")) {
-        pmg_examples_.clear();
-        RebuildPmgSpace();
-        status_message_ = "Cleared parametric space.";
-    }
-}
-
-void PmgViewerWorkspace::DrawParameterSpace(int axis) {
-    if (!pmg_space_ready_ || pmg_examples_.empty()) {
-        return;
-    }
-    axis = std::clamp(axis, 0, std::max(0, pmg_dimension_ - 1));
-    if (axis >= static_cast<int>(pmg_parameter_min_.size()) ||
-        axis >= static_cast<int>(pmg_parameter_.size())) {
-        return;
-    }
-    const float axis_min = pmg_parameter_min_[axis];
-    const float axis_max = pmg_parameter_max_[axis];
-    const float query_value = pmg_parameter_[axis];
-
-    std::vector<float> weights;
-    try {
-        // Stencil weights use the full N-D blend; the canvas projects onto axis.
-        weights = pmg_space_.ComputeLocalBlendWeights(pmg_parameter_);
-    } catch (const std::exception& error) {
-        ImGui::TextWrapped("Weight evaluation failed: %s", error.what());
-        return;
-    }
-
-    ImGui::Spacing();
-    ImGui::TextDisabled("Parameter-space samples and local stencil (axis %d)", axis);
-    const ImVec2 canvas_origin = ImGui::GetCursorScreenPos();
-    const float canvas_width = std::max(120.0f, ImGui::GetContentRegionAvail().x);
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    const float axis_left = canvas_origin.x + 14.0f;
-    const float axis_width = canvas_width - 28.0f;
-    const float axis_y = canvas_origin.y + 42.0f;
-
-    draw_list->AddRectFilled(
-        canvas_origin,
-        ImVec2(canvas_origin.x + canvas_width,
-               canvas_origin.y + kParameterCanvasHeight),
-        IM_COL32(28, 31, 38, 255), 4.0f);
-    draw_list->AddLine(
-        ImVec2(axis_left, axis_y),
-        ImVec2(axis_left + axis_width, axis_y),
-        IM_COL32(150, 155, 165, 255), 2.0f);
-
-    for (std::size_t index = 0; index < pmg_examples_.size(); ++index) {
-        const PmgExample& example = pmg_examples_[index];
-        const float coord = axis < static_cast<int>(example.parameter.size())
-                                ? example.parameter[axis] : 0.0f;
-        const float x = ParameterToCanvasX(
-            coord, axis_min, axis_max, axis_left, axis_width);
-        const float weight = index < weights.size() ? weights[index] : 0.0f;
-        const float radius = 5.0f + 7.0f * std::sqrt(std::max(0.0f, weight));
-        const ImU32 color =
-            weight > kEpsilon ? IM_COL32(245, 180, 65, 255)
-                              : IM_COL32(110, 115, 125, 255);
-        draw_list->AddCircleFilled(ImVec2(x, axis_y), radius, color);
-        draw_list->AddText(
-            ImVec2(x - 18.0f, axis_y + 16.0f),
-            IM_COL32(205, 208, 215, 255),
-            std::to_string(coord).substr(0, 4).c_str());
-    }
-
-    const float query_x = ParameterToCanvasX(
-        query_value, axis_min, axis_max, axis_left, axis_width);
-    draw_list->AddLine(
-        ImVec2(query_x, canvas_origin.y + 8.0f),
-        ImVec2(query_x, axis_y - 7.0f),
-        IM_COL32(80, 205, 255, 255), 2.0f);
-    draw_list->AddTriangleFilled(
-        ImVec2(query_x, axis_y - 2.0f),
-        ImVec2(query_x - 6.0f, axis_y - 10.0f),
-        ImVec2(query_x + 6.0f, axis_y - 10.0f),
-        IM_COL32(80, 205, 255, 255));
-    ImGui::InvisibleButton(
-        "##parameter_space_canvas",
-        ImVec2(canvas_width, kParameterCanvasHeight));
-
-    for (std::size_t index = 0; index < pmg_examples_.size(); ++index) {
-        const float weight = index < weights.size() ? weights[index] : 0.0f;
-        ImGui::Text("%s", pmg_examples_[index].label.c_str());
-        ImGui::SameLine(265.0f);
-        ImGui::ProgressBar(weight, ImVec2(-1.0f, 0.0f),
-                           (std::to_string(static_cast<int>(std::lround(weight * 100.0f))) +
-                            "%").c_str());
-    }
-
-    if (pmg_space_.HasParameterCalibration()) {
-        const pmg::ParameterCalibration& calibration =
-            pmg_space_.ParameterCalibrationData();
-        if (calibration.samples_per_axis > 0) {
-            ImGui::TextDisabled(
-                "Parameter accuracy: calibrated inversion (%zu metrics, %zu "
-                "samples, %d/axis)",
-                calibration.metrics.size(), calibration.samples.size(),
-                calibration.samples_per_axis);
-        } else {
-            ImGui::TextDisabled(
-                "Parameter accuracy: calibrated inversion (%zu metrics, %zu "
-                "imported samples)",
-                calibration.metrics.size(), calibration.samples.size());
-        }
-    } else {
-        ImGui::TextDisabled("Parameter accuracy: local Shepard interpolation");
-    }
-}
-
-void PmgViewerWorkspace::DrawPhaseTimeline(float canonical_phase) {
-    if (!pmg_space_ready_ || pmg_examples_.empty()) {
-        return;
-    }
-
-    ImGui::Separator();
-    ImGui::TextDisabled("Canonical phase -> registered example phase / foot contact");
-    const float label_width = 210.0f;
-    const float row_width =
-        std::max(120.0f, ImGui::GetContentRegionAvail().x - label_width);
-    const ImVec2 start = ImGui::GetCursorScreenPos();
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    const bool has_warps = pmg_space_.HasExampleTimeWarps();
-    const std::vector<pmg::TimeWarp>& warps = pmg_space_.ExampleTimeWarps();
-
-    for (std::size_t index = 0; index < pmg_examples_.size(); ++index) {
-        const float row_top = start.y + static_cast<float>(index) * kPhaseRowHeight;
-        draw_list->AddText(
-            ImVec2(start.x, row_top + 2.0f),
-            IM_COL32(210, 212, 218, 255),
-            pmg_examples_[index].label.c_str());
-        const float timeline_left = start.x + label_width;
-        const float timeline_y = row_top + 11.0f;
-        draw_list->AddLine(
-            ImVec2(timeline_left, timeline_y),
-            ImVec2(timeline_left + row_width, timeline_y),
-            IM_COL32(100, 104, 112, 255), 2.0f);
-
-        for (const pmg::ContactInterval& contact :
-             pmg_examples_[index].contact_intervals) {
-            const float x0 = timeline_left +
-                contact.StrikePhase(pmg_examples_[index].clip.NumFrames()) * row_width;
-            const float x1 = timeline_left +
-                contact.LiftPhase(pmg_examples_[index].clip.NumFrames()) * row_width;
-            draw_list->AddRectFilled(
-                ImVec2(x0, timeline_y - 5.0f),
-                ImVec2(std::max(x0 + 1.0f, x1), timeline_y + 5.0f),
-                IM_COL32(72, 165, 105, 150), 2.0f);
-        }
-
-        const float example_phase =
-            has_warps ? warps[index].Evaluate(canonical_phase) : canonical_phase;
-        DrawPhaseMarker(
-            draw_list, example_phase, timeline_left, timeline_y - 6.0f,
-            row_width, 12.0f, IM_COL32(80, 205, 255, 255));
-
-        if (has_warps) {
-            for (const float anchor : warps[index].InteriorToPhases()) {
-                const float x = timeline_left + anchor * row_width;
-                draw_list->AddCircleFilled(
-                    ImVec2(x, timeline_y), 2.5f,
-                    IM_COL32(240, 185, 70, 255));
-            }
-        }
-    }
-
-    const float total_height =
-        static_cast<float>(pmg_examples_.size()) * kPhaseRowHeight;
-    ImGui::InvisibleButton(
-        "##phase_timeline",
-        ImVec2(label_width + row_width, total_height));
-    ImGui::TextDisabled(
-        "blue = current phase   green = detected contact   gold = registration anchor");
-    ImGui::Text("Canonical phase %.3f", canonical_phase);
 }
 
 // --- Distance Grid heatmap (transition visualization) ----------------------

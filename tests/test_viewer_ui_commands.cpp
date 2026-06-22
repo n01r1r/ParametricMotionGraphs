@@ -72,6 +72,34 @@ void TestInputCommandsUpdateSnapshot() {
     assert(state.next_sample_parameter == parameter.values);
 }
 
+void TestMotionSpaceViewCommandsUpdateSnapshot() {
+    pmgviewer::PmgViewerWorkspace workspace;
+    workspace.ApplyUiCommands({
+        Command(pmgviewer::ViewerUiCommandType::SetMotionSpaceDimension, 3),
+        Command(pmgviewer::ViewerUiCommandType::SetMotionSpaceViewAxis, 99),
+        Command(pmgviewer::ViewerUiCommandType::SetMotionSpacePreviewInPlace, 1),
+    });
+
+    const pmgviewer::ViewerUiState state = workspace.MakeUiState();
+    assert(state.motion_space_view_axis == 2);
+    assert(state.motion_space_preview_in_place);
+}
+
+void TestInvalidMotionSampleCommandRejected() {
+    pmgviewer::PmgViewerWorkspace workspace;
+    pmgviewer::ViewerUiCommand command =
+        Command(pmgviewer::ViewerUiCommandType::SetMotionSampleParameter, 0);
+    command.values = {1.0f};
+
+    bool threw = false;
+    try {
+        workspace.ApplyUiCommand(command);
+    } catch (const std::out_of_range&) {
+        threw = true;
+    }
+    assert(threw);
+}
+
 }  // namespace
 
 int main() {
@@ -79,5 +107,7 @@ int main() {
     TestTogglePlaybackUpdatesUiState();
     TestInvalidPlaybackModeRejected();
     TestInputCommandsUpdateSnapshot();
+    TestMotionSpaceViewCommandsUpdateSnapshot();
+    TestInvalidMotionSampleCommandRejected();
     return 0;
 }
