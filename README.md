@@ -88,3 +88,6 @@ reproduction is not claimed.
 Start code exploration with [CONTEXT.md](CONTEXT.md). Supported specs:
 [specs/README.md](specs/README.md). Audit order and current decisions:
 [PHASE.md](PHASE.md).
+
+External CMU BVH gate: `pmg_cli audit-corpus --corpus-root /path/to/cmubvh --out outputs/cmu_audit`.
+See [docs/cmu_bvh_gap_closure.md](docs/cmu_bvh_gap_closure.md).

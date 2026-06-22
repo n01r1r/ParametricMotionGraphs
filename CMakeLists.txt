@@ -13,6 +13,7 @@ add_library(pmg_core
     src/BvhLoader.cpp
     src/CandidateWindowExtractor.cpp
     src/ContactDetection.cpp
+    src/CorpusAudit.cpp
     src/CyclicContinuity.cpp
     src/FootLocking.cpp
     src/ForwardKinematics.cpp
@@ -82,6 +83,10 @@ if(PMG_BUILD_TESTS)
     add_executable(test_bvh_loader tests/test_bvh_loader.cpp)
     target_link_libraries(test_bvh_loader PRIVATE pmg_core)
     add_test(NAME test_bvh_loader COMMAND test_bvh_loader)
+
+    add_executable(test_corpus_audit tests/test_corpus_audit.cpp)
+    target_link_libraries(test_corpus_audit PRIVATE pmg_core)
+    add_test(NAME test_corpus_audit COMMAND test_corpus_audit)
 
     add_executable(test_motion_distance tests/test_motion_distance.cpp)
     target_link_libraries(test_motion_distance PRIVATE pmg_core)

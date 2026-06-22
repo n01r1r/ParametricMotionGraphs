@@ -10,6 +10,7 @@ void PrintUsage() {
     std::cerr << "Usage:\n"
               << "  pmg_cli --bvh path/to/file.bvh\n"
               << "  pmg_cli --list-bvh-joints path/to/file.bvh\n"
+              << "  pmg_cli audit-corpus --corpus-root path --out output_dir [--max-files N]\n"
               << "  pmg_cli --extract-candidate-windows file.bvh --min-frames N --max-frames N\n"
               << "      --stride N --top-k K --output-md out.md --output-csv out.csv\n"
               << "      [--output-candidates out.pmg_candidates.json]\n"
