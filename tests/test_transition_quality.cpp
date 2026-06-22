@@ -1,4 +1,5 @@
 #include "pmg/TransitionQuality.h"
+#include "pmg/TransitionDiagnostics.h"
 
 #include <cassert>
 #include <cmath>
@@ -285,6 +286,15 @@ void TestStableContactDriftRejects() {
     assert(decision.reason == pmg::TransitionQualityGateReason::kContactDrift);
 }
 
+void TestTransitionMetricClassThresholds() {
+    pmg::PmgBuilderConfig config;
+    config.good_transition_threshold = 2.0f;
+    config.bad_transition_threshold = 4.0f;
+    assert(std::string(pmg::TransitionMetricClass(2.0f, config)) == "GOOD");
+    assert(std::string(pmg::TransitionMetricClass(3.0f, config)) == "NEUTRAL");
+    assert(std::string(pmg::TransitionMetricClass(4.0f, config)) == "BAD");
+}
+
 }  // namespace
 
 int main() {
@@ -300,5 +310,6 @@ int main() {
     TestFootHeightGateRejectsLargeDelta();
     TestSwingFootDriftDoesNotRejectWithoutContact();
     TestStableContactDriftRejects();
+    TestTransitionMetricClassThresholds();
     return 0;
 }

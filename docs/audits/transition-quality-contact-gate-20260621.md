@@ -72,6 +72,10 @@ Artifacts:
 
 ## Limitations
 
+- Transition lookup, target projection, exact metric/phase/frame reporting,
+  seam jumps, contact quality, and quality-gate policy now live behind the
+  `TransitionDiagnostics` domain module. Probe and acceptance-audit CLI paths
+  are adapters; CSV/Markdown formatting remains in CLI code.
 - Gate evaluates reconstructed smoothstep transition windows from artifact
   clips; it does not prove perceptual quality beyond sampled cases.
 - Core `RuntimeController` / viewer scheduling is unchanged.

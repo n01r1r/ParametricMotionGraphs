@@ -33,6 +33,7 @@ add_library(pmg_core
     src/RuntimeController.cpp
     src/SkeletonCompatibility.cpp
     src/TimeWarp.cpp
+    src/TransitionDiagnostics.cpp
     src/TransitionQuality.cpp
     src/TransitionWindow.cpp
 )

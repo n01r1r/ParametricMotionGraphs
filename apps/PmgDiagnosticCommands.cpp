@@ -17,6 +17,7 @@
 #include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
 #include "pmg/TransitionQuality.h"
+#include "pmg/TransitionDiagnostics.h"
 
 #include <algorithm>
 #include <array>
@@ -2491,137 +2492,6 @@ float VelocityJumpAtTransition(
     return HorizontalLength(delta);
 }
 
-struct TransitionContactJoints {
-    int left = -1;
-    int right = -1;
-    int min_contact_frames = 1;
-};
-
-TransitionContactJoints ResolveTransitionContactJoints(
-    const pmg::BuiltPmgArtifact& artifact,
-    const std::string& node_name,
-    const pmg::PmgBuilderConfig& config) {
-    TransitionContactJoints result;
-    const std::vector<int>& metric_joints =
-        config.transition_metric.contact_joint_indices;
-    if (!metric_joints.empty()) result.left = metric_joints[0];
-    if (metric_joints.size() > 1) result.right = metric_joints[1];
-
-    const auto registration = std::find_if(
-        artifact.metadata.node_registrations.begin(),
-        artifact.metadata.node_registrations.end(),
-        [&](const auto& value) { return value.node_name == node_name; });
-    if (registration != artifact.metadata.node_registrations.end()) {
-        result.min_contact_frames = registration->min_contact_frames;
-        for (const std::string& name : registration->contact_joints) {
-            const int joint = ResolveJointIndex(artifact.skeleton, name);
-            std::string lower = name;
-            std::transform(lower.begin(), lower.end(), lower.begin(),
-                           [](unsigned char c) {
-                               return static_cast<char>(std::tolower(c));
-                           });
-            if (lower.find("left") != std::string::npos) result.left = joint;
-            if (lower.find("right") != std::string::npos) result.right = joint;
-        }
-    }
-    if (result.left < 0) {
-        result.left = ResolveJointIndex(artifact.skeleton, "LeftAnkle");
-    }
-    if (result.right < 0) {
-        result.right = ResolveJointIndex(artifact.skeleton, "RightAnkle");
-    }
-    return result;
-}
-
-pmg::TransitionQualityRecord MeasureExactTransitionQuality(
-    const pmg::BuiltPmgArtifact& artifact,
-    const pmg::PmgNode& source_node,
-    const pmg::PmgNode& target_node,
-    const pmg::PmgBuilderConfig& config,
-    const pmg::ParameterVector& source_parameter,
-    const pmg::ParameterVector& effective_target_parameter,
-    const pmg::OptimalTransition& transition,
-    int frames_before,
-    int frames_after) {
-    if (frames_before < 1 || frames_after < 1) {
-        throw std::runtime_error(
-            "transition quality probe requires positive before/after frames");
-    }
-    const pmg::MotionClip source_clip = source_node.motion_space.GenerateClip(
-        source_parameter, artifact.metadata.frames_per_second);
-    const pmg::MotionClip target_clip = target_node.motion_space.GenerateClip(
-        effective_target_parameter, artifact.metadata.frames_per_second);
-
-    std::vector<pmg::Pose> poses;
-    poses.reserve(static_cast<std::size_t>(frames_before + frames_after + 1));
-    const bool continuous_self = &source_node == &target_node &&
-        source_parameter == effective_target_parameter;
-    if (continuous_self) {
-        for (int offset = -frames_before; offset <= frames_after; ++offset) {
-            const int frame = std::clamp(
-                transition.source_frame + offset, 0, source_clip.NumFrames() - 1);
-            poses.push_back(source_clip.frames[static_cast<std::size_t>(frame)]);
-        }
-    } else {
-        const int blend_frames = config.distance_grid.window_size;
-        const int blend_first_offset = -blend_frames / 2;
-        const int blend_last_offset =
-            blend_first_offset + blend_frames - 1;
-        for (int offset = -frames_before; offset <= frames_after; ++offset) {
-            const int source_frame = std::clamp(
-                transition.source_frame + offset, 0, source_clip.NumFrames() - 1);
-            const int target_frame = std::clamp(
-                transition.target_frame + offset, 0, target_clip.NumFrames() - 1);
-            const pmg::Pose aligned_target = transition.alignment.Apply(
-                target_clip.frames[static_cast<std::size_t>(target_frame)]);
-            if (offset < blend_first_offset) {
-                poses.push_back(
-                    source_clip.frames[static_cast<std::size_t>(source_frame)]);
-            } else if (offset > blend_last_offset) {
-                poses.push_back(aligned_target);
-            } else {
-                const float linear_alpha = blend_frames == 1
-                    ? 1.0f
-                    : static_cast<float>(offset - blend_first_offset) /
-                          static_cast<float>(blend_frames - 1);
-                const float alpha = linear_alpha * linear_alpha *
-                                    (3.0f - 2.0f * linear_alpha);
-                poses.push_back(pmg::BlendPose(
-                    source_clip.frames[static_cast<std::size_t>(source_frame)],
-                    aligned_target, alpha));
-            }
-        }
-    }
-
-    const TransitionContactJoints joints = ResolveTransitionContactJoints(
-        artifact, source_node.name, config);
-    std::vector<int> contact_joints;
-    if (joints.left >= 0) contact_joints.push_back(joints.left);
-    if (joints.right >= 0 && joints.right != joints.left) {
-        contact_joints.push_back(joints.right);
-    }
-
-    pmg::TransitionQualityContext context;
-    context.frames_per_second = artifact.metadata.frames_per_second;
-    context.transition_distance = transition.distance;
-    context.left_foot_joint = joints.left;
-    context.right_foot_joint = joints.right;
-    if (!contact_joints.empty()) {
-        pmg::MotionClip quality_clip;
-        quality_clip.frames_per_second = artifact.metadata.frames_per_second;
-        quality_clip.frames = poses;
-        context.contact_settings = pmg::EstimateContactSettings(
-            artifact.skeleton, quality_clip, contact_joints);
-        context.contact_settings->min_contact_frames = 1;
-    }
-
-    pmg::TransitionQualityConfig quality_config;
-    quality_config.frames_before = frames_before;
-    quality_config.frames_after = frames_after;
-    return pmg::MeasureTransitionQuality(
-        artifact.skeleton, poses, frames_before, context, quality_config);
-}
-
 int ResolveNodeIndex(
     const pmg::ParametricMotionGraph& graph,
     const std::string& node_name) {
@@ -3073,54 +2943,10 @@ struct TransitionMontageAuditData {
     std::string conclusion;
 };
 
-struct TransitionAcceptanceConsistencyRow {
-    pmg::ParameterVector source_parameter;
-    pmg::ParameterVector requested_target_parameter;
-    pmg::ParameterVector effective_target_parameter;
-    pmg::ParameterAabb interpolated_target_box;
-    bool accepted_by_box = false;
-    float transition_distance = 0.0f;
-    std::string metric_class;
-    bool acceptance_violation = false;
-    float distance_over_tbad = 0.0f;
-    bool source_coverage_available = false;
-    float source_coverage = 0.0f;
-    float source_phase = 0.0f;
-    int source_frame = 0;
-    float target_phase = 0.0f;
-    int target_frame = 0;
-    float root_jump = 0.0f;
-    float heading_jump = 0.0f;
-    float velocity_jump = 0.0f;
-    std::optional<pmg::TransitionQualityRecord> quality;
-    bool quality_gate_accepts = false;
-    std::string quality_reject_reason = "not_evaluated";
-    std::string nearest_source_anchor_label;
-    std::string nearest_target_anchor_label;
-    std::string nearest_good_evidence;
-    std::string nearest_bad_evidence;
-    std::string overreach_origin;
-    bool jog_walk_pair = false;
-    std::string notes;
-};
-
-struct TransitionAcceptanceConsistencyAuditData {
-    std::string source_node;
-    std::string target_node;
-    pmg::PmgBuilderConfig config;
-    std::vector<TransitionAcceptanceConsistencyRow> rows;
-    int accepted_bad_count = 0;
-    int near_threshold_accepted_count = 0;
-    int accepted_bad_after_quality_gate = 0;
-    int accepted_near_threshold_after_quality_gate = 0;
-    int box_accepted_quality_rejected = 0;
-    std::map<std::string, int> quality_reject_reasons;
-    int jog_walk_row_count = 0;
-    int shrinkage_row_count = 0;
-    bool known_bad_case_found = false;
-    std::string consistency_conclusion;
-    std::string root_cause_conclusion;
-};
+using TransitionAcceptanceConsistencyRow =
+    pmg::TransitionAcceptanceAuditRow;
+using TransitionAcceptanceConsistencyAuditData =
+    pmg::TransitionAcceptanceAuditSummary;
 
 constexpr float kTransitionMontageAnchorTolerance = 1.0e-5f;
 constexpr float kTransitionMontageProjectedNoteTolerance = 1.0e-4f;
@@ -4010,7 +3836,7 @@ TransitionAcceptanceConsistencyRow BuildAcceptanceConsistencyRow(
         source_clip, target_clip, candidate.transition.alignment,
         candidate.transition.source_frame, candidate.transition.target_frame);
     if (candidate.accepted) {
-        row.quality = MeasureExactTransitionQuality(
+        row.quality = pmg::MeasureExactTransitionQuality(
             artifact, source_node, target_node, config,
             candidate.source_parameter, candidate.effective_target_parameter,
             candidate.transition, 3, 3);
@@ -4019,10 +3845,9 @@ TransitionAcceptanceConsistencyRow BuildAcceptanceConsistencyRow(
         const bool no_runtime_transition = &source_node == &target_node &&
             candidate.source_parameter == candidate.effective_target_parameter;
         row.quality_gate_accepts = no_runtime_transition || decision.accepted;
-        row.quality_reject_reason =
-            no_runtime_transition
-                ? "none"
-                : pmg::TransitionQualityGateReasonName(decision.reason);
+        row.quality_reject_reason = no_runtime_transition
+            ? "none"
+            : pmg::TransitionQualityGateReasonName(decision.reason);
     }
     row.nearest_source_anchor_label =
         source_support != nullptr
@@ -4450,22 +4275,7 @@ void WriteTransitionAcceptanceConsistencyMarkdown(
     md << "- Markdown: `" << options.output_md << "`\n";
 }
 
-struct TransitionProbeResult {
-    pmg::ParameterVector source_parameter;
-    pmg::ParameterVector requested_target_parameter;
-    pmg::ParameterVector effective_target_parameter;
-    pmg::ParameterAabb target_box;
-    bool accepted_by_box = false;
-    pmg::OptimalTransition transition;
-    std::string metric_class;
-    float root_jump = 0.0f;
-    float heading_jump = 0.0f;
-    float velocity_jump = 0.0f;
-    pmg::TransitionQualityRecord quality;
-    pmg::TransitionQualityGateDecision quality_decision;
-    bool final_accepted = false;
-    std::string reject_reason;
-};
+using TransitionProbeResult = pmg::TransitionProbeResult;
 
 bool ContactMismatch(
     pmg::TransitionContactState before,
@@ -4477,73 +4287,15 @@ bool ContactMismatch(
 TransitionProbeResult BuildTransitionProbe(
     const pmg::BuiltPmgArtifact& artifact,
     const TransitionProbeOptions& options) {
-    ReachableRegionAuditOptions edge_options;
-    edge_options.source_node = options.source_node;
-    edge_options.target_node = options.target_node;
-    std::string source_name;
-    std::string target_name;
-    const int edge_index = ResolveEdgeIndex(
-        artifact, edge_options, source_name, target_name);
-    const pmg::PmgEdge& edge = artifact.graph.Edge(edge_index);
-    const pmg::PmgNode& source_node = artifact.graph.Node(edge.source_node);
-    const pmg::PmgNode& target_node = artifact.graph.Node(edge.target_node);
-    const pmg::EdgeBuildMetadata* metadata =
-        FindEdgeBuildMetadata(artifact, source_name, target_name);
-    if (metadata == nullptr) {
-        throw std::runtime_error("--probe-transition: missing edge build metadata");
-    }
-    const auto lookup = edge.LookupInterpolated(
-        options.source_parameter, options.target_parameter);
-    if (!lookup.has_value()) {
-        throw std::runtime_error("--probe-transition: edge lookup returned no transition");
-    }
-
-    TransitionProbeResult result;
-    result.source_parameter = options.source_parameter;
-    result.requested_target_parameter = options.target_parameter;
-    result.target_box = lookup->target_parameter_box;
-    result.accepted_by_box = result.target_box.Contains(options.target_parameter);
-    result.effective_target_parameter = result.target_box.Clamp(options.target_parameter);
-    if (target_node.motion_space.HasExplicitParameterSupport()) {
-        result.effective_target_parameter =
-            target_node.motion_space.ExplicitSupport()->ProjectInside(
-                options.target_parameter, result.target_box);
-    }
-
-    const pmg::MotionClip source_clip = source_node.motion_space.GenerateClip(
-        options.source_parameter, artifact.metadata.frames_per_second);
-    const pmg::MotionClip target_clip = target_node.motion_space.GenerateClip(
-        result.effective_target_parameter, artifact.metadata.frames_per_second);
-    result.transition = EvaluateConfiguredTransition(
-        artifact.skeleton, source_clip, target_clip, metadata->config);
-    result.metric_class = PoseSeamClass(
-        result.transition.distance, metadata->config);
-    const pmg::Pose& source_pose = source_clip.frames[
-        static_cast<std::size_t>(result.transition.source_frame)];
-    const pmg::Pose aligned_target_pose = result.transition.alignment.Apply(
-        target_clip.frames[static_cast<std::size_t>(result.transition.target_frame)]);
-    result.root_jump = RootJumpAtTransition(source_pose, aligned_target_pose);
-    result.heading_jump = HeadingJumpAtTransition(source_pose, aligned_target_pose);
-    result.velocity_jump = VelocityJumpAtTransition(
-        source_clip, target_clip, result.transition.alignment,
-        result.transition.source_frame, result.transition.target_frame);
-    result.quality = MeasureExactTransitionQuality(
-        artifact, source_node, target_node, metadata->config,
-        options.source_parameter, result.effective_target_parameter,
-        result.transition, options.frames_before, options.frames_after);
-    result.quality_decision = pmg::EvaluateTransitionQualityGate(
-        result.quality, options.quality_gate);
-    if (&source_node == &target_node &&
-        options.source_parameter == result.effective_target_parameter) {
-        // RuntimeController does not schedule an exact same-node/parameter move.
-        result.quality_decision = {};
-    }
-    result.final_accepted = result.accepted_by_box && result.quality_decision.accepted;
-    result.reject_reason = !result.accepted_by_box
-                               ? "outside_target_box"
-                               : pmg::TransitionQualityGateReasonName(
-                                     result.quality_decision.reason);
-    return result;
+    pmg::TransitionProbeRequest request;
+    request.source_node = options.source_node;
+    request.target_node = options.target_node;
+    request.source_parameter = options.source_parameter;
+    request.requested_target_parameter = options.target_parameter;
+    request.frames_before = options.frames_before;
+    request.frames_after = options.frames_after;
+    request.quality_gate = options.quality_gate;
+    return pmg::ProbeTransition(artifact, request);
 }
 
 void WriteTransitionProbeCsv(
