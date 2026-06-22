@@ -11,6 +11,7 @@ option(PMG_BUILD_VIEWER "Build the OpenGL BVH viewer (pulls GLFW/GLEW/GLM/ImGui)
 add_library(pmg_core
     src/AlignmentStrategy.cpp
     src/BvhLoader.cpp
+    src/CandidateWindowExtractor.cpp
     src/ContactDetection.cpp
     src/CyclicContinuity.cpp
     src/FootLocking.cpp
@@ -85,6 +86,12 @@ if(PMG_BUILD_TESTS)
     add_executable(test_motion_distance tests/test_motion_distance.cpp)
     target_link_libraries(test_motion_distance PRIVATE pmg_core)
     add_test(NAME test_motion_distance COMMAND test_motion_distance)
+
+    add_executable(test_candidate_window_extractor tests/test_candidate_window_extractor.cpp)
+    target_link_libraries(test_candidate_window_extractor PRIVATE pmg_core)
+    target_compile_definitions(test_candidate_window_extractor PRIVATE
+        PMG_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME test_candidate_window_extractor COMMAND test_candidate_window_extractor)
 
     add_executable(test_distance_grid tests/test_distance_grid.cpp)
     target_link_libraries(test_distance_grid PRIVATE pmg_core)
