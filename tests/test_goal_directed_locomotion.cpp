@@ -193,5 +193,15 @@ int main() {
     // Cruise (far) commands a faster speed-axis value than arrival (near).
     assert(far_request.desired_parameter[1] >
            near_request.desired_parameter[1] + 0.05f);
+
+    const pmg::RuntimeControlRequest direct_request =
+        steering2d.RequestForDirectionSpeed(pose2d, pmg::kPi, 1.0e6f);
+    assert(direct_request.desired_parameter.size() == 2);
+    assert(graph2d.Node(node2d).motion_space.ProjectToSupport(
+               direct_request.desired_parameter) ==
+           direct_request.desired_parameter);
+    const pmg::RuntimeControlRequest repeated_request =
+        steering2d.RequestForDirectionSpeed(pose2d, pmg::kPi, 1.0e6f);
+    assert(direct_request.desired_parameter == repeated_request.desired_parameter);
     return 0;
 }

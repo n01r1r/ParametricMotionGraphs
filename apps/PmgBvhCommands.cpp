@@ -2,6 +2,7 @@
 
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
+#include "pmg/CandidateWindowExtractor.h"
 #include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
@@ -30,6 +31,71 @@
 #include <vector>
 
 namespace {
+
+int ParsePositiveInt(const std::string& text, const char* name) {
+    std::size_t consumed = 0;
+    const int value = std::stoi(text, &consumed);
+    if (consumed != text.size() || value < 1) {
+        throw std::runtime_error(std::string(name) + " must be a positive integer");
+    }
+    return value;
+}
+
+int ExtractCandidateWindows(int argc, char** argv) {
+    if (argc < 4) {
+        throw std::runtime_error("usage: pmg_cli --extract-candidate-windows file.bvh --min-frames N --max-frames N --stride N --top-k K --output-md path --output-csv path [--output-candidates path]");
+    }
+    const std::string source_path = argv[2];
+    pmg::CandidateWindowExtractionConfig config;
+    std::filesystem::path markdown_path;
+    std::filesystem::path csv_path;
+    std::filesystem::path candidates_path;
+    for (int index = 3; index < argc; index += 2) {
+        if (index + 1 >= argc) throw std::runtime_error("missing value for option: " + std::string(argv[index]));
+        const std::string option = argv[index];
+        const std::string value = argv[index + 1];
+        if (option == "--min-frames") config.min_length_frames = ParsePositiveInt(value, "min-frames");
+        else if (option == "--max-frames") config.max_length_frames = ParsePositiveInt(value, "max-frames");
+        else if (option == "--stride") config.stride_frames = ParsePositiveInt(value, "stride");
+        else if (option == "--top-k") config.top_k = ParsePositiveInt(value, "top-k");
+        else if (option == "--output-md") markdown_path = value;
+        else if (option == "--output-csv") csv_path = value;
+        else if (option == "--output-candidates") candidates_path = value;
+        else throw std::runtime_error("unknown candidate extraction option: " + option);
+    }
+    if (markdown_path.empty() || csv_path.empty()) {
+        throw std::runtime_error("candidate extraction requires --output-md and --output-csv");
+    }
+
+    const pmg::BvhData data = pmg::BvhLoader::Load(source_path);
+    const auto candidates = pmg::ExtractCandidateMotionWindows(data.skeleton, data.clip, config);
+    for (const auto& path : {markdown_path, csv_path, candidates_path}) {
+        if (path.empty()) continue;
+        if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
+    }
+    std::ofstream csv(csv_path);
+    std::ofstream markdown(markdown_path);
+    if (!csv || !markdown) throw std::runtime_error("failed to open candidate extraction output");
+    if (!candidates_path.empty()) {
+        std::ofstream candidate_output(candidates_path);
+        if (!candidate_output) throw std::runtime_error("failed to open candidate JSON output");
+        pmg::WriteCandidateWindowsJson(candidate_output, source_path, config, candidates);
+    }
+    csv << "source,start_frame,end_frame,duration_seconds,score,root_displacement,heading_delta_radians,reason\n";
+    markdown << "# Candidate motion windows\n\n"
+             << "- Source BVH: `" << source_path << "`\n"
+             << "- Native frames: " << data.clip.NumFrames() << "\n"
+             << "- FPS: " << data.clip.frames_per_second << "\n\n";
+    if (candidates.empty()) markdown << "> Warning: no plausible candidate found.\n";
+    else markdown << "| Start | End | Duration (s) | Score | Root displacement | Heading delta (rad) | Reason |\n|---:|---:|---:|---:|---:|---:|---|\n";
+    for (const auto& candidate : candidates) {
+        const float duration = static_cast<float>(candidate.end_frame - candidate.start_frame + 1) / data.clip.frames_per_second;
+        csv << '"' << source_path << "\"," << candidate.start_frame << ',' << candidate.end_frame << ',' << duration << ',' << candidate.score << ',' << candidate.root_displacement << ',' << candidate.heading_delta << ",\"" << candidate.reason << "\"\n";
+        markdown << "| " << candidate.start_frame << " | " << candidate.end_frame << " | " << duration << " | " << candidate.score << " | " << candidate.root_displacement << " | " << candidate.heading_delta << " | " << candidate.reason << " |\n";
+    }
+    std::cout << "wrote " << candidates.size() << " candidate windows\n";
+    return 0;
+}
 
 std::string LowercaseCopy(std::string text) {
     std::transform(
@@ -400,6 +466,9 @@ std::optional<int> TryRunBvhCommand(int argc, char** argv) {
     }
     if (command == "--list-bvh-joints" && argc == 3) {
         return ListBvhJoints(argv[2]);
+    }
+    if (command == "--extract-candidate-windows") {
+        return ExtractCandidateWindows(argc, argv);
     }
     if (command == "--inspect-contacts" && argc == 4) {
         return InspectContacts(argv[2], argv[3]);

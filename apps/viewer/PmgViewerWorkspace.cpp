@@ -321,6 +321,19 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
         }
     }
 
+    if (path_following_active_ && GraphRuntimeActive()) {
+        constexpr glm::vec3 kPathColor(0.95f, 0.55f, 0.15f);
+        const float y = 0.08f * display_scale_;
+        for (std::size_t index = 1; index < path_waypoints_.size(); ++index) {
+            const glm::vec2& start = path_waypoints_[index - 1];
+            const glm::vec2& end = path_waypoints_[index];
+            scene_.diagnostic_lines.push_back({
+                {start.x * display_scale_, y, start.y * display_scale_},
+                {end.x * display_scale_, y, end.y * display_scale_},
+                kPathColor, 0.04f * display_scale_});
+        }
+    }
+
     if (goto_active_ && GraphRuntimeActive()) {
         const glm::vec3 base(goto_target_.x * display_scale_, 0.0f,
                              goto_target_.y * display_scale_);
@@ -566,7 +579,17 @@ void PmgViewerWorkspace::UpdateGotoSteering(const pmg::Pose& pose) {
     const float dz = goto_target_.y - pose.root_position.z;
     const float distance = std::sqrt(dx * dx + dz * dz);
     if (distance <= goto_tolerance_) {
+        if (path_following_active_ &&
+            path_waypoint_index_ + 1 < path_waypoints_.size()) {
+            ++path_waypoint_index_;
+            goto_target_ = path_waypoints_[path_waypoint_index_];
+            goto_status_ = "Following path waypoint " +
+                std::to_string(path_waypoint_index_ + 1) + "/" +
+                std::to_string(path_waypoints_.size()) + ".";
+            return;
+        }
         ResetGotoState("Target reached.");
+        path_following_active_ = false;
         return;
     }
     pmg::GoalRequest goal;
@@ -577,6 +600,35 @@ void PmgViewerWorkspace::UpdateGotoSteering(const pmg::Pose& pose) {
     // axis 0. graph_desired_parameter_ mirrors axis 0 for the 1-D slider UI.
     goto_desired_parameter_ =
         steering_->RequestForPose(pose, goal).desired_parameter;
+    graph_desired_parameter_ = goto_desired_parameter_.front();
+}
+
+void PmgViewerWorkspace::SetDirectSteeringInput(float turn, float speed) {
+    direct_steering_turn_input_ = std::clamp(turn, -1.0f, 1.0f);
+    direct_steering_speed_input_ = std::clamp(speed, -1.0f, 1.0f);
+}
+
+void PmgViewerWorkspace::UpdateDirectSteering(const pmg::Pose& pose) {
+    if (!steering_.has_value() ||
+        (direct_steering_turn_input_ == 0.0f &&
+         direct_steering_speed_input_ == 0.0f)) {
+        return;
+    }
+    constexpr float kMaximumHeadingOffsetRadians = pmg::kPi * 0.5f;
+    const float desired_heading = pmg::PoseFacingYaw(pose) +
+        direct_steering_turn_input_ * kMaximumHeadingOffsetRadians;
+    const pmg::SteeringCalibration& calibration = steering_->Calibration();
+    std::optional<float> desired_speed;
+    for (const pmg::SteeringAxis& axis : calibration.axes) {
+        if (axis.metric == pmg::ParameterMetric::kTravelSpeed) {
+            const float speed_fraction =
+                0.5f * (direct_steering_speed_input_ + 1.0f);
+            desired_speed = axis.lowest + speed_fraction * (axis.highest - axis.lowest);
+            break;
+        }
+    }
+    goto_desired_parameter_ = steering_->RequestForDirectionSpeed(
+        pose, desired_heading, desired_speed).desired_parameter;
     graph_desired_parameter_ = goto_desired_parameter_.front();
 }
 
@@ -621,8 +673,17 @@ bool PmgViewerWorkspace::HandleGroundClick(const glm::vec3& ray_origin,
     }
     const glm::vec3 hit = ray_origin + t * ray_direction;
     // The scene is rendered at display scale; steering runs in native units.
-    PlaceGotoTarget(
-        glm::vec2(hit.x, hit.z) / std::max(display_scale_, kEpsilon));
+    const glm::vec2 target =
+        glm::vec2(hit.x, hit.z) / std::max(display_scale_, kEpsilon);
+    if (path_following_active_) {
+        path_waypoints_.push_back(target);
+        if (path_waypoints_.size() == 1) {
+            path_waypoint_index_ = 0;
+            PlaceGotoTarget(target);
+        }
+    } else {
+        PlaceGotoTarget(target);
+    }
     return steering_.has_value();
 }
 
@@ -634,11 +695,14 @@ void PmgViewerWorkspace::Update(float delta_seconds) {
         if (playing_) {
             if (goto_active_ && steering_.has_value()) {
                 UpdateGotoSteering(runtime.current_pose.value_or(pmg::Pose{}));
+            } else if (direct_steering_active_ && steering_.has_value()) {
+                UpdateDirectSteering(runtime.current_pose.value_or(pmg::Pose{}));
             }
             ViewerRuntimeRequest request;
             request.desired_node = graph_desired_node_;
             request.desired_parameter_raw =
-                (goto_active_ && !goto_desired_parameter_.empty())
+                ((goto_active_ || direct_steering_active_) &&
+                 !goto_desired_parameter_.empty())
                     ? goto_desired_parameter_
                     : DesiredParameterForNode(graph_desired_node_);
             runtime_.Update(delta_seconds * playback_speed_, request);

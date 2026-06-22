@@ -11,6 +11,7 @@ option(PMG_BUILD_VIEWER "Build the OpenGL BVH viewer (pulls GLFW/GLEW/GLM/ImGui)
 add_library(pmg_core
     src/AlignmentStrategy.cpp
     src/BvhLoader.cpp
+    src/CandidateWindowExtractor.cpp
     src/ContactDetection.cpp
     src/CyclicContinuity.cpp
     src/FootLocking.cpp
@@ -33,6 +34,7 @@ add_library(pmg_core
     src/RuntimeController.cpp
     src/SkeletonCompatibility.cpp
     src/TimeWarp.cpp
+    src/TransitionDiagnostics.cpp
     src/TransitionQuality.cpp
     src/TransitionWindow.cpp
 )
@@ -84,6 +86,12 @@ if(PMG_BUILD_TESTS)
     add_executable(test_motion_distance tests/test_motion_distance.cpp)
     target_link_libraries(test_motion_distance PRIVATE pmg_core)
     add_test(NAME test_motion_distance COMMAND test_motion_distance)
+
+    add_executable(test_candidate_window_extractor tests/test_candidate_window_extractor.cpp)
+    target_link_libraries(test_candidate_window_extractor PRIVATE pmg_core)
+    target_compile_definitions(test_candidate_window_extractor PRIVATE
+        PMG_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME test_candidate_window_extractor COMMAND test_candidate_window_extractor)
 
     add_executable(test_distance_grid tests/test_distance_grid.cpp)
     target_link_libraries(test_distance_grid PRIVATE pmg_core)
@@ -179,16 +187,71 @@ if(PMG_BUILD_TESTS)
     # for the final clean repository.
     add_test(NAME cli_validate_demo_walk_2d
         COMMAND pmg_cli --validate-graph-spec
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec)
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec)
 
     add_test(NAME cli_build_artifact_walk_2d
         COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg)
+
+    add_test(NAME cli_audit_transition_montage_walk_2d
+        COMMAND pmg_cli --audit-transition-montage
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --output-md
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/transition_montage_report.md
+            --output-dir
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/transition_montages)
+    set_tests_properties(cli_audit_transition_montage_walk_2d PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
+    add_test(NAME cli_audit_contact_transitions_walk_2d
+        COMMAND pmg_cli --audit-contact-transitions
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --output-csv
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/contact_transition_audit.csv
+            --output-md
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/contact_transition_audit.md)
+    set_tests_properties(cli_audit_contact_transitions_walk_2d PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
+    add_test(NAME cli_audit_transition_acceptance_consistency_walk_2d
+        COMMAND pmg_cli --audit-transition-acceptance-consistency
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --output-csv
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/transition_acceptance_consistency.csv
+            --output-md
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/transition_acceptance_consistency.md)
+    set_tests_properties(
+        cli_audit_transition_acceptance_consistency_walk_2d PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
+    add_test(NAME cli_probe_transition_fail_vis_001
+        COMMAND pmg_cli --probe-transition
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --source-param -0.04 0.8 --target-param 0.5 0
+            --frames-before 3 --frames-after 3 --expect-decision reject)
+    set_tests_properties(cli_probe_transition_fail_vis_001 PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
+    add_test(NAME cli_probe_transition_self_good
+        COMMAND pmg_cli --probe-transition
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --source-param 0 1 --target-param 0 1
+            --frames-before 3 --frames-after 3 --expect-decision accept)
+    set_tests_properties(cli_probe_transition_self_good PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
+
+    add_test(NAME cli_probe_transition_outside_projection
+        COMMAND pmg_cli --probe-transition
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            --source-param 0 1 --target-param 0.5 0
+            --frames-before 3 --frames-after 3 --expect-decision reject)
+    set_tests_properties(cli_probe_transition_outside_projection PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
 
     add_test(NAME cli_goto_walk_2d
         COMMAND pmg_cli --goto
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangle.pmg_spec 10 10
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec 10 10
             --seconds 20
             --max-pop-ratio 8.0)
 

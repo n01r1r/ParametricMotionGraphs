@@ -241,6 +241,12 @@ pmg::PmgBuilderConfig ParseBuilderConfigOptions(
             config.source_sample_count = std::stoi(require_value("--source-samples"));
         } else if (option == "--target-samples") {
             config.target_sample_count = std::stoi(require_value("--target-samples"));
+        } else if (option == "--blend-frames") {
+            config.distance_grid.window_size =
+                std::stoi(require_value("--blend-frames"));
+            if (config.distance_grid.window_size <= 0) {
+                throw std::runtime_error("--blend-frames must be positive");
+            }
         } else if (option == "--seed") {
             config.seed = static_cast<unsigned int>(std::stoul(require_value("--seed")));
         } else {

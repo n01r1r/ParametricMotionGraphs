@@ -84,6 +84,10 @@ public:
     const SteeringCalibration& Calibration() const;
     RuntimeControlRequest RequestForPose(
         const Pose& world_pose, const GoalRequest& goal);
+    RuntimeControlRequest RequestForDirectionSpeed(
+        const Pose& world_pose,
+        float desired_heading_radians,
+        std::optional<float> desired_speed = std::nullopt) const;
     bool Reached(
         const Pose& world_pose,
         const GoalRequest& goal,

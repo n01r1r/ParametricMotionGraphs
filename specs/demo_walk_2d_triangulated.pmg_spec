@@ -23,4 +23,4 @@ expect walk_2d spanned_axes 2
 
 edge walk_2d walk_2d
 edge_phase_range walk_2d walk_2d 0.70 0.95 0.05 0.30
-edge_config walk_2d walk_2d 300 400 3 6 41
+edge_config walk_2d walk_2d 120 234 3 6 41

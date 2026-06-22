@@ -3,6 +3,11 @@
 BVH-based Parametric Motion Graph offline builder, runtime, CLI, and optional
 OpenGL viewer.
 
+This project implements the core PMG mechanism on a sparse, hand-authored,
+single-node walking motion space: offline sampled transition construction, V12
+artifact persistence, phase-gated runtime lookup, conservative reachable-box
+intersection, direct steering, and single-node path following.
+
 ## Current demo
 
 `specs/demo_walk_2d_triangulated.pmg_spec` defines one 2-D locomotion space,
@@ -60,10 +65,26 @@ as paper-equivalent without reporting its config.
 ## Known limitations
 
 - Demo support is sparse; missing 2-D corners are projected, not synthesized.
+- Current transition montage reports visible pops, and contact audit reports
+  common contact mismatch. The reachable-box intersection gate prevents the
+  measured accepted-BAD overreach case; visual/contact diagnostics remain
+  report-only.
+- Five-frame blending remains the demo default. Eight frames increased latency,
+  rejected more requests, and did not improve worst transition artifacts.
 - Builder may reject declared edges; all rejected edges make build fail.
 - Offline preparation still opens BVH filesystem paths.
 - Reader compatibility covers V2-V12; writer emits V12 only.
 - Viewer requires optional OpenGL dependencies enabled by `PMG_BUILD_VIEWER`.
 
+## Completion path
+
+Core paper mechanisms, direct steering, and single-node waypoint path following
+are implemented. A reproducible corpus audit found only one clear cyclic run
+candidate, so the required compatible second node—and therefore inter-node
+edges and graph-walk demo—remain blocked by source data. `PHASE.md` records the
+evidence and deferrals. Exact paper corpus, timing, graph-size, and visual-result
+reproduction is not claimed.
+
 Start code exploration with [CONTEXT.md](CONTEXT.md). Supported specs:
-[specs/README.md](specs/README.md).
+[specs/README.md](specs/README.md). Audit order and current decisions:
+[PHASE.md](PHASE.md).

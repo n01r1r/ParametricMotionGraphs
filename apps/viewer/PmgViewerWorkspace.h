@@ -65,6 +65,7 @@ public:
     // target there. Returns true when the click was consumed.
     bool HandleGroundClick(
         const glm::vec3& ray_origin, const glm::vec3& ray_direction) override;
+    void SetDirectSteeringInput(float turn, float speed) override;
 
     const RenderScene& Scene() const override { return scene_; }
 
@@ -187,6 +188,7 @@ private:
     // Goto steering delegates to the same core module as the CLI.
     void CalibrateSteering();
     void UpdateGotoSteering(const pmg::Pose& pose);
+    void UpdateDirectSteering(const pmg::Pose& pose);
     void ResetGotoState(const std::string& status = {});
     void ResetSteeringState(const std::string& status = {});
     void SetDesiredRuntimeNode(int node);
@@ -369,6 +371,12 @@ private:
     glm::vec2 goto_target_{0.0f, 0.0f};  // native units, ground plane (x, z)
     float goto_tolerance_ = 2.0f;        // native units; arrival radius
     std::string goto_status_;
+    bool direct_steering_active_ = false;
+    float direct_steering_turn_input_ = 0.0f;
+    float direct_steering_speed_input_ = 0.0f;
+    bool path_following_active_ = false;
+    std::vector<glm::vec2> path_waypoints_;
+    std::size_t path_waypoint_index_ = 0;
 
     float root_heading_radians_ = 0.0f;
     float actual_turn_rate_radians_per_second_ = 0.0f;

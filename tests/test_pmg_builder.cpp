@@ -103,6 +103,11 @@ bool SamplesEqual(const pmg::TransitionSample& a, const pmg::TransitionSample& b
 }  // namespace
 
 int main() {
+    // Canonical demo threshold decision must not drift from builder defaults.
+    const pmg::PmgBuilderConfig default_config;
+    assert(default_config.good_transition_threshold == 120.0f);
+    assert(default_config.bad_transition_threshold == 234.0f);
+
     const pmg::Skeleton skeleton = MakeSkeleton();
     const pmg::ParametricMotionSpace space = MakeSpace('X', 20.0f);
 

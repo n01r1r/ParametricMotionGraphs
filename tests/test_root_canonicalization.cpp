@@ -22,6 +22,12 @@ int main() {
     }
     const pmg::GraphSpec spec =
         pmg::LoadGraphSpec(spec_path.string());
+    assert(spec.edges.size() == 1);
+    assert(spec.edges[0].has_build_config);
+    assert(std::abs(spec.edges[0].build_config.good_transition_threshold -
+                    120.0f) < 1.0e-6f);
+    assert(std::abs(spec.edges[0].build_config.bad_transition_threshold -
+                    234.0f) < 1.0e-6f);
     const pmg::PreparedMotionSpaces prepared = pmg::PrepareMotionSpaces(spec);
     const pmg::PreparedMotionSpace& walk = prepared.Node("walk_2d");
 

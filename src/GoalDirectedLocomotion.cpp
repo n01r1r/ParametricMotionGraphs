@@ -357,6 +357,34 @@ RuntimeControlRequest GoalDirectedLocomotion::RequestForPose(
     return request;
 }
 
+RuntimeControlRequest GoalDirectedLocomotion::RequestForDirectionSpeed(
+    const Pose& world_pose,
+    float desired_heading_radians,
+    std::optional<float> desired_speed) const {
+    const float travel_heading = WrapAngleRadians(
+        PoseFacingYaw(world_pose) + calibration_.travel_heading_offset);
+    const float desired_rate =
+        WrapAngleRadians(desired_heading_radians - travel_heading) /
+        calibration_.cycle_seconds;
+
+    ParameterVector parameter = DomainMidpoint();
+    for (int axis = 0; axis < static_cast<int>(calibration_.axes.size()); ++axis) {
+        const ParameterMetric metric =
+            calibration_.axes[static_cast<std::size_t>(axis)].metric;
+        if (metric == ParameterMetric::kTurnRate) {
+            parameter[static_cast<std::size_t>(axis)] =
+                AxisValueForMetric(axis, desired_rate);
+        } else if (metric == ParameterMetric::kTravelSpeed) {
+            const SteeringAxis& speed_axis =
+                calibration_.axes[static_cast<std::size_t>(axis)];
+            parameter[static_cast<std::size_t>(axis)] = AxisValueForMetric(
+                axis, desired_speed.value_or(speed_axis.highest));
+        }
+    }
+    parameter = graph_.Node(node_index_).motion_space.ProjectToSupport(parameter);
+    return {node_index_, parameter};
+}
+
 bool GoalDirectedLocomotion::Reached(
     const Pose& world_pose,
     const GoalRequest& goal,

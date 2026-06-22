@@ -48,7 +48,43 @@ Paper symbol map:
 
 ## Current limits
 
+Implemented:
+
+- single-node `walk_2d` PMG;
+- triangulated 2-D support;
+- sampled self-edge construction;
+- conservative target-box intersection;
+- transition acceptance consistency gate;
+- direct steering;
+- single-node path following.
+
+Not implemented / limited:
+
+- full multi-node PMG;
+- paper dataset reproduction;
+- guaranteed visual transition quality;
+- contact-aware runtime rejection;
+- foot locking / IK as default policy.
+
 Sparse demo support requires projection. Edge construction is sampling-based
 and may reject edges. Offline preparation still knows BVH paths. Artifact writes
 are V12-only. Viewer is optional and OpenGL-dependent.
+
+Current animation-quality evidence is report-only: accepted transitions still
+include visible-pop cases, and contact mismatch is common. The 5-frame blend
+window remains selected over 8 frames because the longer window adds latency,
+reduces accepted reachability, and does not remove the measured artifacts. See
+`PHASE.md` and `build/blend_window_comparison.md`.
+
+Runtime reachable boxes now intersect positively weighted source-sample boxes.
+Canonical acceptance audit rejects 300/2,756 rows, preserves 89.1147% sampled
+coverage, and reports zero accepted transitions with `D >= TBAD`.
+
+Paper-faithfulness status: core node/edge construction, runtime lookup, direct
+steering, and single-node waypoint path following are implemented. The corpus
+audit found only one clear cyclic run candidate, so second-node, inter-node-edge,
+and graph-walk phases remain data-gated. Replay export, controller comparison,
+and foot locking remain deferred unless evidence makes
+them necessary. Exact reproduction of the paper's unavailable corpus and
+reported performance is outside the functional-reimplementation target.
 

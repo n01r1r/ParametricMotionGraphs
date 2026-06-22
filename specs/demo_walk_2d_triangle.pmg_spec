@@ -1,4 +1,5 @@
-# The primary demo uses a sparse 2D simplex support over three authored locomotion anchors. It does not claim full rectangular turn/speed control because the tight-jog corner clip is missing.
+# Legacy simplex fixture/demo over three authored locomotion anchors.
+# Canonical presentation and CTest demo: demo_walk_2d_triangulated.pmg_spec.
 # Demonstrates:
 # - a 2-D ParametricMotionSpace with measured metric calibration;
 # - the minimum three non-collinear examples needed for local 2-D lookup;
