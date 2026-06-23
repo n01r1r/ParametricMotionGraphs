@@ -3,10 +3,15 @@
 BVH-based Parametric Motion Graph offline builder, runtime, CLI, and optional
 OpenGL viewer.
 
-This project implements the core PMG mechanism on a sparse, hand-authored,
-single-node walking motion space: offline sampled transition construction, V12
-artifact persistence, phase-gated runtime lookup, conservative reachable-box
-intersection, direct steering, and single-node path following.
+This project implements the core PMG transition pipeline on a single-family,
+single-node, sparse walking motion space. It includes sampled transition-region
+construction, a Kovar-style transition metric, runtime lookup, cyclic-window
+cleanup, and target-directed steering (V12 artifact persistence, phase-gated
+lookup, conservative reachable-box intersection).
+
+It does **not** reproduce KG04 automatic motion-space construction, multi-node
+PMG examples, boxing graphs, or the full Section 5 paper results. It is a
+PMG-core demo, not a paper reproduction.
 
 ## Current demo
 
