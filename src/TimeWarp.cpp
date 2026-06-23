@@ -1,6 +1,7 @@
 #include "pmg/TimeWarp.h"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -19,6 +20,45 @@ void RequireStrictlyIncreasingInterior(
         }
         previous = phase;
     }
+}
+
+// Fritsch-Carlson monotone cubic Hermite tangents. Given strictly increasing
+// knots (x, y), returns dy/dx at each knot such that the cubic Hermite spline
+// through the knots is C1 and never overshoots, so a monotone mapping stays
+// monotone. See KG04 section 4.1 (strictly increasing timewarp spline).
+std::vector<float> ComputeMonotoneTangents(
+    const std::vector<float>& x, const std::vector<float>& y) {
+    const std::size_t n = x.size();
+    std::vector<float> secant(n > 0 ? n - 1 : 0, 0.0f);
+    for (std::size_t i = 0; i + 1 < n; ++i) {
+        secant[i] = (y[i + 1] - y[i]) / (x[i + 1] - x[i]);
+    }
+
+    std::vector<float> tangent(n, 0.0f);
+    tangent.front() = secant.front();
+    tangent.back() = secant.back();
+    for (std::size_t i = 1; i + 1 < n; ++i) {
+        tangent[i] = 0.5f * (secant[i - 1] + secant[i]);
+    }
+
+    // Clamp tangents into the monotone region (Fritsch-Carlson): on any segment
+    // where alpha^2 + beta^2 > 9, scale both endpoint tangents back.
+    for (std::size_t i = 0; i + 1 < n; ++i) {
+        if (secant[i] == 0.0f) {
+            tangent[i] = 0.0f;
+            tangent[i + 1] = 0.0f;
+            continue;
+        }
+        const float alpha = tangent[i] / secant[i];
+        const float beta = tangent[i + 1] / secant[i];
+        const float magnitude = alpha * alpha + beta * beta;
+        if (magnitude > 9.0f) {
+            const float scale = 3.0f / std::sqrt(magnitude);
+            tangent[i] = scale * alpha * secant[i];
+            tangent[i + 1] = scale * beta * secant[i];
+        }
+    }
+    return tangent;
 }
 
 }  // namespace
@@ -47,6 +87,7 @@ TimeWarp TimeWarp::FromAnchors(
     warp.to_knots_.insert(warp.to_knots_.end(), to_phases.begin(), to_phases.end());
     warp.from_knots_.push_back(1.0f);
     warp.to_knots_.push_back(1.0f);
+    warp.tangents_ = ComputeMonotoneTangents(warp.from_knots_, warp.to_knots_);
     return warp;
 }
 
@@ -69,10 +110,23 @@ float TimeWarp::Evaluate(float from_phase) const {
 
     const float from_start = from_knots_[segment_start];
     const float from_end = from_knots_[segment_end];
-    const float segment_span = from_end - from_start;
+    const float span = from_end - from_start;
+    if (span <= 0.0f) {
+        return to_knots_[segment_start];
+    }
 
-    const float alpha = segment_span > 0.0f ? (from_phase - from_start) / segment_span : 0.0f;
-    return to_knots_[segment_start] + alpha * (to_knots_[segment_end] - to_knots_[segment_start]);
+    // Monotone cubic Hermite on the segment (C1 across knots).
+    const float t = (from_phase - from_start) / span;
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    const float h00 = 2.0f * t3 - 3.0f * t2 + 1.0f;
+    const float h10 = t3 - 2.0f * t2 + t;
+    const float h01 = -2.0f * t3 + 3.0f * t2;
+    const float h11 = t3 - t2;
+    return h00 * to_knots_[segment_start] +
+           h10 * span * tangents_[segment_start] +
+           h01 * to_knots_[segment_end] +
+           h11 * span * tangents_[segment_end];
 }
 
 bool TimeWarp::IsIdentity() const {

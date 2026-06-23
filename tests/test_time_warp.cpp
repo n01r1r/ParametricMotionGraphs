@@ -28,13 +28,29 @@ void TestSingleAnchor() {
     assert(!warp.IsIdentity());
     assert(warp.NumAnchors() == 1);
 
+    // Knots are interpolated exactly.
     assert(Near(warp.Evaluate(0.0f), 0.0f));
     assert(Near(warp.Evaluate(0.5f), 0.6f));
     assert(Near(warp.Evaluate(1.0f), 1.0f));
 
-    // Linear within segments: halfway to the anchor maps halfway to 0.6.
-    assert(Near(warp.Evaluate(0.25f), 0.3f));
-    assert(Near(warp.Evaluate(0.75f), 0.8f));
+    // Monotone cubic Hermite between knots (not piecewise-linear): the mid
+    // points sit near, but not on, the straight-line values 0.3 / 0.8.
+    assert(Near(warp.Evaluate(0.25f), 0.3125f, 1.0e-3f));
+    assert(Near(warp.Evaluate(0.75f), 0.8125f, 1.0e-3f));
+}
+
+void TestC1Continuity() {
+    // Piecewise-linear warps jump in slope at each knot; the C1 Hermite warp
+    // does not. Compare the one-sided finite-difference slopes across a knot.
+    const pmg::TimeWarp warp = pmg::TimeWarp::FromAnchors({0.5f}, {0.6f});
+    const float knot = 0.5f;
+    const float h = 2.0e-3f;
+    const float slope_below =
+        (warp.Evaluate(knot) - warp.Evaluate(knot - h)) / h;
+    const float slope_above =
+        (warp.Evaluate(knot + h) - warp.Evaluate(knot)) / h;
+    // PWL would give 1.2 vs 0.8 here; C1 keeps them equal.
+    assert(Near(slope_below, slope_above, 2.0e-2f));
 }
 
 void TestMultipleAnchors() {
@@ -44,8 +60,8 @@ void TestMultipleAnchors() {
     assert(Near(warp.Evaluate(0.25f), 0.2f));
     assert(Near(warp.Evaluate(0.5f), 0.55f));
     assert(Near(warp.Evaluate(0.75f), 0.9f));
-    // Between anchors 2 and 3.
-    assert(Near(warp.Evaluate(0.625f), 0.725f));
+    // Between anchors 2 and 3 the spline curves off the straight line 0.725.
+    assert(Near(warp.Evaluate(0.625f), 0.740625f, 1.0e-3f));
 }
 
 void TestMonotonicity() {
@@ -106,6 +122,7 @@ void TestValidation() {
 int main() {
     TestIdentity();
     TestSingleAnchor();
+    TestC1Continuity();
     TestMultipleAnchors();
     TestMonotonicity();
     TestClamping();

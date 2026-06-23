@@ -11,6 +11,9 @@ expect walk spanned_axes 1
 expect walk corner_coverage full
 # D6 raw-sum thresholds keep classification selective: the widest-turn source
 # sees GOOD, NEUTRAL, and BAD targets while tight-turn sources stay fully GOOD.
+# Band shifted +5 (203/210 -> 208/215) for the C1 monotone-Hermite TimeWarp,
+# which moved the registered-phase pose distances up by ~3 raw units; the
+# reachable box still shrinks (to ~0.87) so the selective split is preserved.
 edge walk walk
 edge_phase_range walk walk 0.70 0.95 0.05 0.30
-edge_config walk walk 203 210 12 60 7
+edge_config walk walk 208 215 12 60 7
