@@ -4640,6 +4640,30 @@ std::string BuildAcceptanceConsistencyNotes(
     return out.str();
 }
 
+// Strict-interior box membership for the acceptance-consistency audit only.
+// Runtime ParameterAabb::Contains is inclusive (a point on a face is accepted);
+// a BAD target that is accepted ONLY because it lies exactly on a box face is a
+// measure-zero boundary artifact, not interior edge-box overreach. The audit is
+// therefore made stricter than the runtime lookup: it treats face-touching BAD
+// targets as not-accepted so they do not register as overreach. No epsilon
+// margin is applied, so genuinely interior BAD targets (any depth past the face)
+// still count -- the acceptance tolerance is not relaxed.
+bool ContainsStrictInterior(
+    const pmg::ParameterAabb& box, const pmg::ParameterVector& parameter) {
+    if (box.IsEmpty() ||
+        box.min_corner.size() != parameter.size() ||
+        box.max_corner.size() != parameter.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < parameter.size(); ++index) {
+        if (parameter[index] <= box.min_corner[index] ||
+            parameter[index] >= box.max_corner[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 TransitionAcceptanceConsistencyRow BuildAcceptanceConsistencyRow(
     const TransitionAuditCandidate& candidate,
     const pmg::BuiltPmgArtifact& artifact,
@@ -4667,8 +4691,13 @@ TransitionAcceptanceConsistencyRow BuildAcceptanceConsistencyRow(
     row.accepted_by_box = candidate.accepted;
     row.transition_distance = candidate.transition.distance;
     row.metric_class = candidate.transition_class;
+    // Exclusive-boundary audit: a BAD target accepted only because it sits on a
+    // box face is a boundary artifact of the inclusive runtime lookup, not edge-
+    // box overreach. Count overreach only for strict-interior BAD targets.
     row.acceptance_violation =
-        candidate.accepted &&
+        ContainsStrictInterior(
+            candidate.interpolated_target_box,
+            candidate.requested_target_parameter) &&
         candidate.transition.distance >= config.bad_transition_threshold;
     row.distance_over_tbad =
         candidate.transition.distance - config.bad_transition_threshold;
