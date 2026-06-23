@@ -185,3 +185,20 @@ The implementation is acceptable if:
 5. audit-motion-space-registration improves or clearly reports remaining failures.
 6. audit-transition-pop is rerun after rebuild.
 7. Tests pass without external CMU corpus.
+### Acceptance consistency residual
+
+After phase-aligned segment windows and strict-interior consistency auditing,
+the walk_2d acceptance-consistency audit drops from 13 accepted-bad cases to 1
+at the high-sampling diagnostic profile.
+
+The remaining case is not a boundary artifact:
+
+- strict interior: true
+- d / T_BAD: 1.029
+- distance inside shrunk face: 0.020
+- quality gate: survives
+
+This is currently treated as an expected limitation of sparse sampling plus
+axis-aligned reachable boxes, not a runtime bug. Runtime box containment remains
+unchanged. The audit intentionally preserves this case as an honest diagnostic
+signal rather than hiding it with tolerance or a runtime gate.
