@@ -193,15 +193,15 @@ if(PMG_BUILD_TESTS)
 
     set(PMG_TEST_ARTIFACT_ROOT ${CMAKE_CURRENT_BINARY_DIR}/test_artifacts)
 
-    # Canonical course-demo spec. This is the only viewer-facing PMG demo kept
-    # for the final clean repository.
+    # Canonical course-demo spec: single-family walk_2d (no cross-family jog).
+    # This is the only viewer-facing PMG demo kept for the final clean repository.
     add_test(NAME cli_validate_demo_walk_2d
         COMMAND pmg_cli --validate-graph-spec
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec)
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d.pmg_spec)
 
     add_test(NAME cli_build_artifact_walk_2d
         COMMAND pmg_cli --build-graph
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg)
 
     add_test(NAME cli_audit_transition_montage_walk_2d
@@ -235,33 +235,39 @@ if(PMG_BUILD_TESTS)
         cli_audit_transition_acceptance_consistency_walk_2d PROPERTIES
         DEPENDS cli_build_artifact_walk_2d)
 
+    # Cross-family quality-gate reject. This fail case only exists where a jog
+    # anchor sits in the walk hull, so it probes the cross-family stress fixture,
+    # not the single-family canonical demo (which has no such fail region).
     add_test(NAME cli_probe_transition_fail_vis_001
         COMMAND pmg_cli --probe-transition
-            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d_jog_crossfamily/artifact.pmg
             --source-param -0.04 0.8 --target-param 0.5 0
             --frames-before 3 --frames-after 3 --expect-decision reject)
     set_tests_properties(cli_probe_transition_fail_vis_001 PROPERTIES
-        DEPENDS cli_build_artifact_walk_2d)
+        DEPENDS cli_build_artifact_walk_2d_jog_crossfamily)
 
+    # Good in-hull self-transition on the canonical single-family demo.
     add_test(NAME cli_probe_transition_self_good
         COMMAND pmg_cli --probe-transition
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
-            --source-param 0 1 --target-param 0 1
+            --source-param 0 0 --target-param 0 0
             --frames-before 3 --frames-after 3 --expect-decision accept)
     set_tests_properties(cli_probe_transition_self_good PROPERTIES
         DEPENDS cli_build_artifact_walk_2d)
 
+    # Out-of-hull target ([0,1], the dropped jog corner) projects onto the
+    # authored support and is rejected by the per-source reachable box.
     add_test(NAME cli_probe_transition_outside_projection
         COMMAND pmg_cli --probe-transition
             ${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
-            --source-param 0 1 --target-param 0.5 0
+            --source-param 0 0 --target-param 0 1
             --frames-before 3 --frames-after 3 --expect-decision reject)
     set_tests_properties(cli_probe_transition_outside_projection PROPERTIES
         DEPENDS cli_build_artifact_walk_2d)
 
     add_test(NAME cli_goto_walk_2d
         COMMAND pmg_cli --goto
-            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d_triangulated.pmg_spec 10 10
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d.pmg_spec 10 10
             --seconds 20
             --max-pop-ratio 8.0)
 
@@ -276,6 +282,14 @@ if(PMG_BUILD_TESTS)
         COMMAND pmg_cli --build-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixtures/fixture_transition_box_shrink.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
+
+    # Cross-family stress fixture: builds the dropped jog-in-walk-hull graph so
+    # the within-hull jolt / edge-box overreach case stays exercised even though
+    # it is no longer the canonical demo. Build-only: no acceptance assertion.
+    add_test(NAME cli_build_artifact_walk_2d_jog_crossfamily
+        COMMAND pmg_cli --build-graph
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixtures/fixture_walk_2d_jog_crossfamily.pmg_spec
+            ${PMG_TEST_ARTIFACT_ROOT}/walk_2d_jog_crossfamily/artifact.pmg)
 
     add_test(NAME cli_diagnostics_smoke
         COMMAND ${CMAKE_COMMAND}

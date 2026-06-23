@@ -4,39 +4,33 @@ This directory intentionally lists only specs that are currently usable with the
 
 ## Presentation / viewer demos
 
-### `demo_walk_2d_triangulated.pmg_spec`
+### `demo_walk_2d.pmg_spec`
 
-Primary demo.
+Primary canonical demo (single-family, paper-faithful `walk_2d`).
 
-Use this for the smooth sparse parametric locomotion viewer demo. It places wide-walk, tight-walk, and jog anchors inside one 2-D parametric motion space and uses a single self-edge:
+Use this for the smooth sparse parametric locomotion viewer demo. It places four
+logically-similar walking anchors (wide walk, walk, tight walk, fast walk)
+inside one 2-D parametric motion space and uses a single self-edge:
 
 ```text
 walk_2d -> walk_2d
 ```
 
-The primary demo uses a triangulated 2D scattered support over five authored locomotion anchors.
-The spec declares `parameter_support walk_2d triangulated_2d`, so loading validates the authored examples and the explicitly provided triangle indices.
-In the viewer, use Graph -> Coverage to see that triangulated mesh overlaid on the node's domain; the missing corners are marked as unsampled. Use Graph -> Runtime -> Transition to interact with the 2D canvas and compare the requested target parameter with the actual transition parameter projected into authored support and the current edge's reachable box.
+The spec declares `parameter_support walk_2d triangulated_2d`, so loading
+validates the authored examples and the explicitly provided triangle indices.
+In the viewer, use Graph -> Coverage to see the triangulated mesh overlaid on the
+node's domain; the missing corners are marked as unsampled. Use
+Graph -> Runtime -> Transition to compare the requested target parameter with the
+actual transition parameter projected into authored support and the current
+edge's reachable box.
 
-> Known limitation: the `jogCurve` anchor at `[0, 1]` is cross-family (jog vs
-> walk: different contact/footfall pattern). Its pairwise pose-seam distance to
-> every walk anchor is 217-246 versus 2.6-50 for walk-family pairs, so any hull
-> parameter whose blend weights include the jog anchor averages logically
-> dissimilar poses and looks non-smooth. This violates the parametric-synthesis
-> precondition that a motion space hold only logically similar examples. See
-> `demo_walk_2d_singlefamily.pmg_spec` for the single-family control and
-> `docs/audits/jolt-cross-family-diagnosis-20260623.md` for the diagnosis.
-
-### `demo_walk_2d_singlefamily.pmg_spec`
-
-Single-family control / paper-faithful `walk_2d`.
-
-Identical to `demo_walk_2d_triangulated` with the cross-family `jogCurve` anchor
-removed; the travel-speed axis is kept via the same-family
-`walkStraightTwiceAsFast` clip. Every authored pair classifies
+Because every anchor is the same gait family, every authored pair classifies
 `PASS_PAIR_PHASE_ALIGNMENT` (no cross-family pose-seam blowup), so within-hull
-blends stay logically similar. Per the paper, jog belongs in a separate node
-connected by a transition edge, not blended into the walk space.
+blends stay logically similar -- the parametric-synthesis precondition the paper
+assumes. The travel-speed axis tops out at the authored `walkStraightTwiceAsFast`
+anchor (~0.75); the old `[0, 1]` jog corner is intentionally excluded. Per the
+paper, jog belongs in a separate node connected by a transition edge, not blended
+into the walk space. See `docs/audits/jolt-cross-family-diagnosis-20260623.md`.
 
 ### `demo_walk_2d_triangle.pmg_spec`
 
@@ -53,8 +47,13 @@ Fixtures live under `specs/fixtures/`.
 
 - `fixtures/fixture_edge_selective_good_bad.pmg_spec`
 - `fixtures/fixture_transition_box_shrink.pmg_spec`
+- `fixtures/fixture_walk_2d_jog_crossfamily.pmg_spec`
 
-These are not viewer demos. They intentionally stress edge classification and conservative transition-domain shrink behavior.
+These are not viewer demos. The first two intentionally stress edge
+classification and conservative transition-domain shrink behavior. The third is
+the old jog-in-walk-hull spec, retained to exercise the cross-family within-hull
+jolt and edge-box acceptance overreach that motivated the single-family
+canonical demo.
 
 ## Removed / deprecated specs
 

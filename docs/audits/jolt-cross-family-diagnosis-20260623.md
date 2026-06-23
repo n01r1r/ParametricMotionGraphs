@@ -57,6 +57,11 @@ It is not PMG-structural and not a blend-code defect. The paper-faithful fix is
 to keep jog in a separate node connected by a transition edge, not blended into
 the walk space (`demo_walk_2d_singlefamily.pmg_spec`).
 
+> Follow-up (same day): this fix was adopted. The single-family spec became the
+> canonical `specs/demo_walk_2d.pmg_spec`; the old jog-in-hull spec moved to
+> `specs/fixtures/fixture_walk_2d_jog_crossfamily.pmg_spec` as a stress fixture.
+> See `docs/audits/walk-2d-single-family-canonical-20260623.md`.
+
 ## Code gap closed
 
 `--audit-registration-phase-alignment` classified pairs by metric per row

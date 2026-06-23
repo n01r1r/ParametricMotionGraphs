@@ -16,9 +16,9 @@ bool Near(float a, float b, float tolerance = 1.0e-4f) {
 }  // namespace
 
 int main() {
-    std::filesystem::path spec_path("specs/demo_walk_2d_triangulated.pmg_spec");
+    std::filesystem::path spec_path("specs/demo_walk_2d.pmg_spec");
     if (!std::filesystem::exists(spec_path)) {
-        spec_path = "../specs/demo_walk_2d_triangulated.pmg_spec";
+        spec_path = "../specs/demo_walk_2d.pmg_spec";
     }
     const pmg::GraphSpec spec =
         pmg::LoadGraphSpec(spec_path.string());
@@ -31,7 +31,7 @@ int main() {
     const pmg::PreparedMotionSpaces prepared = pmg::PrepareMotionSpaces(spec);
     const pmg::PreparedMotionSpace& walk = prepared.Node("walk_2d");
 
-    assert(walk.production.NumExamples() == 5);
+    assert(walk.production.NumExamples() == 4);
     for (const pmg::ExampleMotion& example : walk.production.Examples()) {
         const pmg::Pose& first = example.clip.frames.front();
         assert(Near(first.root_position.x, 0.0f));

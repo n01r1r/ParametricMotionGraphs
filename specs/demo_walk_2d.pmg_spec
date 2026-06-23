@@ -1,0 +1,34 @@
+# Canonical walk_2d viewer/CTest demo: single-family sparse 2-D locomotion space.
+# Four logically-similar walking anchors (no cross-family jog), so every
+# within-hull blend interpolates similar poses -- the parametric-synthesis
+# precondition the PMG paper assumes. A dissimilar gait (jog) belongs in a
+# separate node joined by a transition edge, not blended into this space; the
+# cross-family case is preserved as a stress fixture at
+# specs/fixtures/fixture_walk_2d_jog_crossfamily.pmg_spec.
+#
+# Axis 0 (turn_rate):    wide -> tight walk turn.
+# Axis 1 (travel_speed): authored support reaches ~0.75 via walkStraightTwiceAsFast.
+# The old [0,1] jog corner is intentionally dropped -- it was the cross-family
+# jolt source, not a usable walking speed -- so the speed support is smaller than
+# a full rectangle. Requests beyond the hull project onto the authored triangles.
+# See docs/audits/jolt-cross-family-diagnosis-20260623.md.
+
+node walk_2d 2
+registration walk_2d - - 3 0
+parameter_metrics walk_2d turn_rate travel_speed
+parameter_calibration walk_2d 5
+parameter_support walk_2d triangulated_2d
+
+example walk_2d -0.3 0.0 ../BVH/walkMoreCurve.bvh
+example walk_2d  0.0 0.0 ../BVH/walkCurve.bvh
+example walk_2d  1.0 0.0 ../BVH/walkTightCurve.bvh start_frame 33 end_frame 67 phase_label left_contact_start contact_start L=contact;R=swing contact_end L=contact;R=swing
+example walk_2d  0.15 0.75 ../BVH/walkStraightTwiceAsFast.bvh
+
+triangle walk_2d 0 1 3
+triangle walk_2d 1 2 3
+
+expect walk_2d spanned_axes 2
+
+edge walk_2d walk_2d
+edge_phase_range walk_2d walk_2d 0.70 0.95 0.05 0.30
+edge_config walk_2d walk_2d 120 234 3 6 41

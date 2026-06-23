@@ -10,10 +10,12 @@ intersection, direct steering, and single-node path following.
 
 ## Current demo
 
-`specs/demo_walk_2d_triangulated.pmg_spec` defines one 2-D locomotion space,
-five authored anchors, triangulated support, and one self-edge. Missing domain
-corners are unsupported; runtime requests are projected into authored support
-and the selected transition's reachable target box.
+`specs/demo_walk_2d.pmg_spec` defines one 2-D locomotion space, four
+authored single-family (walking-only) anchors, triangulated support, and one
+self-edge. The cross-family jog corner is intentionally excluded (kept as a
+stress fixture); missing domain corners are unsupported; runtime requests are
+projected into authored support and the selected transition's reachable target
+box.
 
 ## Module map
 
@@ -50,9 +52,9 @@ offline construction -> `BuildPmgOfflinePipeline`; runtime stream ->
 cmake -S . -B build -DPMG_BUILD_VIEWER=ON -DPMG_BUILD_TESTS=ON
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
-.\build\Debug\pmg_cli.exe --validate-graph-spec .\specs\demo_walk_2d_triangulated.pmg_spec
-.\build\Debug\pmg_cli.exe --build-graph .\specs\demo_walk_2d_triangulated.pmg_spec .\build\viewer_out\walk_2d_triangulated.pmg
-.\build\Debug\pmg_viewer.exe .\build\viewer_out\walk_2d_triangulated.pmg
+.\build\Debug\pmg_cli.exe --validate-graph-spec .\specs\demo_walk_2d.pmg_spec
+.\build\Debug\pmg_cli.exe --build-graph .\specs\demo_walk_2d.pmg_spec .\build\viewer_out\walk_2d.pmg
+.\build\Debug\pmg_viewer.exe .\build\viewer_out\walk_2d.pmg
 ```
 
 ## Paper-compatible vs extension path
