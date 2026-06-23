@@ -2010,8 +2010,13 @@ RegistrationPhaseAlignmentAuditData BuildRegistrationPhaseAlignmentAudit(
         }
     }
     for (const RegistrationPhaseAlignmentPairRow& row : data.pair_rows) {
-        if (row.conclusion == "WARN_PHASE_MISMATCH_FOR_JOG") {
-            data.conclusion = "WARN_PHASE_MISMATCH_FOR_JOG";
+        // A BAD cross-family pose seam is unsafe regardless of clip filename.
+        // WARN_PHASE_MISMATCH_FOR_JOG is only the jog-labeled case of the same
+        // metric failure; escalate WARN_PAIR_NOT_SAFE too so the summary signal
+        // is metric-driven, not coupled to a "jog" substring in the path.
+        if (row.conclusion == "WARN_PHASE_MISMATCH_FOR_JOG" ||
+            row.conclusion == "WARN_PAIR_NOT_SAFE") {
+            data.conclusion = row.conclusion;
             return data;
         }
     }

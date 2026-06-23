@@ -1,0 +1,26 @@
+# Controlled single-family walk_2d (jolt-diagnosis control group).
+# Identical to demo_walk_2d_triangulated except the cross-family jogCurve anchor
+# is removed. Speed axis is kept via the same-family walkStraightTwiceAsFast clip.
+# Purpose: isolate whether hull jolt is caused by the cross-family jog anchor
+# (data gap) or is structural to PMG blending. One variable changed vs the
+# triangulated demo: the jog example.
+
+node walk_2d 2
+registration walk_2d - - 3 0
+parameter_metrics walk_2d turn_rate travel_speed
+parameter_calibration walk_2d 5
+parameter_support walk_2d triangulated_2d
+
+example walk_2d -0.3 0.0 ../BVH/walkMoreCurve.bvh
+example walk_2d  0.0 0.0 ../BVH/walkCurve.bvh
+example walk_2d  1.0 0.0 ../BVH/walkTightCurve.bvh start_frame 33 end_frame 67 phase_label left_contact_start contact_start L=contact;R=swing contact_end L=contact;R=swing
+example walk_2d  0.15 0.75 ../BVH/walkStraightTwiceAsFast.bvh
+
+triangle walk_2d 0 1 3
+triangle walk_2d 1 2 3
+
+expect walk_2d spanned_axes 2
+
+edge walk_2d walk_2d
+edge_phase_range walk_2d walk_2d 0.70 0.95 0.05 0.30
+edge_config walk_2d walk_2d 120 234 3 6 41

@@ -18,6 +18,26 @@ The primary demo uses a triangulated 2D scattered support over five authored loc
 The spec declares `parameter_support walk_2d triangulated_2d`, so loading validates the authored examples and the explicitly provided triangle indices.
 In the viewer, use Graph -> Coverage to see that triangulated mesh overlaid on the node's domain; the missing corners are marked as unsampled. Use Graph -> Runtime -> Transition to interact with the 2D canvas and compare the requested target parameter with the actual transition parameter projected into authored support and the current edge's reachable box.
 
+> Known limitation: the `jogCurve` anchor at `[0, 1]` is cross-family (jog vs
+> walk: different contact/footfall pattern). Its pairwise pose-seam distance to
+> every walk anchor is 217-246 versus 2.6-50 for walk-family pairs, so any hull
+> parameter whose blend weights include the jog anchor averages logically
+> dissimilar poses and looks non-smooth. This violates the parametric-synthesis
+> precondition that a motion space hold only logically similar examples. See
+> `demo_walk_2d_singlefamily.pmg_spec` for the single-family control and
+> `docs/audits/jolt-cross-family-diagnosis-20260623.md` for the diagnosis.
+
+### `demo_walk_2d_singlefamily.pmg_spec`
+
+Single-family control / paper-faithful `walk_2d`.
+
+Identical to `demo_walk_2d_triangulated` with the cross-family `jogCurve` anchor
+removed; the travel-speed axis is kept via the same-family
+`walkStraightTwiceAsFast` clip. Every authored pair classifies
+`PASS_PAIR_PHASE_ALIGNMENT` (no cross-family pose-seam blowup), so within-hull
+blends stay logically similar. Per the paper, jog belongs in a separate node
+connected by a transition edge, not blended into the walk space.
+
 ### `demo_walk_2d_triangle.pmg_spec`
 
 Legacy simplex fixture/demo.
