@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pmg/MotionClipSegment.h"
 #include "pmg/PmgArtifact.h"
 #include "pmg/PmgBuilder.h"
 
@@ -37,7 +38,8 @@ struct GraphSpecNode {
 struct GraphSpecExample {
     std::string node_name;
     ParameterVector parameter;
-    std::string bvh_path;
+    std::string bvh_path;  // compatibility alias for segment.source_bvh
+    MotionClipSegment segment;
 };
 
 struct GraphSpecEdge {

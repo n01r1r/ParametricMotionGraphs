@@ -3,6 +3,7 @@
 #include "pmg/Diagnostics.h"
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
+#include "pmg/ContactDetection.h"
 #include "pmg/CyclicContinuity.h"
 #include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
@@ -2289,6 +2290,835 @@ struct TransitionPopAuditOptions {
     std::filesystem::path out_dir;
     int worst_k = 8;
 };
+
+struct ArtifactLoopSweepRow {
+    std::string node_name;
+    std::string sample_type;
+    pmg::ParameterVector parameter;
+    std::string source_clip;
+    int start_frame = 0;
+    int end_frame = -1;
+    pmg::LoopAuditReport loop;
+    std::string verdict;
+};
+
+struct MotionSpaceRegistrationAuditOptions {
+    std::string pmg_path;
+    std::filesystem::path out_dir;
+};
+
+struct RegistrationAnchorRow {
+    std::string node_name;
+    int anchor_id = -1;
+    pmg::ParameterVector parameter;
+    std::string source_bvh_path;
+    int start_frame = 0;
+    int end_frame = -1;
+    int frame_count = 0;
+    float duration_seconds = 0.0f;
+    pmg::LoopAuditReport loop;
+    std::string start_contact_state;
+    std::string end_contact_state;
+    pmg::Vec3 root_displacement{};
+    float heading_displacement = 0.0f;
+    std::string verdict;
+};
+
+struct RegistrationPairwiseRow {
+    std::string node_name;
+    int source_anchor_id = -1;
+    int target_anchor_id = -1;
+    float parameter_distance = 0.0f;
+    float start_pose_distance = 0.0f;
+    float end_pose_distance = 0.0f;
+    bool contact_phase_match = false;
+    float root_delta_difference = 0.0f;
+    float heading_delta_difference = 0.0f;
+    bool duration_frame_match = false;
+};
+
+struct RegistrationGeneratedRow {
+    std::string node_name;
+    std::string sample_type;
+    pmg::ParameterVector parameter;
+    pmg::LoopAuditReport loop;
+    std::string verdict;
+    std::vector<int> contributing_anchor_ids;
+    std::vector<float> blend_weights;
+    std::vector<std::string> contributing_source_bvh_paths;
+    std::vector<std::string> contributing_anchor_verdicts;
+    std::vector<float> contributing_anchor_cycle_scores;
+    std::vector<int> contributing_anchor_contact_mismatch;
+    std::vector<std::string> contributing_anchor_start_contact_state;
+    std::vector<std::string> contributing_anchor_end_contact_state;
+    std::vector<pmg::Vec3> contributing_anchor_root_deltas;
+    std::vector<float> contributing_anchor_heading_deltas;
+};
+
+enum class RegistrationRootCause {
+    kBadSourceAnchorLoop,
+    kAnchorPhaseMismatch,
+    kRootTrajectoryBlendFailure,
+    kInterpolationWeightFailure,
+    kMixedFailure,
+    kUnknown,
+};
+
+struct MotionSpaceRegistrationAuditData {
+    std::vector<RegistrationAnchorRow> anchor_rows;
+    std::vector<RegistrationPairwiseRow> pair_rows;
+    std::vector<RegistrationGeneratedRow> generated_rows;
+    RegistrationRootCause root_cause = RegistrationRootCause::kUnknown;
+};
+
+float ParameterDistance(
+    const pmg::ParameterVector& left,
+    const pmg::ParameterVector& right) {
+    pmg::RequireSameParameterDimension(left, right, "ParameterDistance");
+    float sum = 0.0f;
+    for (std::size_t axis = 0; axis < left.size(); ++axis) {
+        const float delta = left[axis] - right[axis];
+        sum += delta * delta;
+    }
+    return std::sqrt(sum);
+}
+
+float MeanPoseDistance(
+    const pmg::Skeleton& skeleton,
+    const pmg::Pose& left,
+    const pmg::Pose& right) {
+    const std::vector<pmg::Vec3> left_positions =
+        pmg::ComputeJointWorldPositions(skeleton, left);
+    const std::vector<pmg::Vec3> right_positions =
+        pmg::ComputeJointWorldPositions(skeleton, right);
+    float distance_sum = 0.0f;
+    for (std::size_t joint_index = 0; joint_index < left_positions.size();
+         ++joint_index) {
+        distance_sum +=
+            (right_positions[joint_index] - left_positions[joint_index]).Norm();
+    }
+    return distance_sum / static_cast<float>(left_positions.size());
+}
+
+std::vector<int> ResolveRegistrationAuditFootJoints(
+    const pmg::Skeleton& skeleton) {
+    const std::array<std::string, 4> preferred_names{
+        "LeftAnkle", "RightAnkle", "LeftFoot", "RightFoot"};
+    std::vector<int> joints;
+    for (const std::string& joint_name : preferred_names) {
+        const int joint_index = ResolveJointIndex(skeleton, joint_name);
+        if (joint_index >= 0) {
+            joints.push_back(joint_index);
+        }
+    }
+    return joints;
+}
+
+bool ContactActiveAtFrame(
+    const std::vector<pmg::ContactInterval>& contacts,
+    int joint_index,
+    int frame_index) {
+    for (const pmg::ContactInterval& interval : contacts) {
+        if (interval.joint_index == joint_index &&
+            frame_index >= interval.first_frame &&
+            frame_index <= interval.last_frame) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string ClipContactStateSummary(
+    const std::vector<pmg::ContactInterval>& contacts,
+    const std::vector<int>& contact_joints,
+    int frame_index) {
+    if (contact_joints.empty()) {
+        return "n/a";
+    }
+    std::ostringstream out;
+    for (std::size_t joint = 0; joint < contact_joints.size(); ++joint) {
+        if (joint > 0) {
+            out << ';';
+        }
+        out << (joint == 0 ? "L=" : "R=")
+            << (ContactActiveAtFrame(contacts, contact_joints[joint], frame_index)
+                    ? "contact"
+                    : "swing");
+    }
+    return out.str();
+}
+
+std::string JoinIntList(const std::vector<int>& values) {
+    std::ostringstream out;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ';';
+        }
+        out << values[index];
+    }
+    return out.str();
+}
+
+std::string JoinFloatList(const std::vector<float>& values) {
+    std::ostringstream out;
+    out << std::setprecision(6);
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ';';
+        }
+        out << values[index];
+    }
+    return out.str();
+}
+
+std::string JoinStringList(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ';';
+        }
+        out << values[index];
+    }
+    return out.str();
+}
+
+std::string FormatSegmentLabel(
+    const std::string& source_bvh_path,
+    int start_frame,
+    int end_frame) {
+    std::ostringstream out;
+    out << source_bvh_path;
+    if (end_frame >= 0) {
+        out << " [" << start_frame << ", " << end_frame << "]";
+    }
+    return out.str();
+}
+
+std::string JoinVec3List(const std::vector<pmg::Vec3>& values) {
+    std::ostringstream out;
+    out << std::setprecision(6);
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            out << ';';
+        }
+        out << '[' << values[index].x << ' ' << values[index].y << ' '
+            << values[index].z << ']';
+    }
+    return out.str();
+}
+
+const char* RegistrationRootCauseName(RegistrationRootCause cause) {
+    switch (cause) {
+        case RegistrationRootCause::kBadSourceAnchorLoop:
+            return "bad_source_anchor_loop";
+        case RegistrationRootCause::kAnchorPhaseMismatch:
+            return "anchor_phase_mismatch";
+        case RegistrationRootCause::kRootTrajectoryBlendFailure:
+            return "root_trajectory_blend_failure";
+        case RegistrationRootCause::kInterpolationWeightFailure:
+            return "interpolation_weight_failure";
+        case RegistrationRootCause::kMixedFailure:
+            return "mixed_failure";
+        case RegistrationRootCause::kUnknown:
+            return "unknown";
+    }
+    throw std::runtime_error("RegistrationRootCauseName: unsupported cause");
+}
+
+std::string LoopSweepVerdict(const pmg::LoopAuditReport& loop) {
+    int violations = 0;
+    violations += loop.root_normalized_start_end_distance > 1.0f ? 1 : 0;
+    violations += loop.root_velocity_discontinuity > 1.0f ? 1 : 0;
+    violations += loop.root_yaw_discontinuity > 0.35f ? 1 : 0;
+    violations += loop.foot_contact_mismatch > 0 ? 1 : 0;
+    if (violations == 0) {
+        return "pass";
+    }
+    if (violations == 1) {
+        return "borderline";
+    }
+    return "fail";
+}
+
+void WriteArtifactLoopSweepCsv(
+    const std::filesystem::path& path,
+    const std::vector<ArtifactLoopSweepRow>& rows) {
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error(
+            "audit-transition-pop: cannot write generated_loop_sweep.csv");
+    }
+    csv << "node_name,sample_type,parameter,source_bvh_path,start_frame,end_frame,frame_count,"
+           "root_normalized_loop_pose_distance,root_velocity_seam,yaw_seam,"
+           "contact_mismatch,cycle_score,verdict\n";
+    for (const ArtifactLoopSweepRow& row : rows) {
+        csv << EscapeCsvCell(row.node_name) << ','
+            << EscapeCsvCell(row.sample_type) << ','
+            << ParameterCsv(row.parameter) << ','
+            << EscapeCsvCell(row.source_clip) << ','
+            << row.start_frame << ','
+            << row.end_frame << ','
+            << row.loop.frame_count << ','
+            << row.loop.root_normalized_start_end_distance << ','
+            << row.loop.root_velocity_discontinuity << ','
+            << row.loop.root_yaw_discontinuity << ','
+            << row.loop.foot_contact_mismatch << ','
+            << row.loop.cycle_score << ','
+            << row.verdict << "\n";
+    }
+}
+
+void WriteArtifactLoopSweepMarkdown(
+    const std::filesystem::path& path,
+    const std::vector<ArtifactLoopSweepRow>& rows) {
+    std::ofstream md(path);
+    if (!md) {
+        throw std::runtime_error(
+            "audit-transition-pop: cannot write generated_loop_sweep.md");
+    }
+    const int pass_count = static_cast<int>(std::count_if(
+        rows.begin(), rows.end(), [](const ArtifactLoopSweepRow& row) {
+            return row.verdict == "pass";
+        }));
+    const int borderline_count = static_cast<int>(std::count_if(
+        rows.begin(), rows.end(), [](const ArtifactLoopSweepRow& row) {
+            return row.verdict == "borderline";
+        }));
+    const int fail_count = static_cast<int>(std::count_if(
+        rows.begin(), rows.end(), [](const ArtifactLoopSweepRow& row) {
+            return row.verdict == "fail";
+        }));
+
+    md << "# Generated Loop Sweep\n\n";
+    md << "- Rows: `" << rows.size() << "`\n";
+    md << "- Pass: `" << pass_count << "`\n";
+    md << "- Borderline: `" << borderline_count << "`\n";
+    md << "- Fail: `" << fail_count << "`\n\n";
+    md << "| Node | Sample type | Parameter | Source clip | Pose dist | Root vel seam | Yaw seam | Contact mismatch | Verdict |\n";
+    md << "|---|---|---|---|---:|---:|---:|---:|---|\n";
+    for (const ArtifactLoopSweepRow& row : rows) {
+        md << "| " << row.node_name
+           << " | " << row.sample_type
+           << " | " << ParameterMd(row.parameter)
+           << " | " << (row.source_clip.empty() ? "-" : FormatSegmentLabel(
+                    row.source_clip, row.start_frame, row.end_frame))
+           << " | " << row.loop.root_normalized_start_end_distance
+           << " | " << row.loop.root_velocity_discontinuity
+           << " | " << row.loop.root_yaw_discontinuity
+           << " | " << row.loop.foot_contact_mismatch
+           << " | " << row.verdict << " |\n";
+    }
+}
+
+std::vector<ArtifactLoopSweepRow> BuildArtifactLoopSweepRows(
+    const pmg::BuiltPmgArtifact& artifact) {
+    std::vector<ArtifactLoopSweepRow> rows;
+    for (int node_index = 0; node_index < artifact.graph.NumNodes(); ++node_index) {
+        const pmg::PmgNode& node = artifact.graph.Node(node_index);
+        for (const pmg::ExampleMotion& example : node.motion_space.Examples()) {
+            ArtifactLoopSweepRow row;
+            row.node_name = node.name;
+            row.sample_type = "authored_anchor";
+            row.parameter = example.parameter;
+            row.source_clip = example.segment.source_bvh;
+            row.start_frame = example.segment.start_frame;
+            row.end_frame = example.segment.end_frame;
+            row.loop = pmg::AuditLoop({artifact.skeleton, example.clip});
+            row.verdict = LoopSweepVerdict(row.loop);
+            rows.push_back(std::move(row));
+        }
+        for (const pmg::ParameterVector& parameter :
+             GeneratedAuditParameters(node.motion_space)) {
+            ArtifactLoopSweepRow row;
+            row.node_name = node.name;
+            row.sample_type = "generated_grid";
+            row.parameter = parameter;
+            const pmg::MotionClip generated = node.motion_space.GenerateClip(
+                parameter, artifact.metadata.frames_per_second);
+            row.loop = pmg::AuditLoop({artifact.skeleton, generated});
+            row.verdict = LoopSweepVerdict(row.loop);
+            rows.push_back(std::move(row));
+        }
+        for (const pmg::ParameterVector& parameter :
+             node.motion_space.ExampleParameters()) {
+            ArtifactLoopSweepRow row;
+            row.node_name = node.name;
+            row.sample_type = "generated_anchor";
+            row.parameter = parameter;
+            const pmg::MotionClip generated = node.motion_space.GenerateClip(
+                parameter, artifact.metadata.frames_per_second);
+            row.loop = pmg::AuditLoop({artifact.skeleton, generated});
+            row.verdict = LoopSweepVerdict(row.loop);
+            rows.push_back(std::move(row));
+        }
+    }
+    return rows;
+}
+
+MotionSpaceRegistrationAuditData BuildMotionSpaceRegistrationAudit(
+    const pmg::BuiltPmgArtifact& artifact) {
+    MotionSpaceRegistrationAuditData data;
+    const std::vector<int> contact_joints =
+        ResolveRegistrationAuditFootJoints(artifact.skeleton);
+
+    for (int node_index = 0; node_index < artifact.graph.NumNodes(); ++node_index) {
+        const pmg::PmgNode& node = artifact.graph.Node(node_index);
+        const auto& examples = node.motion_space.Examples();
+        const std::size_t node_anchor_offset = data.anchor_rows.size();
+        std::vector<std::vector<pmg::ContactInterval>> anchor_contacts(
+            examples.size());
+
+        for (std::size_t example_index = 0; example_index < examples.size();
+             ++example_index) {
+            const pmg::ExampleMotion& example = examples[example_index];
+            RegistrationAnchorRow row;
+            row.node_name = node.name;
+            row.anchor_id = static_cast<int>(example_index);
+            row.parameter = example.parameter;
+            row.source_bvh_path = example.segment.source_bvh;
+            row.start_frame = example.segment.start_frame;
+            row.end_frame = example.segment.end_frame;
+            row.frame_count = example.clip.NumFrames();
+            row.duration_seconds = example.clip.DurationSeconds();
+            row.loop = pmg::AuditLoop({artifact.skeleton, example.clip});
+            const pmg::RootStartSummary root =
+                pmg::SummarizeRootStart(example.clip);
+            row.root_displacement = root.final_relative_displacement;
+            row.heading_displacement = root.final_relative_heading;
+            row.verdict = LoopSweepVerdict(row.loop);
+            if (!contact_joints.empty()) {
+                const pmg::ContactDetectionSettings settings =
+                    pmg::EstimateContactSettings(
+                        artifact.skeleton, example.clip, contact_joints);
+                anchor_contacts[example_index] = pmg::DetectContacts(
+                    artifact.skeleton, example.clip, contact_joints, settings);
+                row.start_contact_state = ClipContactStateSummary(
+                    anchor_contacts[example_index], contact_joints, 0);
+                row.end_contact_state = ClipContactStateSummary(
+                    anchor_contacts[example_index], contact_joints,
+                    example.clip.NumFrames() - 1);
+            } else {
+                row.start_contact_state = "n/a";
+                row.end_contact_state = "n/a";
+            }
+            data.anchor_rows.push_back(std::move(row));
+        }
+
+        for (std::size_t source_index = 0; source_index < examples.size();
+             ++source_index) {
+            for (std::size_t target_index = source_index + 1;
+                 target_index < examples.size();
+                 ++target_index) {
+                const pmg::MotionClip& source = examples[source_index].clip;
+                const pmg::MotionClip& target = examples[target_index].clip;
+                RegistrationPairwiseRow row;
+                row.node_name = node.name;
+                row.source_anchor_id = static_cast<int>(source_index);
+                row.target_anchor_id = static_cast<int>(target_index);
+                row.parameter_distance = ParameterDistance(
+                    examples[source_index].parameter,
+                    examples[target_index].parameter);
+                row.start_pose_distance = MeanPoseDistance(
+                    artifact.skeleton, source.frames.front(),
+                    target.frames.front());
+                row.end_pose_distance = MeanPoseDistance(
+                    artifact.skeleton, source.frames.back(),
+                    target.frames.back());
+                row.contact_phase_match =
+                    data.anchor_rows[node_anchor_offset + source_index]
+                            .start_contact_state ==
+                        data.anchor_rows[node_anchor_offset + target_index]
+                            .start_contact_state &&
+                    data.anchor_rows[node_anchor_offset + source_index]
+                            .end_contact_state ==
+                        data.anchor_rows[node_anchor_offset + target_index]
+                            .end_contact_state;
+                row.root_delta_difference =
+                    (data.anchor_rows[node_anchor_offset + source_index]
+                         .root_displacement -
+                     data.anchor_rows[node_anchor_offset + target_index]
+                         .root_displacement)
+                        .Norm();
+                row.heading_delta_difference = std::abs(
+                    data.anchor_rows[node_anchor_offset + source_index]
+                        .heading_displacement -
+                    data.anchor_rows[node_anchor_offset + target_index]
+                        .heading_displacement);
+                row.duration_frame_match =
+                    source.NumFrames() == target.NumFrames() &&
+                    std::abs(source.DurationSeconds() - target.DurationSeconds()) <=
+                        1.0e-4f;
+                data.pair_rows.push_back(std::move(row));
+            }
+        }
+
+        auto add_generated_row = [&](const std::string& sample_type,
+                                     const pmg::ParameterVector& parameter) {
+            RegistrationGeneratedRow row;
+            row.node_name = node.name;
+            row.sample_type = sample_type;
+            row.parameter = parameter;
+            const pmg::MotionClip generated = node.motion_space.GenerateClip(
+                parameter, artifact.metadata.frames_per_second);
+            row.loop = pmg::AuditLoop({artifact.skeleton, generated});
+            row.verdict = LoopSweepVerdict(row.loop);
+            const std::vector<float> weights =
+                node.motion_space.ComputeLocalBlendWeights(parameter);
+            for (std::size_t anchor_index = 0; anchor_index < weights.size();
+                 ++anchor_index) {
+                if (weights[anchor_index] <= 1.0e-4f) {
+                    continue;
+                }
+                const RegistrationAnchorRow& anchor =
+                    data.anchor_rows[node_anchor_offset + anchor_index];
+                row.contributing_anchor_ids.push_back(
+                    static_cast<int>(anchor_index));
+                row.blend_weights.push_back(weights[anchor_index]);
+                row.contributing_source_bvh_paths.push_back(anchor.source_bvh_path);
+                row.contributing_anchor_verdicts.push_back(anchor.verdict);
+                row.contributing_anchor_cycle_scores.push_back(
+                    anchor.loop.cycle_score);
+                row.contributing_anchor_contact_mismatch.push_back(
+                    anchor.loop.foot_contact_mismatch);
+                row.contributing_anchor_start_contact_state.push_back(
+                    anchor.start_contact_state);
+                row.contributing_anchor_end_contact_state.push_back(
+                    anchor.end_contact_state);
+                row.contributing_anchor_root_deltas.push_back(
+                    anchor.root_displacement);
+                row.contributing_anchor_heading_deltas.push_back(
+                    anchor.heading_displacement);
+            }
+            data.generated_rows.push_back(std::move(row));
+        };
+
+        for (const pmg::ParameterVector& parameter :
+             GeneratedAuditParameters(node.motion_space)) {
+            add_generated_row("generated_grid", parameter);
+        }
+        for (const pmg::ParameterVector& parameter :
+             node.motion_space.ExampleParameters()) {
+            add_generated_row("generated_anchor", parameter);
+        }
+    }
+
+    int bad_anchor_count = 0;
+    bool has_failed_generated_anchor = false;
+    int failed_generated_count = 0;
+    int failed_generated_with_bad_anchor = 0;
+    int failed_generated_with_contact_mismatch = 0;
+    int failed_generated_with_large_root_blend = 0;
+    int failed_generated_with_diffuse_weights = 0;
+    for (const RegistrationAnchorRow& row : data.anchor_rows) {
+        if (row.verdict == "fail") {
+            ++bad_anchor_count;
+        }
+    }
+    for (const RegistrationGeneratedRow& row : data.generated_rows) {
+        has_failed_generated_anchor |=
+            row.sample_type == "generated_anchor" && row.verdict == "fail";
+        if (row.verdict != "fail") {
+            continue;
+        }
+        ++failed_generated_count;
+        bool has_bad_anchor = false;
+        bool has_contact_mismatch = false;
+        float max_weight = 0.0f;
+        float max_root_delta_difference = 0.0f;
+        for (std::size_t index = 0; index < row.contributing_anchor_ids.size();
+             ++index) {
+            max_weight = std::max(max_weight, row.blend_weights[index]);
+            has_bad_anchor |= row.contributing_anchor_verdicts[index] == "fail";
+            has_contact_mismatch |=
+                row.contributing_anchor_start_contact_state[index] !=
+                    row.contributing_anchor_end_contact_state[index] ||
+                row.contributing_anchor_contact_mismatch[index] > 0;
+            for (std::size_t other = index + 1;
+                 other < row.contributing_anchor_ids.size(); ++other) {
+                max_root_delta_difference = std::max(
+                    max_root_delta_difference,
+                    (row.contributing_anchor_root_deltas[index] -
+                     row.contributing_anchor_root_deltas[other])
+                        .Norm());
+            }
+        }
+        failed_generated_with_bad_anchor += has_bad_anchor ? 1 : 0;
+        failed_generated_with_contact_mismatch += has_contact_mismatch ? 1 : 0;
+        failed_generated_with_large_root_blend +=
+            max_root_delta_difference > 10.0f ? 1 : 0;
+        failed_generated_with_diffuse_weights +=
+            (row.blend_weights.size() >= 3 && max_weight < 0.6f) ? 1 : 0;
+    }
+
+    if (bad_anchor_count > 0 && has_failed_generated_anchor) {
+        data.root_cause = RegistrationRootCause::kBadSourceAnchorLoop;
+    } else if (bad_anchor_count > 0 &&
+               failed_generated_count > 0 &&
+               failed_generated_with_bad_anchor == failed_generated_count) {
+        data.root_cause = RegistrationRootCause::kBadSourceAnchorLoop;
+    } else if (failed_generated_with_contact_mismatch > 0 &&
+               failed_generated_with_large_root_blend > 0) {
+        data.root_cause = RegistrationRootCause::kMixedFailure;
+    } else if (failed_generated_with_contact_mismatch > 0) {
+        data.root_cause = RegistrationRootCause::kAnchorPhaseMismatch;
+    } else if (failed_generated_with_large_root_blend > 0) {
+        data.root_cause = RegistrationRootCause::kRootTrajectoryBlendFailure;
+    } else if (failed_generated_with_diffuse_weights > 0) {
+        data.root_cause = RegistrationRootCause::kInterpolationWeightFailure;
+    } else {
+        data.root_cause = RegistrationRootCause::kUnknown;
+    }
+
+    return data;
+}
+
+void WriteMotionSpaceRegistrationAnchorCsv(
+    const std::filesystem::path& path,
+    const MotionSpaceRegistrationAuditData& data) {
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error(
+            "audit-motion-space-registration: cannot write anchor_registration.csv");
+    }
+    csv << "node_name,anchor_id,parameter,source_bvh_path,start_frame,end_frame,frame_count,duration_seconds,"
+           "cycle_score,root_normalized_start_end_distance,root_velocity_seam,"
+           "yaw_seam,contact_mismatch,start_contact_state,end_contact_state,"
+           "root_displacement,heading_displacement,verdict\n";
+    for (const RegistrationAnchorRow& row : data.anchor_rows) {
+        csv << EscapeCsvCell(row.node_name) << ',' << row.anchor_id << ','
+            << ParameterCsv(row.parameter) << ','
+            << EscapeCsvCell(row.source_bvh_path) << ',' << row.start_frame << ','
+            << row.end_frame << ',' << row.frame_count << ','
+            << row.duration_seconds << ',' << row.loop.cycle_score << ','
+            << row.loop.root_normalized_start_end_distance << ','
+            << row.loop.root_velocity_discontinuity << ','
+            << row.loop.root_yaw_discontinuity << ','
+            << row.loop.foot_contact_mismatch << ','
+            << EscapeCsvCell(row.start_contact_state) << ','
+            << EscapeCsvCell(row.end_contact_state) << ','
+            << Vec3Csv(row.root_displacement) << ','
+            << row.heading_displacement << ',' << row.verdict << "\n";
+    }
+}
+
+void WriteMotionSpaceRegistrationAnchorMarkdown(
+    const std::filesystem::path& path,
+    const MotionSpaceRegistrationAuditData& data) {
+    std::ofstream md(path);
+    if (!md) {
+        throw std::runtime_error(
+            "audit-motion-space-registration: cannot write anchor_registration.md");
+    }
+    const int pass_count = static_cast<int>(std::count_if(
+        data.anchor_rows.begin(), data.anchor_rows.end(),
+        [](const RegistrationAnchorRow& row) { return row.verdict == "pass"; }));
+    const int borderline_count = static_cast<int>(std::count_if(
+        data.anchor_rows.begin(), data.anchor_rows.end(),
+        [](const RegistrationAnchorRow& row) {
+            return row.verdict == "borderline";
+        }));
+    const int fail_count = static_cast<int>(std::count_if(
+        data.anchor_rows.begin(), data.anchor_rows.end(),
+        [](const RegistrationAnchorRow& row) { return row.verdict == "fail"; }));
+    md << "# Anchor Registration Audit\n\n";
+    md << "- Anchors: `" << data.anchor_rows.size() << "`\n";
+    md << "- Pass: `" << pass_count << "`\n";
+    md << "- Borderline: `" << borderline_count << "`\n";
+    md << "- Fail: `" << fail_count << "`\n\n";
+    md << "| Anchor | Parameter | Source BVH | Cycle score | Root vel seam | Yaw seam | Contact mismatch | Start contact | End contact | Root delta | Heading delta | Verdict |\n";
+    md << "|---:|---|---|---:|---:|---:|---:|---|---|---|---:|---|\n";
+    for (const RegistrationAnchorRow& row : data.anchor_rows) {
+        md << "| " << row.anchor_id << " | " << ParameterMd(row.parameter)
+           << " | " << FormatSegmentLabel(
+                    row.source_bvh_path, row.start_frame, row.end_frame)
+           << " | " << row.loop.cycle_score
+           << " | " << row.loop.root_velocity_discontinuity << " | "
+           << row.loop.root_yaw_discontinuity << " | "
+           << row.loop.foot_contact_mismatch << " | "
+           << row.start_contact_state << " | " << row.end_contact_state
+           << " | [" << row.root_displacement.x << ", "
+           << row.root_displacement.z << "] | " << row.heading_displacement
+           << " | " << row.verdict << " |\n";
+    }
+}
+
+void WriteMotionSpaceRegistrationPairwiseCsv(
+    const std::filesystem::path& path,
+    const MotionSpaceRegistrationAuditData& data) {
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error(
+            "audit-motion-space-registration: cannot write anchor_pairwise_consistency.csv");
+    }
+    csv << "node_name,source_anchor_id,target_anchor_id,parameter_distance,"
+           "start_pose_distance,end_pose_distance,contact_phase_match,"
+           "root_delta_difference,heading_delta_difference,duration_frame_match\n";
+    for (const RegistrationPairwiseRow& row : data.pair_rows) {
+        csv << EscapeCsvCell(row.node_name) << ',' << row.source_anchor_id << ','
+            << row.target_anchor_id << ',' << row.parameter_distance << ','
+            << row.start_pose_distance << ',' << row.end_pose_distance << ','
+            << (row.contact_phase_match ? "true" : "false") << ','
+            << row.root_delta_difference << ','
+            << row.heading_delta_difference << ','
+            << (row.duration_frame_match ? "true" : "false") << "\n";
+    }
+}
+
+void WriteMotionSpaceRegistrationGeneratedCsv(
+    const std::filesystem::path& path,
+    const MotionSpaceRegistrationAuditData& data) {
+    std::ofstream csv(path);
+    if (!csv) {
+        throw std::runtime_error(
+            "audit-motion-space-registration: cannot write generated_loop_provenance.csv");
+    }
+    csv << "node_name,sample_type,parameter,loop_status,cycle_score,root_velocity_seam,"
+           "yaw_seam,contact_mismatch,contributing_anchor_ids,blend_weights,"
+           "contributing_source_bvh_paths,contributing_anchor_verdicts,"
+           "contributing_anchor_cycle_scores,contributing_anchor_contact_mismatch,"
+           "contributing_anchor_start_contact_state,"
+           "contributing_anchor_end_contact_state,contributing_anchor_root_deltas,"
+           "contributing_anchor_heading_deltas\n";
+    for (const RegistrationGeneratedRow& row : data.generated_rows) {
+        csv << EscapeCsvCell(row.node_name) << ','
+            << EscapeCsvCell(row.sample_type) << ','
+            << ParameterCsv(row.parameter) << ',' << row.verdict << ','
+            << row.loop.cycle_score << ','
+            << row.loop.root_velocity_discontinuity << ','
+            << row.loop.root_yaw_discontinuity << ','
+            << row.loop.foot_contact_mismatch << ','
+            << EscapeCsvCell(JoinIntList(row.contributing_anchor_ids)) << ','
+            << EscapeCsvCell(JoinFloatList(row.blend_weights)) << ','
+            << EscapeCsvCell(JoinStringList(row.contributing_source_bvh_paths))
+            << ','
+            << EscapeCsvCell(JoinStringList(row.contributing_anchor_verdicts))
+            << ','
+            << EscapeCsvCell(JoinFloatList(
+                   row.contributing_anchor_cycle_scores))
+            << ','
+            << EscapeCsvCell(JoinIntList(
+                   row.contributing_anchor_contact_mismatch))
+            << ','
+            << EscapeCsvCell(JoinStringList(
+                   row.contributing_anchor_start_contact_state))
+            << ','
+            << EscapeCsvCell(JoinStringList(
+                   row.contributing_anchor_end_contact_state))
+            << ','
+            << EscapeCsvCell(JoinVec3List(
+                   row.contributing_anchor_root_deltas))
+            << ','
+            << EscapeCsvCell(JoinFloatList(
+                   row.contributing_anchor_heading_deltas))
+            << "\n";
+    }
+}
+
+void WriteMotionSpaceRegistrationGeneratedMarkdown(
+    const std::filesystem::path& path,
+    const MotionSpaceRegistrationAuditData& data) {
+    std::ofstream md(path);
+    if (!md) {
+        throw std::runtime_error(
+            "audit-motion-space-registration: cannot write generated_loop_provenance.md");
+    }
+    const int pass_count = static_cast<int>(std::count_if(
+        data.generated_rows.begin(), data.generated_rows.end(),
+        [](const RegistrationGeneratedRow& row) { return row.verdict == "pass"; }));
+    const int borderline_count = static_cast<int>(std::count_if(
+        data.generated_rows.begin(), data.generated_rows.end(),
+        [](const RegistrationGeneratedRow& row) {
+            return row.verdict == "borderline";
+        }));
+    const int fail_count = static_cast<int>(std::count_if(
+        data.generated_rows.begin(), data.generated_rows.end(),
+        [](const RegistrationGeneratedRow& row) { return row.verdict == "fail"; }));
+    md << "# Generated Loop Provenance\n\n";
+    md << "- Samples: `" << data.generated_rows.size() << "`\n";
+    md << "- Pass: `" << pass_count << "`\n";
+    md << "- Borderline: `" << borderline_count << "`\n";
+    md << "- Fail: `" << fail_count << "`\n";
+    md << "- Root cause label: `" << RegistrationRootCauseName(data.root_cause)
+       << "`\n\n";
+    md << "| Sample type | Parameter | Verdict | Cycle score | Root vel seam | Yaw seam | Contact mismatch | Anchors | Weights | Source BVHs |\n";
+    md << "|---|---|---|---:|---:|---:|---:|---|---|---|\n";
+    for (const RegistrationGeneratedRow& row : data.generated_rows) {
+        md << "| " << row.sample_type << " | " << ParameterMd(row.parameter)
+           << " | " << row.verdict << " | " << row.loop.cycle_score << " | "
+           << row.loop.root_velocity_discontinuity << " | "
+           << row.loop.root_yaw_discontinuity << " | "
+           << row.loop.foot_contact_mismatch << " | "
+           << JoinIntList(row.contributing_anchor_ids) << " | "
+           << JoinFloatList(row.blend_weights) << " | "
+           << JoinStringList(row.contributing_source_bvh_paths) << " |\n";
+    }
+}
+
+MotionSpaceRegistrationAuditOptions ParseMotionSpaceRegistrationAuditOptions(
+    int argc,
+    char** argv) {
+    if (argc < 5) {
+        throw std::runtime_error(
+            "usage: pmg_cli audit-motion-space-registration artifact.pmg --out outputs/diagnostics/walk2d_registration");
+    }
+    MotionSpaceRegistrationAuditOptions options;
+    options.pmg_path = argv[2];
+    for (int index = 3; index < argc; ++index) {
+        const std::string option = argv[index];
+        auto require_value = [&](const char* name) -> std::string {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(std::string(name) + " requires a value");
+            }
+            return argv[++index];
+        };
+        if (option == "--out") {
+            options.out_dir = require_value("--out");
+        } else {
+            throw std::runtime_error(
+                "audit-motion-space-registration: unknown option '" + option +
+                "'");
+        }
+    }
+    if (options.out_dir.empty()) {
+        throw std::runtime_error(
+            "audit-motion-space-registration requires --out");
+    }
+    return options;
+}
+
+int MotionSpaceRegistrationAuditCommand(
+    const MotionSpaceRegistrationAuditOptions& options) {
+    const pmg::BuiltPmgArtifact artifact = pmg::LoadPmgArtifactText(options.pmg_path);
+    const MotionSpaceRegistrationAuditData data =
+        BuildMotionSpaceRegistrationAudit(artifact);
+    std::filesystem::create_directories(options.out_dir);
+    WriteMotionSpaceRegistrationAnchorCsv(
+        options.out_dir / "anchor_registration.csv", data);
+    WriteMotionSpaceRegistrationAnchorMarkdown(
+        options.out_dir / "anchor_registration.md", data);
+    WriteMotionSpaceRegistrationPairwiseCsv(
+        options.out_dir / "anchor_pairwise_consistency.csv", data);
+    WriteMotionSpaceRegistrationGeneratedCsv(
+        options.out_dir / "generated_loop_provenance.csv", data);
+    WriteMotionSpaceRegistrationGeneratedMarkdown(
+        options.out_dir / "generated_loop_provenance.md", data);
+    std::cout << "registration_anchor_csv="
+              << (options.out_dir / "anchor_registration.csv").string() << "\n";
+    std::cout << "registration_anchor_md="
+              << (options.out_dir / "anchor_registration.md").string() << "\n";
+    std::cout << "registration_pairwise_csv="
+              << (options.out_dir / "anchor_pairwise_consistency.csv").string()
+              << "\n";
+    std::cout << "registration_generated_csv="
+              << (options.out_dir / "generated_loop_provenance.csv").string()
+              << "\n";
+    std::cout << "registration_generated_md="
+              << (options.out_dir / "generated_loop_provenance.md").string()
+              << "\n";
+    std::cout << "registration_root_cause="
+              << RegistrationRootCauseName(data.root_cause) << "\n";
+    return 0;
+}
 
 struct ReachableRegionAuditRow {
     pmg::ParameterVector source_parameter;
@@ -4738,6 +5568,51 @@ int LoopAuditCommand(const LoopAuditOptions& options) {
     const std::filesystem::path out_path = options.out_dir / "loop_audit.md";
     pmg::WriteLoopAuditReport(report, out_path);
     std::cout << "loop_audit=" << out_path.string() << "\n";
+
+    // Per-joint contact-interval timeline over the full clip. Lets an author
+    // pick a phase-aligned segment start (e.g. a left-foot strike frame) when
+    // windowing a MotionClipSegment example.
+    std::vector<int> contact_joints;
+    std::vector<std::string> contact_joint_names;
+    for (const char* joint_name : {"LeftAnkle", "RightAnkle", "LeftFoot",
+                                   "RightFoot", "LeftToeBase", "RightToeBase"}) {
+        for (int j = 0; j < data.skeleton.NumJoints(); ++j) {
+            if (data.skeleton.joints[j].name == joint_name) {
+                contact_joints.push_back(j);
+                contact_joint_names.push_back(joint_name);
+                break;
+            }
+        }
+    }
+    if (!contact_joints.empty()) {
+        const pmg::ContactDetectionSettings settings =
+            pmg::EstimateContactSettings(data.skeleton, data.clip, contact_joints);
+        const std::vector<pmg::ContactInterval> intervals =
+            pmg::DetectContacts(data.skeleton, data.clip, contact_joints, settings);
+        const int frame_count = data.clip.NumFrames();
+        const std::filesystem::path timeline_path =
+            options.out_dir / "contact_timeline.csv";
+        std::ofstream timeline(timeline_path);
+        if (!timeline) {
+            throw std::runtime_error(
+                "audit-loop: cannot write contact_timeline.csv");
+        }
+        timeline << "joint,first_frame,last_frame,strike_phase,lift_phase\n";
+        for (const pmg::ContactInterval& interval : intervals) {
+            std::string joint_label = std::to_string(interval.joint_index);
+            for (std::size_t i = 0; i < contact_joints.size(); ++i) {
+                if (contact_joints[i] == interval.joint_index) {
+                    joint_label = contact_joint_names[i];
+                    break;
+                }
+            }
+            timeline << joint_label << ',' << interval.first_frame << ','
+                     << interval.last_frame << ','
+                     << interval.StrikePhase(frame_count) << ','
+                     << interval.LiftPhase(frame_count) << "\n";
+        }
+        std::cout << "contact_timeline=" << timeline_path.string() << "\n";
+    }
     return 0;
 }
 
@@ -4745,10 +5620,58 @@ int TransitionPopAuditCommand(const TransitionPopAuditOptions& options) {
     const pmg::BuiltPmgArtifact artifact = pmg::LoadPmgArtifactText(options.pmg_path);
     const pmg::TransitionPopAuditReport report =
         pmg::AuditTransitionPop(artifact, options.worst_k);
+    std::filesystem::create_directories(options.out_dir);
     const std::filesystem::path out_path =
         options.out_dir / "transition_pop_audit.md";
+    const std::filesystem::path worst_csv_path =
+        options.out_dir / "worst_aligned_transitions.csv";
+    {
+        std::ofstream csv(worst_csv_path);
+        if (!csv) {
+            throw std::runtime_error(
+                "audit-transition-pop: cannot write worst_aligned_transitions.csv");
+        }
+        csv << "source_node,target_node,source_parameter,target_parameter,"
+               "source_transition_frame,target_transition_frame,"
+               "stored_transition_distance,raw_root_jump,aligned_root_jump,"
+               "raw_joint_jump,aligned_joint_jump,raw_velocity_jump,"
+               "aligned_velocity_jump,contact_mismatch,alignment_yaw,"
+               "alignment_translation_x,alignment_translation_z\n";
+        for (const pmg::TransitionPopAuditRow& row : report.worst_transitions) {
+            csv << EscapeCsvCell(row.source_node) << ','
+                << EscapeCsvCell(row.target_node) << ','
+                << ParameterCsv(row.source_parameter) << ','
+                << ParameterCsv(row.target_parameter) << ','
+                << row.source_frame << ','
+                << row.target_frame << ','
+                << row.transition_distance << ','
+                << row.raw_root_position_jump << ','
+                << row.aligned_root_position_jump << ','
+                << row.raw_joint_pose_jump << ','
+                << row.aligned_joint_pose_jump << ','
+                << row.raw_velocity_jump << ','
+                << row.aligned_velocity_jump << ','
+                << row.contact_mismatch << ','
+                << row.alignment_yaw << ','
+                << row.alignment_dx << ','
+                << row.alignment_dz << "\n";
+        }
+    }
+
+    const std::vector<ArtifactLoopSweepRow> loop_rows =
+        BuildArtifactLoopSweepRows(artifact);
+    WriteArtifactLoopSweepCsv(
+        options.out_dir / "generated_loop_sweep.csv", loop_rows);
+    WriteArtifactLoopSweepMarkdown(
+        options.out_dir / "generated_loop_sweep.md", loop_rows);
+
     pmg::WriteTransitionPopAuditReport(report, out_path);
     std::cout << "transition_pop_audit=" << out_path.string() << "\n";
+    std::cout << "transition_pop_worst_csv=" << worst_csv_path.string() << "\n";
+    std::cout << "generated_loop_sweep_csv="
+              << (options.out_dir / "generated_loop_sweep.csv").string() << "\n";
+    std::cout << "generated_loop_sweep_md="
+              << (options.out_dir / "generated_loop_sweep.md").string() << "\n";
     return 0;
 }
 
@@ -5899,6 +6822,12 @@ std::optional<int> TryRunDiagnosticCommand(int argc, char** argv) {
     if ((command == "audit-transition-pop" || command == "--audit-transition-pop") &&
         argc >= 5) {
         return TransitionPopAuditCommand(ParseTransitionPopAuditOptions(argc, argv));
+    }
+    if ((command == "audit-motion-space-registration" ||
+         command == "--audit-motion-space-registration") &&
+        argc >= 5) {
+        return MotionSpaceRegistrationAuditCommand(
+            ParseMotionSpaceRegistrationAuditOptions(argc, argv));
     }
     if ((command == "inspect-skeleton" || command == "--inspect-skeleton") &&
         argc >= 5) {

@@ -36,6 +36,9 @@ BuiltPmgArtifact BuildPmgOfflinePipeline(
             artifact.graph.AddNode(node.name, prepared_node.production));
         artifact.metadata.node_registrations.push_back(
             prepared_node.registration);
+        for (const ExampleMotion& example : prepared_node.production.Examples()) {
+            artifact.metadata.source_segments.push_back(example.segment);
+        }
     }
 
     artifact.metadata.generated_frame_count =

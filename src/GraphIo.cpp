@@ -28,21 +28,23 @@ struct GraphPayloadFormat {
     bool has_transition_distance;    // V9+ store per-sample build-time distance D
     bool has_transition_metric_config;  // V10+ store metric kind/config per edge build
     bool has_parameter_support;      // V11+ store explicit parameter support
+    bool has_example_segments;       // V13+ store per-example source segment provenance
 };
 
 std::optional<GraphPayloadFormat> FormatForHeader(const std::string& header) {
-    //                                       meta+skel warp  calib vector target quoted conv   dist   metric support
-    if (header == "PMG_GRAPH_V12") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true};
-    if (header == "PMG_GRAPH_V11") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true};
-    if (header == "PMG_GRAPH_V10") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  false};
-    if (header == "PMG_GRAPH_V9")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  false, false};
-    if (header == "PMG_GRAPH_V8")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  false, false, false};
-    if (header == "PMG_GRAPH_V7")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false, false, false, false};
-    if (header == "PMG_GRAPH_V6")  return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false, false, false, false};
-    if (header == "PMG_GRAPH_V5")  return GraphPayloadFormat{true,  true,  true,  false, false, true,  false, false, false, false};
-    if (header == "PMG_GRAPH_V4")  return GraphPayloadFormat{true,  true,  false, false, false, true,  false, false, false, false};
-    if (header == "PMG_GRAPH_V3")  return GraphPayloadFormat{false, true,  false, false, false, false, false, false, false, false};
-    if (header == "PMG_GRAPH_V2")  return GraphPayloadFormat{false, false, false, false, false, false, false, false, false, false};
+    //                                       meta+skel warp  calib vector target quoted conv   dist   metric support seg
+    if (header == "PMG_GRAPH_V13") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true,  true};
+    if (header == "PMG_GRAPH_V12") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true,  false};
+    if (header == "PMG_GRAPH_V11") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  true,  false};
+    if (header == "PMG_GRAPH_V10") return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  true,  false, false};
+    if (header == "PMG_GRAPH_V9")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  true,  false, false, false};
+    if (header == "PMG_GRAPH_V8")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  true,  false, false, false, false};
+    if (header == "PMG_GRAPH_V7")  return GraphPayloadFormat{true,  true,  true,  true,  true,  true,  false, false, false, false, false};
+    if (header == "PMG_GRAPH_V6")  return GraphPayloadFormat{true,  true,  true,  false, true,  true,  false, false, false, false, false};
+    if (header == "PMG_GRAPH_V5")  return GraphPayloadFormat{true,  true,  true,  false, false, true,  false, false, false, false, false};
+    if (header == "PMG_GRAPH_V4")  return GraphPayloadFormat{true,  true,  false, false, false, true,  false, false, false, false, false};
+    if (header == "PMG_GRAPH_V3")  return GraphPayloadFormat{false, true,  false, false, false, false, false, false, false, false, false};
+    if (header == "PMG_GRAPH_V2")  return GraphPayloadFormat{false, false, false, false, false, false, false, false, false, false, false};
     return std::nullopt;
 }
 
@@ -131,6 +133,28 @@ void WriteClip(std::ostream& output, const MotionClip& clip) {
         }
         output << '\n';
     }
+}
+
+void WriteSegment(std::ostream& output, const MotionClipSegment& segment) {
+    output << "segment " << std::quoted(segment.source_bvh) << ' '
+           << segment.start_frame << ' ' << segment.end_frame << ' '
+           << std::quoted(segment.phase_label) << ' '
+           << std::quoted(segment.contact_start) << ' '
+           << std::quoted(segment.contact_end) << '\n';
+}
+
+MotionClipSegment ReadSegment(std::istream& input) {
+    std::string keyword;
+    MotionClipSegment segment;
+    input >> keyword >> std::quoted(segment.source_bvh)
+          >> segment.start_frame >> segment.end_frame
+          >> std::quoted(segment.phase_label)
+          >> std::quoted(segment.contact_start)
+          >> std::quoted(segment.contact_end);
+    if (keyword != "segment" || !input) {
+        throw std::runtime_error("LoadPmgArtifactText: expected segment record");
+    }
+    return segment;
 }
 
 MotionClip ReadClip(std::istream& input, bool quoted_names) {
@@ -306,6 +330,7 @@ void WriteGraphPayload(std::ostream& output, const ParametricMotionGraph& graph)
             output << "example ";
             WriteParameter(output, example.parameter);
             output << '\n';
+            WriteSegment(output, example.segment);
             WriteClip(output, example.clip);
         }
         const std::vector<TimeWarp>& warps = space.ExampleTimeWarps();
@@ -431,7 +456,14 @@ ParametricMotionGraph ReadGraphPayload(
                     "LoadPmgArtifactText: expected example record");
             }
             const ParameterVector parameter = ReadParameter(input);
-            space.AddExample(parameter, ReadClip(input, format.quoted_names));
+            MotionClipSegment segment;
+            if (format.has_example_segments) {
+                segment = ReadSegment(input);
+            }
+            space.AddExample(
+                parameter,
+                ReadClip(input, format.quoted_names),
+                std::move(segment));
         }
         if (format.has_warp_records) {
             int warp_count = 0;
@@ -814,6 +846,10 @@ void WriteMetadata(std::ostream& output, const PmgArtifactMetadata& metadata) {
     for (const std::string& path : metadata.source_bvh_paths) {
         output << "source " << std::quoted(path) << '\n';
     }
+    output << "source_segments " << metadata.source_segments.size() << '\n';
+    for (const MotionClipSegment& segment : metadata.source_segments) {
+        WriteSegment(output, segment);
+    }
     output << "registrations " << metadata.node_registrations.size() << '\n';
     for (const NodeRegistrationMetadata& registration :
          metadata.node_registrations) {
@@ -877,8 +913,18 @@ PmgArtifactMetadata ReadMetadata(
         metadata.source_bvh_paths.push_back(std::move(path));
     }
 
+    // V13+ emits an optional "source_segments <n>" block before
+    // "registrations". Older formats jump straight to "registrations"; peek the
+    // keyword to support both without double-reading the registration count.
     std::size_t registration_count = 0;
     input >> keyword >> registration_count;
+    if (keyword == "source_segments") {
+        const std::size_t source_segment_count = registration_count;
+        for (std::size_t index = 0; index < source_segment_count; ++index) {
+            metadata.source_segments.push_back(ReadSegment(input));
+        }
+        input >> keyword >> registration_count;
+    }
     if (keyword != "registrations") {
         throw std::runtime_error(
             "LoadPmgArtifactText: expected registrations record");
@@ -957,7 +1003,7 @@ void SavePmgArtifactText(
             "SavePmgArtifactText: failed to open '" + path + "'");
     }
     output << std::setprecision(9);
-    output << "PMG_GRAPH_V12\n";
+    output << "PMG_GRAPH_V13\n";
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
@@ -975,7 +1021,7 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
     const std::optional<GraphPayloadFormat> format = FormatForHeader(header);
     if (!format) {
         throw std::runtime_error(
-            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V12");
+            "LoadPmgArtifactText: expected PMG_GRAPH_V2 through V13");
     }
 
     BuiltPmgArtifact artifact;

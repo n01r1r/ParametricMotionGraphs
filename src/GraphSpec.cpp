@@ -41,6 +41,54 @@ std::string ResolveRelativePath(const std::filesystem::path& base_directory,
     return (base_directory / path).lexically_normal().string();
 }
 
+MotionClipSegment ParseExampleSegmentTail(
+    std::istringstream& line,
+    int line_number,
+    const std::filesystem::path& base_directory,
+    const std::string& bvh_path_text) {
+    MotionClipSegment segment = FullClipSegment(
+        ResolveRelativePath(base_directory, bvh_path_text));
+    std::string field_name;
+    while (line >> field_name) {
+        if (field_name == "start_frame") {
+            if (!(line >> segment.start_frame)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": start_frame requires an integer value");
+            }
+        } else if (field_name == "end_frame") {
+            if (!(line >> segment.end_frame)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": end_frame requires an integer value");
+            }
+        } else if (field_name == "phase_label") {
+            if (!(line >> segment.phase_label)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": phase_label requires a value");
+            }
+        } else if (field_name == "contact_start") {
+            if (!(line >> segment.contact_start)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": contact_start requires a value");
+            }
+        } else if (field_name == "contact_end") {
+            if (!(line >> segment.contact_end)) {
+                throw std::runtime_error(
+                    "LoadGraphSpec line " + std::to_string(line_number) +
+                    ": contact_end requires a value");
+            }
+        } else {
+            throw std::runtime_error(
+                "LoadGraphSpec line " + std::to_string(line_number) +
+                ": unknown example field '" + field_name + "'");
+        }
+    }
+    return segment;
+}
+
 std::vector<std::string> SplitCommaList(const std::string& text) {
     std::vector<std::string> values;
     std::istringstream stream(text);
@@ -366,7 +414,9 @@ GraphSpec LoadGraphSpec(const std::string& path) {
                 throw std::runtime_error("LoadGraphSpec line " + std::to_string(line_number) +
                                          ": missing BVH path");
             }
-            example.bvh_path = ResolveRelativePath(base_directory, bvh_path);
+            example.segment = ParseExampleSegmentTail(
+                line, line_number, base_directory, bvh_path);
+            example.bvh_path = example.segment.source_bvh;
             spec.examples.push_back(example);
             continue;
         }

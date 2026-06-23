@@ -10,8 +10,8 @@ parameter_support walk_2d triangulated_2d
 
 example walk_2d -0.3 0.0 ../BVH/walkMoreCurve.bvh
 example walk_2d  0.0 0.0 ../BVH/walkCurve.bvh
-example walk_2d  1.0 0.0 ../BVH/walkTightCurve.bvh
-example walk_2d  0.0 1.0 ../BVH/jogCurve.bvh
+example walk_2d  1.0 0.0 ../BVH/walkTightCurve.bvh start_frame 33 end_frame 67 phase_label left_contact_start contact_start L=contact;R=swing contact_end L=contact;R=swing
+example walk_2d  0.0 1.0 ../BVH/jogCurve.bvh start_frame 23 end_frame 46 phase_label left_contact_start contact_start L=contact;R=swing contact_end L=contact;R=swing
 example walk_2d  0.15 0.75 ../BVH/walkStraightTwiceAsFast.bvh
 
 triangle walk_2d 0 1 4

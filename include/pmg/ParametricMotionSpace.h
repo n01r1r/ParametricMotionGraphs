@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pmg/MotionClip.h"
+#include "pmg/MotionClipSegment.h"
 #include "pmg/ParameterVector.h"
 #include "pmg/ParameterDomain.h"
 #include "pmg/ParameterSupport.h"
@@ -15,6 +16,7 @@ namespace pmg {
 struct ExampleMotion {
     ParameterVector parameter;
     MotionClip clip;
+    MotionClipSegment segment;
 };
 
 // Measurable motion properties used to make blends parameter-accurate.
@@ -60,7 +62,10 @@ public:
     int ParameterDimension() const;
     int NumExamples() const;
 
-    void AddExample(const ParameterVector& parameter, MotionClip clip);
+    void AddExample(
+        const ParameterVector& parameter,
+        MotionClip clip,
+        MotionClipSegment segment = {});
 
     // Registration warps, one per example, mapping the space's canonical
     // phase onto each example's own phase (see MotionRegistration). When set,

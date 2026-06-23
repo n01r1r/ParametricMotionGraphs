@@ -26,9 +26,16 @@ pmg::MotionClip MakeClip(float root_x) {
 
 pmg::ParametricMotionGraph MakeGraph(bool registered) {
     pmg::ParametricMotionSpace space("walk", 2);
-    space.AddExample({0.0f, 0.0f}, MakeClip(0.0f));
-    space.AddExample({1.0f, 0.0f}, MakeClip(10.0f));
-    space.AddExample({0.0f, 1.0f}, MakeClip(20.0f));
+    space.AddExample(
+        {0.0f, 0.0f}, MakeClip(0.0f),
+        {"a path/walk_a.bvh", 10, 20, "left_contact_start", "L=contact;R=swing",
+         "L=contact;R=swing"});
+    space.AddExample(
+        {1.0f, 0.0f}, MakeClip(10.0f),
+        {"walk_b.bvh", 0, 30, "", "", ""});
+    space.AddExample(
+        {0.0f, 1.0f}, MakeClip(20.0f),
+        {"walk_c.bvh", 5, 25, "", "", ""});
     if (registered) {
         space.SetExampleTimeWarps({
             pmg::TimeWarp::FromAnchors({0.5f}, {0.35f}),
@@ -98,6 +105,11 @@ pmg::BuiltPmgArtifact MakeArtifact() {
     artifact.metadata.generated_frame_count = 3;
     artifact.metadata.frames_per_second = 30.0f;
     artifact.metadata.source_bvh_paths = {"a path/walk_a.bvh", "walk_b.bvh"};
+    artifact.metadata.source_segments = {
+        {"a path/walk_a.bvh", 10, 20, "left_contact_start", "L=contact;R=swing",
+         "L=contact;R=swing"},
+        {"walk_b.bvh", 0, 30, "", "", ""},
+    };
     artifact.metadata.node_registrations.push_back(
         {"walk", "LeftAnkle", {"LeftAnkle", "RightAnkle"}, 3, true});
 
@@ -297,7 +309,7 @@ int main() {
         std::ifstream input(path);
         std::string header;
         input >> header;
-        assert(header == "PMG_GRAPH_V12");
+        assert(header == "PMG_GRAPH_V13");
     }
     const pmg::BuiltPmgArtifact loaded =
         pmg::LoadPmgArtifactText(path.string());
@@ -306,6 +318,8 @@ int main() {
     assert(loaded.skeleton.joints[0].name == "Hips");
     assert(loaded.metadata.generated_frame_count == 3);
     assert(loaded.metadata.source_bvh_paths[0] == "a path/walk_a.bvh");
+    assert(loaded.metadata.source_segments[0].start_frame == 10);
+    assert(loaded.metadata.source_segments[0].end_frame == 20);
     assert(loaded.metadata.node_registrations[0].dtw_refine);
     assert(loaded.metadata.edge_builds[0].config.seed == 42);
     assert(loaded.metadata.edge_builds[0].config.transition_metric_type ==
@@ -334,6 +348,10 @@ int main() {
                        .target_phase_samples[1]
                        .target_transition_phase -
                0.15f) < 1.0e-6f);
+    assert(loaded.graph.Node(0).motion_space.Examples()[0].segment.source_bvh ==
+           "a path/walk_a.bvh");
+    assert(loaded.graph.Node(0).motion_space.Examples()[0].segment.start_frame ==
+           10);
 
     // Parameter calibration round-trips with the space.
     {

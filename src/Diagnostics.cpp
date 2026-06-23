@@ -1,9 +1,11 @@
 #include "pmg/Diagnostics.h"
 
+#include "pmg/AlignmentStrategy.h"
 #include "pmg/ContactDetection.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
 #include "pmg/MotionClip.h"
+#include "pmg/PmgArtifact.h"
 #include "pmg/RigidTransform2D.h"
 #include "pmg/RootCanonicalization.h"
 #include "pmg/TransitionQuality.h"
@@ -214,9 +216,86 @@ float RootYawDelta(const Pose& first, const Pose& second) {
     return WrapAngleRadians(RootHeadingYaw(second) - RootHeadingYaw(first));
 }
 
+Pose AlignPoseForTransition(
+    const MotionClip& source_clip,
+    const MotionClip& target_clip,
+    const InterpolatedTransition& transition,
+    const RuntimeControllerConfig& runtime_config,
+    const RigidTransform2D& alignment,
+    int target_frame) {
+    float target_time_seconds =
+        static_cast<float>(target_frame) / target_clip.frames_per_second;
+    const float blend_seconds = TransitionWindowSpanSeconds(
+        runtime_config.transition_blend_frames,
+        source_clip.frames_per_second);
+    const int half_window = runtime_config.transition_blend_frames / 2;
+    const float target_lead_seconds =
+        runtime_config.convention == TransitionWindowConvention::kPmgCentered
+            ? static_cast<float>(half_window) / source_clip.frames_per_second
+            : blend_seconds;
+    const float raw_target_start =
+        transition.target_transition_phase * target_clip.DurationSeconds() -
+        target_lead_seconds;
+    const float normalized_phase =
+        target_clip.DurationSeconds() > 0.0f
+            ? (target_time_seconds - raw_target_start) /
+                  target_clip.DurationSeconds()
+            : 0.0f;
+    return alignment.Apply(target_clip.SampleNormalizedPhase(normalized_phase));
+}
+
+RigidTransform2D ResolveRuntimeAlignment(
+    const BuiltPmgArtifact& artifact,
+    const MotionClip& source_clip,
+    const MotionClip& target_clip,
+    const InterpolatedTransition& transition) {
+    const RuntimeControllerConfig runtime_config =
+        RuntimeControllerConfigFromArtifact(artifact);
+    const int half_window = runtime_config.transition_blend_frames / 2;
+    const float source_first_offset_phase =
+        runtime_config.convention == TransitionWindowConvention::kPmgCentered
+            ? static_cast<float>(half_window) /
+                  static_cast<float>(std::max(1, source_clip.NumFrames() - 1))
+            : 0.0f;
+    const float live_source_phase =
+        transition.source_transition_phase - source_first_offset_phase;
+    const AlignmentContext context{
+        source_clip,
+        target_clip,
+        live_source_phase,
+        transition,
+        runtime_config.transition_blend_frames,
+        runtime_config.convention};
+    const PointCloudAlignment alignment(
+        artifact.skeleton,
+        runtime_config.transition_blend_frames);
+    return alignment.Resolve(context);
+}
+
+float TransitionVelocityJump(
+    const MotionClip& source_clip,
+    const MotionClip& target_clip,
+    const RigidTransform2D& alignment,
+    int source_frame,
+    int target_frame) {
+    if (source_frame <= 0 || target_frame <= 0) {
+        return 0.0f;
+    }
+    const Vec3 source_step =
+        source_clip.frames[static_cast<std::size_t>(source_frame)].root_position -
+        source_clip.frames[static_cast<std::size_t>(source_frame - 1)].root_position;
+    const Vec3 target_step =
+        alignment.ApplyPoint(
+            target_clip.frames[static_cast<std::size_t>(target_frame)].root_position) -
+        alignment.ApplyPoint(
+            target_clip.frames[static_cast<std::size_t>(target_frame - 1)].root_position);
+    return HorizontalDistance(
+        source_step * source_clip.frames_per_second,
+        target_step * source_clip.frames_per_second);
+}
+
 TransitionPopAuditRow MakeTransitionPopRow(
     const BuiltPmgArtifact& artifact,
-    const PmgEdge& edge,
     const PmgNode& source_node,
     const PmgNode& target_node,
     const TransitionSample& source_sample,
@@ -230,9 +309,6 @@ TransitionPopAuditRow MakeTransitionPopRow(
     row.source_frame = probe.transition.source_frame;
     row.target_frame = probe.transition.target_frame;
     row.transition_distance = probe.transition.distance;
-    row.root_position_jump = probe.root_jump;
-    row.root_yaw_jump = probe.heading_jump;
-    row.velocity_jump = probe.velocity_jump;
     row.local_pop_ratio = probe.quality.local_pop_ratio;
     row.root_speed_ratio = probe.quality.root_speed_ratio;
     row.yaw_rate_ratio = probe.quality.yaw_rate_ratio;
@@ -247,10 +323,45 @@ TransitionPopAuditRow MakeTransitionPopRow(
         probe.effective_target_parameter, artifact.metadata.frames_per_second);
     const Pose source_pose =
         source_clip.frames[static_cast<std::size_t>(probe.transition.source_frame)];
-    const Pose aligned_target_pose = probe.transition.alignment.Apply(
-        target_clip.frames[static_cast<std::size_t>(probe.transition.target_frame)]);
-    row.joint_pose_jump = MeanJointDistance(
+    const Pose raw_target_pose =
+        target_clip.frames[static_cast<std::size_t>(probe.transition.target_frame)];
+    const InterpolatedTransition runtime_transition{
+        source_sample.target_parameter_box,
+        target_sample.source_transition_phase,
+        target_sample.target_transition_phase,
+        source_sample.transition_distance};
+
+    row.raw_root_position_jump = HorizontalDistance(
+        source_pose.root_position, raw_target_pose.root_position);
+    row.raw_root_yaw_jump = std::abs(
+        WrapAngleRadians(
+            RootHeadingYaw(raw_target_pose) - RootHeadingYaw(source_pose)));
+    row.raw_joint_pose_jump = MeanJointDistance(
+        artifact.skeleton, source_pose, raw_target_pose);
+    row.raw_velocity_jump = TransitionVelocityJump(
+        source_clip, target_clip, RigidTransform2D{},
+        probe.transition.source_frame, probe.transition.target_frame);
+
+    const RigidTransform2D runtime_alignment = ResolveRuntimeAlignment(
+        artifact, source_clip, target_clip, runtime_transition);
+    const RuntimeControllerConfig runtime_config =
+        RuntimeControllerConfigFromArtifact(artifact);
+    const Pose aligned_target_pose = AlignPoseForTransition(
+        source_clip, target_clip, runtime_transition, runtime_config,
+        runtime_alignment, probe.transition.target_frame);
+    row.aligned_root_position_jump = HorizontalDistance(
+        source_pose.root_position, aligned_target_pose.root_position);
+    row.aligned_root_yaw_jump = std::abs(
+        WrapAngleRadians(
+            RootHeadingYaw(aligned_target_pose) - RootHeadingYaw(source_pose)));
+    row.aligned_joint_pose_jump = MeanJointDistance(
         artifact.skeleton, source_pose, aligned_target_pose);
+    row.aligned_velocity_jump = TransitionVelocityJump(
+        source_clip, target_clip, runtime_alignment,
+        probe.transition.source_frame, probe.transition.target_frame);
+    row.alignment_yaw = runtime_alignment.yaw;
+    row.alignment_dx = runtime_alignment.dx;
+    row.alignment_dz = runtime_alignment.dz;
 
     int contact_mismatch = 0;
     if (probe.quality.left_contact_before != TransitionContactState::kUnknown &&
@@ -616,7 +727,7 @@ TransitionPopAuditReport AuditTransitionPop(
                     continue;
                 }
                 TransitionPopAuditRow row = MakeTransitionPopRow(
-                    artifact, edge, source_node, target_node, source_sample,
+                    artifact, source_node, target_node, source_sample,
                     target_sample, probe);
                 ++report.transition_count;
                 ++report.accepted_transition_count;
@@ -633,13 +744,13 @@ TransitionPopAuditReport AuditTransitionPop(
     std::sort(
         report.worst_transitions.begin(), report.worst_transitions.end(),
         [](const TransitionPopAuditRow& first, const TransitionPopAuditRow& second) {
-            if (first.joint_pose_jump != second.joint_pose_jump) {
-                return first.joint_pose_jump > second.joint_pose_jump;
+            if (first.aligned_joint_pose_jump != second.aligned_joint_pose_jump) {
+                return first.aligned_joint_pose_jump > second.aligned_joint_pose_jump;
             }
-            if (first.transition_distance != second.transition_distance) {
-                return first.transition_distance > second.transition_distance;
+            if (first.aligned_root_position_jump != second.aligned_root_position_jump) {
+                return first.aligned_root_position_jump > second.aligned_root_position_jump;
             }
-            return first.velocity_jump > second.velocity_jump;
+            return first.aligned_velocity_jump > second.aligned_velocity_jump;
         });
     if (static_cast<int>(report.worst_transitions.size()) > worst_k) {
         report.worst_transitions.resize(static_cast<std::size_t>(worst_k));
@@ -648,7 +759,9 @@ TransitionPopAuditReport AuditTransitionPop(
     report.suggested_notes.push_back(
         report.worst_transitions.empty()
             ? "no accepted transitions to audit"
-            : "worst rows sorted by joint pose jump, then transition distance");
+            : "worst rows sorted by aligned joint jump, then aligned root jump");
+    report.suggested_notes.push_back(
+        "raw seam fields use target clip as-is; aligned seam fields recompute runtime point-cloud alignment");
     report.suggested_notes.push_back(
         "montage references reuse existing transition_montage_manifest.csv entries");
     return report;
@@ -829,22 +942,24 @@ void WriteTransitionPopAuditReport(
         md << "- " << note << "\n";
     }
     md << "\n## Worst transitions\n\n";
-    md << "| Source p | Target p | Src frame | Tgt frame | D | Root jump | Yaw jump | Joint jump | Velocity jump | Contact mismatch | Local pop | Root speed ratio | Yaw ratio | Montage |\n";
-    md << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n";
+    md << "| Source p | Target p | Src frame | Tgt frame | D | Raw root | Aligned root | Raw joint | Aligned joint | Raw vel | Aligned vel | Contact mismatch | Align yaw | Align dx | Align dz | Montage |\n";
+    md << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n";
     for (const TransitionPopAuditRow& row : report.worst_transitions) {
         md << "| " << JoinParameters(row.source_parameter)
            << " | " << JoinParameters(row.target_parameter)
            << " | " << row.source_frame
            << " | " << row.target_frame
            << " | " << row.transition_distance
-           << " | " << row.root_position_jump
-           << " | " << row.root_yaw_jump
-           << " | " << row.joint_pose_jump
-           << " | " << row.velocity_jump
+           << " | " << row.raw_root_position_jump
+           << " | " << row.aligned_root_position_jump
+           << " | " << row.raw_joint_pose_jump
+           << " | " << row.aligned_joint_pose_jump
+           << " | " << row.raw_velocity_jump
+           << " | " << row.aligned_velocity_jump
            << " | " << row.contact_mismatch
-           << " | " << row.local_pop_ratio
-           << " | " << row.root_speed_ratio
-           << " | " << row.yaw_rate_ratio
+           << " | " << row.alignment_yaw
+           << " | " << row.alignment_dx
+           << " | " << row.alignment_dz
            << " | `" << row.montage_reference << "` |\n";
     }
 }

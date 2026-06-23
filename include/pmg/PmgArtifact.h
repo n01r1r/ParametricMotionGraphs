@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pmg/MotionClipSegment.h"
 #include "pmg/ParametricMotionGraph.h"
 #include "pmg/PmgBuilder.h"
 #include "pmg/RuntimeController.h"
@@ -30,6 +31,7 @@ struct PmgArtifactMetadata {
     int generated_frame_count = 0;
     float frames_per_second = 0.0f;
     std::vector<std::string> source_bvh_paths;
+    std::vector<MotionClipSegment> source_segments;
     std::vector<NodeRegistrationMetadata> node_registrations;
     std::vector<EdgeBuildMetadata> edge_builds;
 };
