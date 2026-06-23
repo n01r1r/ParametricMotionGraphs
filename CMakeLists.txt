@@ -265,10 +265,15 @@ if(PMG_BUILD_TESTS)
     set_tests_properties(cli_probe_transition_outside_projection PROPERTIES
         DEPENDS cli_build_artifact_walk_2d)
 
+    # --tolerance asserts the goal is actually reached within --seconds, not just
+    # that popping stays low. Guards the arrival-ease default: with the old
+    # too-small arrival_speed_distance the character orbited the goal and only
+    # grazed tolerance at ~24.7 s (> 20 s), so this would fail.
     add_test(NAME cli_goto_walk_2d
         COMMAND pmg_cli --goto
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d.pmg_spec 10 10
             --seconds 20
+            --tolerance 2.0
             --max-pop-ratio 8.0)
 
     # Unit fixtures. These are not presentation demos; they exercise edge

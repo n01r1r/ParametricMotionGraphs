@@ -70,7 +70,7 @@ void PrintUsage() {
               << "      [builder/registration opts]\n"
               << "  pmg_cli --goto graph_spec.txt|graph.pmg x z [--seconds S] [--tolerance D]\n"
               << "      [--facing-degrees DEG --facing-tolerance-degrees DEG]\n"
-              << "      [--max-pop-ratio X] [builder/registration opts]\n";
+              << "      [--arrival-distance D] [--max-pop-ratio X] [builder/registration opts]\n";
 }
 
 }  // namespace

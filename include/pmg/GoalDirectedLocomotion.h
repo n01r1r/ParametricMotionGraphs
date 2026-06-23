@@ -59,8 +59,13 @@ struct GoalDirectedLocomotionConfig {
     float orientation_blend_distance = 5.0f;
     // Travel-speed axes cruise at their fastest achievable pace until within
     // this floor distance of the goal, then ease toward their slowest so the
-    // controller settles onto the target instead of overshooting it.
-    float arrival_speed_distance = 3.0f;
+    // controller settles onto the target instead of overshooting it. Must exceed
+    // the cruise turning radius (cruise speed / max turn rate, ~16 native units
+    // for the walk_2d demo): below it the character keeps cruise speed all the
+    // way in and orbits the goal at its turning radius instead of spiralling in.
+    // Per-corpus calibration knob in native BVH distance units; also exposed as
+    // `pmg_cli --goto --arrival-distance`.
+    float arrival_speed_distance = 18.0f;
     // Optional per-axis metric override (size must equal the node dimension).
     // Empty = read from the node's parameter calibration; a 1-D node with no
     // calibration defaults to a single turn_rate axis.

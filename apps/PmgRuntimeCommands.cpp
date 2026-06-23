@@ -731,6 +731,8 @@ struct GotoOptions {
     // Assert thresholds; negative = report only.
     float tolerance = -1.0f;
     float max_pop_ratio = -1.0f;
+    // Override the steering arrival-ease distance; negative = use config default.
+    float arrival_distance = -1.0f;
 };
 
 // Paper application B/C: goal-directed locomotion through semantic control.
@@ -756,6 +758,9 @@ int GotoCommand(const GotoOptions& options) {
         pmg::RuntimeControllerConfigFromArtifact(artifact);
     pmg::GoalDirectedLocomotionConfig steering_config;
     steering_config.runtime = runtime_config;
+    if (options.arrival_distance >= 0.0f) {
+        steering_config.arrival_speed_distance = options.arrival_distance;
+    }
     pmg::GoalDirectedLocomotion steering(
         artifact.graph, artifact.skeleton, 0,
         artifact.metadata.frames_per_second, steering_config);
@@ -1025,6 +1030,8 @@ GotoOptions ParseGotoOptions(int argc, char** argv) {
             options.tolerance = std::stof(require_value("--tolerance"));
         } else if (option == "--max-pop-ratio") {
             options.max_pop_ratio = std::stof(require_value("--max-pop-ratio"));
+        } else if (option == "--arrival-distance") {
+            options.arrival_distance = std::stof(require_value("--arrival-distance"));
         } else if (option == "--facing-degrees") {
             options.final_facing_degrees =
                 std::stof(require_value("--facing-degrees"));
