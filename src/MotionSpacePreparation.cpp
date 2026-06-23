@@ -1,6 +1,7 @@
 #include "pmg/MotionSpacePreparation.h"
 
 #include "pmg/BvhLoader.h"
+#include "pmg/ContactDetection.h"
 #include "pmg/MotionRegistration.h"
 #include "pmg/RootCanonicalization.h"
 #include "pmg/SkeletonCompatibility.h"
@@ -23,14 +24,40 @@ int FindJointIndex(const Skeleton& skeleton, const std::string& name, const std:
     throw std::runtime_error(context + ": unknown joint '" + name + "'");
 }
 
-bool IsExplicitRecutBvhPath(const std::string& path) {
-    // Files produced by `pmg_cli --export-known-cyclic-recuts` are already
-    // cropped to the intended cycle window. Running ExtractFirstCycle again on
-    // those short clips can fail because a valid one-cycle clip may contain only
-    // one detected strike for the cycle joint. Keep registration/contact metadata
-    // active, but do not perform a second contact-based cycle extraction.
-    const std::string filename = std::filesystem::path(path).filename().string();
-    return filename.find("_recut_") != std::string::npos;
+MotionClip ExtractClipSegment(
+    const MotionClip& clip,
+    const MotionClipSegment& segment) {
+    const int clip_last_frame = clip.NumFrames() - 1;
+    const int resolved_end_frame =
+        segment.end_frame < 0 ? clip_last_frame : segment.end_frame;
+    if (segment.start_frame < 0) {
+        throw std::runtime_error(
+            "PrepareMotionSpaces: segment start_frame must be >= 0 for '" +
+            segment.source_bvh + "'");
+    }
+    if (resolved_end_frame > clip_last_frame) {
+        throw std::runtime_error(
+            "PrepareMotionSpaces: segment end_frame " +
+            std::to_string(resolved_end_frame) + " exceeds last frame " +
+            std::to_string(clip_last_frame) + " for '" + segment.source_bvh + "'");
+    }
+    if (resolved_end_frame <= segment.start_frame) {
+        throw std::runtime_error(
+            "PrepareMotionSpaces: segment end_frame must be > start_frame for '" +
+            segment.source_bvh + "'");
+    }
+    const int segment_frame_count = resolved_end_frame - segment.start_frame + 1;
+    if (segment_frame_count < 2) {
+        throw std::runtime_error(
+            "PrepareMotionSpaces: segment must contain at least 2 frames for '" +
+            segment.source_bvh + "'");
+    }
+
+    MotionClip extracted = clip;
+    extracted.frames.assign(
+        clip.frames.begin() + segment.start_frame,
+        clip.frames.begin() + resolved_end_frame + 1);
+    return extracted;
 }
 
 NodeRegistrationMetadata ResolveRegistration(const GraphSpecNode& node,
@@ -85,7 +112,7 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
                 continue;
             }
 
-            BvhData bvh = BvhLoader::Load(example.bvh_path);
+            BvhData bvh = BvhLoader::Load(example.segment.source_bvh);
             if (!reference_skeleton.has_value()) {
                 reference_skeleton = bvh.skeleton;
             } else {
@@ -93,22 +120,40 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
                                           config.skeleton_offset_tolerance);
             }
 
-            MotionClip clip = std::move(bvh.clip);
-            const bool should_extract_first_cycle =
-                !stages.registration.cycle_joint.empty() &&
-                !IsExplicitRecutBvhPath(example.bvh_path);
-            if (should_extract_first_cycle) {
-                const int cycle_joint =
-                    FindJointIndex(*reference_skeleton, stages.registration.cycle_joint,
-                                   "PrepareMotionSpaces cycle joint");
-                const ContactDetectionSettings cycle_settings =
-                    EstimateContactSettings(*reference_skeleton, clip, {cycle_joint});
-                clip = ExtractFirstCycle(*reference_skeleton, clip, cycle_joint, cycle_settings);
-            }
+            const int source_frame_count = bvh.clip.NumFrames();
+            const bool has_explicit_window =
+                example.segment.start_frame > 0 || example.segment.end_frame >= 0;
 
+            MotionClipSegment resolved_segment = example.segment;
+            MotionClip clip;
+            if (has_explicit_window) {
+                // Author selected an exact cycle window; use it verbatim and
+                // skip cycle re-detection.
+                clip = ExtractClipSegment(bvh.clip, example.segment);
+                if (resolved_segment.end_frame < 0) {
+                    resolved_segment.end_frame = source_frame_count - 1;
+                }
+            } else {
+                // Backward-compatible full-clip path: optionally crop to the
+                // first detected locomotion cycle so examples stay blendable.
+                clip = std::move(bvh.clip);
+                if (!stages.registration.cycle_joint.empty()) {
+                    const int cycle_joint = FindJointIndex(
+                        *reference_skeleton, stages.registration.cycle_joint,
+                        "PrepareMotionSpaces cycle joint");
+                    const ContactDetectionSettings cycle_settings =
+                        EstimateContactSettings(*reference_skeleton, clip,
+                                                {cycle_joint});
+                    clip = ExtractFirstCycle(*reference_skeleton, clip, cycle_joint,
+                                             cycle_settings);
+                }
+                resolved_segment.start_frame = 0;
+                resolved_segment.end_frame = source_frame_count - 1;
+            }
             clip = CanonicalizeRootOrigin(clip);
-            authored.AddExample(example.parameter, std::move(clip));
-            prepared.source_bvh_paths.push_back(example.bvh_path);
+            authored.AddExample(
+                example.parameter, std::move(clip), std::move(resolved_segment));
+            prepared.source_bvh_paths.push_back(example.segment.source_bvh);
         }
 
         if (authored.NumExamples() == 0) {

@@ -64,6 +64,9 @@ int main() {
     const pmg::GraphSpec parsed = pmg::LoadGraphSpec(spec_path.string());
     assert(parsed.nodes.size() == 1);
     assert(parsed.examples.size() == 2);
+    assert(parsed.examples[0].segment.source_bvh == bvh_a.string());
+    assert(parsed.examples[0].segment.start_frame == 0);
+    assert(parsed.examples[0].segment.end_frame == -1);
     assert(parsed.edges.size() == 1);
     assert(parsed.nodes[0].has_registration_config);
     assert(parsed.nodes[0].contact_joints.empty());
@@ -110,6 +113,24 @@ int main() {
                pmg::ParameterMetric::kTurnRate,
                pmg::ParameterMetric::kTravelSpeed}));
     assert(multidimensional.nodes[0].calibration_samples_per_axis == 7);
+
+    const std::filesystem::path segmented_spec_path =
+        directory / "segmented.txt";
+    {
+        std::ofstream segmented_spec(segmented_spec_path);
+        segmented_spec << "node walk 1\n"
+                       << "example walk 0 walk_a.bvh start_frame 1 end_frame 3 "
+                          "phase_label left_contact_start "
+                          "contact_start L=contact;R=swing "
+                          "contact_end L=contact;R=swing\n";
+    }
+    const pmg::GraphSpec segmented =
+        pmg::LoadGraphSpec(segmented_spec_path.string());
+    assert(segmented.examples[0].segment.source_bvh == bvh_a.string());
+    assert(segmented.examples[0].segment.start_frame == 1);
+    assert(segmented.examples[0].segment.end_frame == 3);
+    assert(segmented.examples[0].segment.phase_label ==
+           "left_contact_start");
 
     const std::filesystem::path invalid_metrics_spec_path =
         directory / "invalid_metrics.txt";

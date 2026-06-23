@@ -8,12 +8,16 @@ namespace {
 
 void PrintUsage() {
     std::cerr << "Usage:\n"
+              << "  pmg_cli inspect-skeleton input.bvh --out outputs/skeleton_report\n"
               << "  pmg_cli --bvh path/to/file.bvh\n"
               << "  pmg_cli --list-bvh-joints path/to/file.bvh\n"
+              << "  pmg_cli audit-corpus --corpus-root path --out output_dir [--max-files N]\n"
               << "  pmg_cli --extract-candidate-windows file.bvh --min-frames N --max-frames N\n"
               << "      --stride N --top-k K --output-md out.md --output-csv out.csv\n"
               << "      [--output-candidates out.pmg_candidates.json]\n"
               << "  pmg_cli --inspect-transition source.bvh target.bvh\n"
+              << "  pmg_cli audit-loop input.bvh --out outputs/loop_audit\n"
+              << "  pmg_cli audit-transition-pop artifact.pmg --out outputs/transition_pop_audit\n"
               << "  pmg_cli --compare-transition-conventions source.bvh target.bvh\n"
               << "  pmg_cli --dump-distance-grid source.bvh target.bvh out.csv\n"
               << "  pmg_cli --calibrate-thresholds bvh_directory [manifest.txt]\n"

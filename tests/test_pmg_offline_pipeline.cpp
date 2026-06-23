@@ -45,8 +45,10 @@ pmg::GraphSpec MakeSpec(const std::filesystem::path& bvh_a,
     node.contact_joints.clear();
     node.dtw_refine = false;
     spec.nodes.push_back(node);
-    spec.examples.push_back({"walk", {0.0f}, bvh_a.string()});
-    spec.examples.push_back({"walk", {1.0f}, bvh_b.string()});
+    spec.examples.push_back(
+        {"walk", {0.0f}, bvh_a.string(), pmg::FullClipSegment(bvh_a.string())});
+    spec.examples.push_back(
+        {"walk", {1.0f}, bvh_b.string(), pmg::FullClipSegment(bvh_b.string())});
     spec.edges.push_back({"walk", "walk"});
     return spec;
 }

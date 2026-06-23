@@ -13,6 +13,8 @@ add_library(pmg_core
     src/BvhLoader.cpp
     src/CandidateWindowExtractor.cpp
     src/ContactDetection.cpp
+    src/CorpusAudit.cpp
+    src/Diagnostics.cpp
     src/CyclicContinuity.cpp
     src/FootLocking.cpp
     src/ForwardKinematics.cpp
@@ -83,6 +85,10 @@ if(PMG_BUILD_TESTS)
     target_link_libraries(test_bvh_loader PRIVATE pmg_core)
     add_test(NAME test_bvh_loader COMMAND test_bvh_loader)
 
+    add_executable(test_corpus_audit tests/test_corpus_audit.cpp)
+    target_link_libraries(test_corpus_audit PRIVATE pmg_core)
+    add_test(NAME test_corpus_audit COMMAND test_corpus_audit)
+
     add_executable(test_motion_distance tests/test_motion_distance.cpp)
     target_link_libraries(test_motion_distance PRIVATE pmg_core)
     add_test(NAME test_motion_distance COMMAND test_motion_distance)
@@ -107,6 +113,10 @@ if(PMG_BUILD_TESTS)
         tests/test_transition_quality.cpp)
     target_link_libraries(test_transition_quality PRIVATE pmg_core)
     add_test(NAME test_transition_quality COMMAND test_transition_quality)
+
+    add_executable(test_diagnostics tests/test_diagnostics.cpp)
+    target_link_libraries(test_diagnostics PRIVATE pmg_core)
+    add_test(NAME test_diagnostics COMMAND test_diagnostics)
 
     add_executable(test_cyclic_continuity
         tests/test_cyclic_continuity.cpp)
@@ -266,6 +276,16 @@ if(PMG_BUILD_TESTS)
         COMMAND pmg_cli --build-graph
             ${CMAKE_CURRENT_SOURCE_DIR}/specs/fixtures/fixture_transition_box_shrink.pmg_spec
             ${PMG_TEST_ARTIFACT_ROOT}/box_shrink/artifact.pmg)
+
+    add_test(NAME cli_diagnostics_smoke
+        COMMAND ${CMAKE_COMMAND}
+            -DPMG_CLI=$<TARGET_FILE:pmg_cli>
+            -DBVH_PATH=${CMAKE_CURRENT_SOURCE_DIR}/BVH/WalkLoopA.bvh
+            -DPMG_PATH=${PMG_TEST_ARTIFACT_ROOT}/walk_2d/artifact.pmg
+            -DOUT_ROOT=${PMG_TEST_ARTIFACT_ROOT}/cli_diagnostics_smoke
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_diagnostics_smoke.cmake)
+    set_tests_properties(cli_diagnostics_smoke PROPERTIES
+        DEPENDS cli_build_artifact_walk_2d)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -351,6 +371,7 @@ if(PMG_BUILD_VIEWER)
     target_compile_definitions(viewer_host PUBLIC GLEW_STATIC)
 
     add_library(pmg_viewer_workspace STATIC
+        apps/viewer/ImGuiViewerUi.cpp
         apps/viewer/PmgViewerWorkspace.cpp
         apps/viewer/PmgViewerWorkspaceGraph.cpp
         apps/viewer/ViewerRuntimeModule.cpp
@@ -397,5 +418,10 @@ if(PMG_BUILD_VIEWER)
         target_include_directories(test_viewer_runtime_module PRIVATE apps/viewer include)
         target_link_libraries(test_viewer_runtime_module PRIVATE pmg_viewer_workspace pmg_core)
         add_test(NAME test_viewer_runtime_module COMMAND test_viewer_runtime_module)
+
+        add_executable(test_viewer_ui_commands tests/test_viewer_ui_commands.cpp)
+        target_include_directories(test_viewer_ui_commands PRIVATE apps/viewer include)
+        target_link_libraries(test_viewer_ui_commands PRIVATE pmg_viewer_workspace pmg_core)
+        add_test(NAME test_viewer_ui_commands COMMAND test_viewer_ui_commands)
     endif()
 endif()

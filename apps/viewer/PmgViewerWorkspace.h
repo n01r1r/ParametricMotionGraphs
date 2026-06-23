@@ -19,7 +19,9 @@
 #include "pmg/Skeleton.h"
 
 #include "GraphAuthoringModel.h"
+#include "ImGuiViewerUi.h"
 #include "ViewerRuntimeModule.h"
+#include "ViewerUiState.h"
 #include "ViewerWorkspace.h"
 
 namespace pmgviewer {
@@ -29,12 +31,6 @@ namespace pmgviewer {
 //   ParametricBlend - evaluate the live ParametricMotionSpace blend.
 //   GraphRuntime    - stream motion from a ParametricMotionGraph via
 //                     RuntimeController (self-edge transitions, paper Sec 4-5).
-enum class ViewerPlaybackMode {
-    ClipPlayback,
-    ParametricBlend,
-    GraphRuntime,
-};
-
 // PMG Adapter: owns loaded BVH motion, playback, graph diagnostics, and the
 // conversion from pmg_core data into an algorithm-neutral RenderScene.
 //
@@ -59,6 +55,9 @@ public:
 
     void Update(float delta_seconds) override;
     void BuildUi() override;
+    ViewerUiState MakeUiState() const;
+    void ApplyUiCommand(const ViewerUiCommand& command);
+    void ApplyUiCommands(const std::vector<ViewerUiCommand>& commands);
 
     // Ray pick (display-space, e.g. from a right-click unprojected by main):
     // intersects the ground plane and, in graph runtime, places the goto
@@ -88,6 +87,7 @@ private:
     void DiscoverBvhFiles();
     void LoadClip(int file_index);
     pmg::Pose CurrentPose() const;
+    pmg::Pose DisplayPose() const;
     const pmg::Skeleton& ActiveSkeleton() const;
     void RebuildScene(const pmg::Pose& pose);
     // Transform a pose's joints into render/world space (ground lift, then the
@@ -127,23 +127,19 @@ private:
 
     void BuildWorkflowSection();
     void BuildTransportSection();
-    void BuildInputsSection();
     void BuildDisplaySection();
-    void BuildMotionSpaceSection();
     void BuildDistanceGridSection();
     void BuildGraphSection();
     void BuildGraphAuthorTab();
     void BuildGraphSpecTab();
     void BuildGraphQuickTab();
     void BuildGraphRuntimeTab();
-    void DrawParameterSpace(int axis);
     // 2-D scatter of a node's example parameters with the parameter-box corners,
     // marking corners no example reaches. Makes a declared N-D space that is
     // really a lower-dimensional simplex (e.g. the missing tight-jog corner)
     // visible instead of implied. Mirrors the spec `expect corner_coverage`
     // check in the viewer.
     void DrawParameterCoverage();
-    void DrawPhaseTimeline(float canonical_phase);
     void DrawGraphCanvas();
     void DrawTransitionPipeline();
 
@@ -195,20 +191,16 @@ private:
     void PlaceGotoTarget(const glm::vec2& target);
     void UpdateRootMotionDiagnostics(const pmg::Pose& pose, float delta_seconds);
 
-    // SliderFloat plus tick marks at the example parameters, so the user can
-    // see where the real clips sit on the blend axis.
-    bool ParameterSliderWithTicks(const char* label, float* value,
-                                  float min_value, float max_value, int axis);
-
     void HandleShortcuts();
     void StepFrame(int direction);  // +1 / -1 frame; clip & blend modes only
     void ResetPlayback();
     bool ParametricBlendActive() const;
     bool GraphRuntimeActive() const;
 
+    ImGuiViewerUi imgui_ui_;
+
     std::vector<std::filesystem::path> bvh_files_;
     int selected_file_index_ = -1;
-    char clip_filter_[64] = "";  // case-insensitive substring filter for the clip list
     std::string status_message_ = "No clip loaded.";
     pmg::CyclicContinuityGraphSummary graph_cyclic_summary_;
     std::string graph_cyclic_warning_;
@@ -319,6 +311,12 @@ private:
     bool show_graph_transition_markers_ = true;
     bool show_root_canonicalization_markers_ = false;
     bool show_anchor_root_trajectories_ = false;
+    bool show_joint_names_ = false;
+    bool show_end_sites_separately_ = false;
+    bool hide_end_sites_ = false;
+    bool draw_local_joint_axes_ = false;
+    bool mark_likely_foot_joints_ = false;
+    ViewerSkeletonPoseMode skeleton_pose_mode_ = ViewerSkeletonPoseMode::Current;
     GraphOrigin graph_origin_ = GraphOrigin::None;
     bool graph_open_runtime_tab_ = false;
     float graph_desired_parameter_ = 0.0f;

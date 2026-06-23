@@ -3,6 +3,7 @@
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
 #include "pmg/CandidateWindowExtractor.h"
+#include "pmg/CorpusAudit.h"
 #include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
@@ -31,6 +32,29 @@
 #include <vector>
 
 namespace {
+
+int AuditCorpus(int argc, char** argv) {
+    pmg::CorpusAuditConfig config;
+    for (int index = 2; index < argc; ++index) {
+        const std::string option = argv[index];
+        if (option == "--category-hints") { config.category_hints = true; continue; }
+        if (index + 1 >= argc) throw std::runtime_error("missing value for option: " + option);
+        const std::string value = argv[++index];
+        if (option == "--corpus-root") config.corpus_root = value;
+        else if (option == "--out") config.output_directory = value;
+        else if (option == "--max-files") {
+            config.max_files = std::stoull(value);
+            if (config.max_files == 0) throw std::runtime_error("max-files must be positive");
+        }
+        else if (option == "--include" && value != "**/*.bvh") throw std::runtime_error("audit-corpus supports only --include **/*.bvh");
+        else throw std::runtime_error("unknown audit-corpus option: " + option);
+    }
+    if (config.corpus_root.empty() || config.output_directory.empty()) throw std::runtime_error("audit-corpus requires --corpus-root and --out");
+    const pmg::CorpusAuditResult result = pmg::AuditBvhCorpus(config);
+    pmg::WriteCorpusAudit(config, result);
+    std::cout << "audited " << result.files.size() << " BVH files into " << config.output_directory << "\n";
+    return 0;
+}
 
 int ParsePositiveInt(const std::string& text, const char* name) {
     std::size_t consumed = 0;
@@ -470,6 +494,7 @@ std::optional<int> TryRunBvhCommand(int argc, char** argv) {
     if (command == "--extract-candidate-windows") {
         return ExtractCandidateWindows(argc, argv);
     }
+    if (command == "audit-corpus" || command == "--audit-corpus") return AuditCorpus(argc, argv);
     if (command == "--inspect-contacts" && argc == 4) {
         return InspectContacts(argv[2], argv[3]);
     }

@@ -71,7 +71,10 @@ int ParametricMotionSpace::NumExamples() const {
     return static_cast<int>(examples_.size());
 }
 
-void ParametricMotionSpace::AddExample(const ParameterVector& parameter, MotionClip clip) {
+void ParametricMotionSpace::AddExample(
+    const ParameterVector& parameter,
+    MotionClip clip,
+    MotionClipSegment segment) {
     if (static_cast<int>(parameter.size()) != parameter_dimension_) {
         throw std::runtime_error("ParametricMotionSpace::AddExample: parameter dimension mismatch");
     }
@@ -85,7 +88,10 @@ void ParametricMotionSpace::AddExample(const ParameterVector& parameter, MotionC
             "ParametricMotionSpace::AddExample: add all examples before registering time warps");
     }
 
-    examples_.push_back({parameter, std::move(clip)});
+    if (segment.source_bvh.empty()) {
+        segment = FullClipSegment(clip.name);
+    }
+    examples_.push_back({parameter, std::move(clip), std::move(segment)});
 }
 
 void ParametricMotionSpace::SetExampleTimeWarps(std::vector<TimeWarp> warps) {

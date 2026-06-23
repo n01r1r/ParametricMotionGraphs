@@ -54,8 +54,10 @@ int main() {
     node.min_contact_frames = 3;
     node.dtw_refine = false;
     spec.nodes.push_back(node);
-    spec.examples.push_back({"walk", {0.0f}, bvh_a.string()});
-    spec.examples.push_back({"walk", {1.0f}, bvh_b.string()});
+    spec.examples.push_back(
+        {"walk", {0.0f}, bvh_a.string(), pmg::FullClipSegment(bvh_a.string())});
+    spec.examples.push_back(
+        {"walk", {1.0f}, bvh_b.string(), pmg::FullClipSegment(bvh_b.string())});
 
     pmg::MotionSpacePreparationConfig config;
     config.default_contact_joints.clear();
@@ -67,6 +69,9 @@ int main() {
     const pmg::PreparedMotionSpace& walk = prepared.Node("walk");
     assert(walk.authored.NumExamples() == 2);
     assert(walk.production.NumExamples() == 2);
+    assert(walk.production.Examples()[0].segment.source_bvh == bvh_a.string());
+    assert(walk.production.Examples()[0].segment.start_frame == 0);
+    assert(walk.production.Examples()[0].segment.end_frame == 3);
     assert(!walk.contact_registered.has_value());
     assert(!walk.dtw_refined.has_value());
 
@@ -86,8 +91,23 @@ int main() {
     assert(artifact.graph.NumNodes() == 1);
     assert(artifact.graph.Node(0).motion_space.NumExamples() == walk.production.NumExamples());
     assert(artifact.metadata.source_bvh_paths == prepared.source_bvh_paths);
+    assert(artifact.metadata.source_segments.size() == 2);
+    assert(artifact.metadata.source_segments[1].source_bvh == bvh_b.string());
     assert(artifact.metadata.node_registrations.size() == 1);
     assert(artifact.metadata.node_registrations[0].node_name == "walk");
+
+    pmg::GraphSpec invalid_segment_spec = spec;
+    invalid_segment_spec.examples[0].segment.start_frame = 3;
+    invalid_segment_spec.examples[0].segment.end_frame = 3;
+    bool invalid_segment_threw = false;
+    try {
+        (void)pmg::PrepareMotionSpaces(invalid_segment_spec, config);
+    } catch (const std::runtime_error& error) {
+        invalid_segment_threw =
+            std::string(error.what()).find("segment end_frame must be > start_frame") !=
+            std::string::npos;
+    }
+    assert(invalid_segment_threw);
 
     std::filesystem::remove_all(directory);
     return 0;
