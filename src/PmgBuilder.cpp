@@ -227,11 +227,19 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
             sample_report.accepted = false;
             sample_report.reject_reason = "no GOOD target samples";
             result.report.source_reports.push_back(sample_report);
+            if (config.restrict_source_range) {
+                // Paper Sec 6 (opt-in): this source parameter cannot reach the
+                // target, so drop it and keep building from the compatible source
+                // samples instead of rejecting the whole edge.
+                continue;
+            }
             result.report.edge_created = false;
-            // Paper Sec 6: an edge requires every source sample to reach the
-            // target. Surface the achievable distance vs threshold so the cause
-            // (incompatible spaces vs a too-low threshold) is self-evident
-            // instead of the bare "no GOOD target samples".
+            // Legacy default is all-or-nothing: an edge requires every source
+            // sample to reach the target (config.restrict_source_range relaxes
+            // this to the compatible source sub-range). Surface the achievable
+            // distance vs threshold so the cause (incompatible spaces vs a
+            // too-low threshold) is self-evident instead of the bare "no GOOD
+            // target samples".
             result.report.reject_reason =
                 "a source sample cannot transition to the target space (best "
                 "distance " + std::to_string(sample_report.min_distance) +
@@ -254,17 +262,26 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
         }
         sample_report.target_box_after_shrink = target_box;
 
+        bool skip_source_sample = false;
         if (!target_box.IsEmpty()) {
             for (const ParameterVector& bad_parameter : bad_target_parameters) {
                 if (target_box.Contains(bad_parameter)) {
                     sample_report.accepted = false;
                     sample_report.reject_reason = "BAD target sample remained inside adjusted box";
                     result.report.source_reports.push_back(sample_report);
+                    if (config.restrict_source_range) {
+                        // Paper Sec 6 (opt-in): drop this source sample, keep rest.
+                        skip_source_sample = true;
+                        break;
+                    }
                     result.report.edge_created = false;
                     result.report.reject_reason = "BAD target sample remained inside adjusted box";
                     return result;
                 }
             }
+        }
+        if (skip_source_sample) {
+            continue;
         }
 
         int in_box_count = 0;
@@ -287,6 +304,10 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
                                               ? "adjusted target box is empty"
                                               : "no GOOD samples remain inside adjusted box";
             result.report.source_reports.push_back(sample_report);
+            if (config.restrict_source_range) {
+                // Paper Sec 6 (opt-in): drop this source sample, keep rest.
+                continue;
+            }
             result.report.edge_created = false;
             result.report.reject_reason = sample_report.reject_reason;
             return result;
@@ -321,7 +342,10 @@ EdgeBuildResult PmgBuilder::BuildEdgeWithReport(
 
     result.report.edge_created = !result.edge.samples.empty();
     if (!result.report.edge_created) {
-        result.report.reject_reason = "edge has no transition samples";
+        result.report.reject_reason = config.restrict_source_range
+            ? "no source sample could transition to the target (paper Sec 6 "
+              "source-range restriction left no compatible source samples)"
+            : "edge has no transition samples";
     }
     return result;
 }

@@ -58,6 +58,15 @@ struct PmgBuilderConfig {
     // endpoint-clamped windows, so the metric scores the real cycle-boundary
     // frames. Cross-node edges are unaffected. See DistanceGridConfig::cyclic_wrap.
     bool self_edge_cyclic_metric = false;
+    // Ablation (default off). Paper §6 source-range restriction. When false, the
+    // legacy all-or-nothing rule holds: if any sampled source parameter cannot
+    // reach the target (no GOOD hit, a BAD target left inside the reachable box,
+    // or an empty box), the whole edge is rejected. When true, such a source
+    // sample is dropped and the edge is built from the remaining compatible
+    // source samples; the edge is still rejected only if no compatible source
+    // sample remains. This restricts the edge to the transition-compatible subset
+    // of sampled source parameters -- it does not guarantee a contiguous interval.
+    bool restrict_source_range = false;
     // Default preserves paper-compatible Kovar point-cloud distances and their
     // calibrated thresholds. kDynamicsWindow is an opt-in quality extension.
     TransitionMetricType transition_metric_type =
