@@ -1,6 +1,8 @@
 #include "pmg/GraphIo.h"
 #include "pmg/RuntimeController.h"
 #include "pmg/AlignmentStrategy.h"
+#include "pmg/PmgBuilder.h"
+#include "pmg/ParametricMotionSpace.h"
 
 #include <cassert>
 #include <cmath>
@@ -382,8 +384,93 @@ void CheckDim1RoundTrip() {
     assert(loaded.graph.Edge(0).samples[0].target_phase_samples.size() == 2);
 }
 
+pmg::MotionClip MakeLoopClip16(float root_x) {
+    pmg::MotionClip clip;
+    clip.frames_per_second = 30.0f;
+    for (int frame = 0; frame < 16; ++frame) {
+        const float phase = static_cast<float>(frame) / 15.0f;
+        pmg::Pose pose;
+        pose.root_position = {root_x + 0.3f * phase, 0.1f, 0.0f};
+        pose.local_rotations.push_back(pmg::Quaternion::Identity());
+        pose.local_rotations.push_back(pmg::Quaternion::Identity());
+        pose.local_rotations.push_back(pmg::Quaternion::Identity());
+        clip.frames.push_back(pose);
+    }
+    return clip;
+}
+
+pmg::Skeleton MakeBuilderSkeleton() {
+    pmg::Skeleton skeleton;
+    pmg::Joint root;
+    root.name = "root";
+    root.parent_index = -1;
+    skeleton.joints.push_back(root);
+    pmg::Joint a;
+    a.name = "a";
+    a.parent_index = 0;
+    a.offset = {1.0f, 0.0f, 0.0f};
+    skeleton.joints.push_back(a);
+    pmg::Joint b;
+    b.name = "b";
+    b.parent_index = 1;
+    b.offset = {0.0f, -1.0f, 0.0f};
+    skeleton.joints.push_back(b);
+    return skeleton;
+}
+
+// Regression: a REAL builder-produced report must round-trip. Forcing a
+// rejection (impossible TGOOD) leaves the source report's distances and target
+// boxes at their +inf/-inf defaults, exactly the non-finite values the builder
+// emits in the wild -- prior tests only round-tripped hand-crafted finite data.
+void CheckBuilderOutputRoundTrip() {
+    pmg::ParametricMotionSpace space("walk", 1);
+    space.AddExample({0.0f}, MakeLoopClip16(0.0f));
+    space.AddExample({1.0f}, MakeLoopClip16(5.0f));
+
+    pmg::PmgBuilderConfig config;
+    config.source_sample_count = 2;
+    config.target_sample_count = 4;
+    config.generated_frame_count = 16;
+    config.good_transition_threshold = -1.0f;  // nothing can be <= -1 -> reject
+    config.bad_transition_threshold = 0.0f;
+
+    const pmg::Skeleton skeleton = MakeBuilderSkeleton();
+    const pmg::EdgeBuildResult result = pmg::PmgBuilder::BuildEdgeWithReport(
+        skeleton, 0, 0, space, space, config);
+    assert(!result.report.source_reports.empty());
+
+    pmg::ParametricMotionGraph graph;
+    graph.AddNode("walk", space);
+    if (!result.edge.samples.empty()) {
+        graph.AddEdge(result.edge);
+    }
+
+    pmg::BuiltPmgArtifact artifact;
+    artifact.skeleton = skeleton;
+    artifact.graph = graph;
+    artifact.metadata.units = "BVH native units";
+    artifact.metadata.generated_frame_count = 16;
+    artifact.metadata.frames_per_second = 30.0f;
+    pmg::EdgeBuildMetadata meta;
+    meta.source_node = "walk";
+    meta.target_node = "walk";
+    meta.config = config;
+    meta.report = result.report;  // real builder report, carrying ±inf
+    artifact.metadata.edge_builds.push_back(meta);
+
+    const auto path =
+        std::filesystem::temp_directory_path() / "pmg_graph_builder.txt";
+    pmg::SavePmgArtifactText(artifact, path.string());
+    const pmg::BuiltPmgArtifact loaded =
+        pmg::LoadPmgArtifactText(path.string());
+    assert(loaded.metadata.edge_builds.size() == 1);
+    assert(loaded.metadata.edge_builds[0].report.source_reports.size() ==
+           result.report.source_reports.size());
+}
+
 int main() {
     CheckDim1RoundTrip();
+    CheckBuilderOutputRoundTrip();
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() / "pmg_graph_io_test.pmg";
 
