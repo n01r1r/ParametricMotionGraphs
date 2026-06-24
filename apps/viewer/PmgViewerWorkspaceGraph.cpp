@@ -1363,7 +1363,7 @@ void PmgViewerWorkspace::BuildGraphSection() {
 void PmgViewerWorkspace::BuildGraphBuildTab() {
     // One Build tab, three sources: Author = manual snapshot + edges (saveable),
     // Spec = from .pmg_spec (saveable), Quick = scratch self-edge (not saveable).
-    ImGui::TextDisabled("Source");
+    ImGui::SeparatorText("Source");
     ImGui::RadioButton("Author", &graph_build_source_, 0);
     ImGui::SameLine();
     ImGui::RadioButton("Spec", &graph_build_source_, 1);

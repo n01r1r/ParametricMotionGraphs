@@ -103,7 +103,7 @@ void BuildInputs(const ViewerUiState& state, char* clip_filter,
         }
     }
 
-    ImGui::Separator();
+    ImGui::SeparatorText("Motion samples");
     int dimension = state.motion_space_dimension;
     ImGui::BeginDisabled(state.has_motion_samples);
     ImGui::SetNextItemWidth(120.0f);
@@ -421,8 +421,7 @@ void BuildMotionSpace(const ViewerUiState& state,
     }
 
     if (state.motion_space_ready) {
-        ImGui::Separator();
-        ImGui::TextDisabled("Evaluation parameter");
+        ImGui::SeparatorText("Evaluation parameter");
         const int dim = std::max(1, state.motion_space_dimension);
         for (int axis = 0; axis < dim; ++axis) {
             ImGui::PushID(axis);
@@ -463,8 +462,7 @@ void BuildMotionSpace(const ViewerUiState& state,
     }
 
     if (!state.motion_samples.empty()) {
-        ImGui::Separator();
-        ImGui::TextDisabled("Samples (edit parameter / remove)");
+        ImGui::SeparatorText("Samples (edit / remove)");
         for (int i = 0; i < static_cast<int>(state.motion_samples.size()); ++i) {
             ImGui::PushID(i);
             std::vector<float> parameter = state.motion_samples[i].parameter;
@@ -505,6 +503,7 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
     ImGui::Begin("PMG Viewer");
 
     ImGui::TextWrapped("%s", state.status_message.c_str());
+    ImGui::SeparatorText("Mode");
     int mode = static_cast<int>(state.playback_mode);
     ImGui::RadioButton("Clip playback", &mode, 0);
     ImGui::BeginDisabled(!state.motion_space_ready);
@@ -517,7 +516,7 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
         Push(commands, ViewerUiCommandType::SetPlaybackMode, mode);
     }
 
-    ImGui::Separator();
+    ImGui::SeparatorText("Transport");
     if (ImGui::Button(state.playing ? "Pause" : "Play "))
         Push(commands, ViewerUiCommandType::TogglePlayback);
     ImGui::SameLine();
@@ -565,7 +564,7 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
         build_legacy_tabs();  // ponytail: migrate remaining tabs incrementally.
         ImGui::EndTabBar();
     }
-    ImGui::Separator();
+    ImGui::SeparatorText("Display");
     float skeleton_scale = state.skeleton_scale;
     if (ImGui::SliderFloat("Skeleton scale", &skeleton_scale, 0.1f, 5.0f, "%.2fx"))
         Push(commands, ViewerUiCommandType::SetSkeletonScale, -1, skeleton_scale);
