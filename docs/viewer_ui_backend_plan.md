@@ -39,3 +39,50 @@ same commands. Add no broad `IViewerUi` until a second backend exists.
 
 This change does not replace ImGui. It only makes replacement local and starts
 moving widgets behind the state/command seam.
+
+## UI cleanup pass (2026-06-24)
+
+Trim and clarify the live UI surface without touching the seam. Code landed on
+`dev/ui` (`8755805` structure, `c608f9f` polish); this plan doc on `dev/misc`.
+Viewer ctest 5/5.
+
+### Done
+
+- Deleted dead builders `BuildWorkflowSection` / `BuildTransportSection` /
+  `BuildDisplaySection` (~125 lines, zero call sites after the `ImGuiViewerUi`
+  migration).
+- Rewired path preview into the live transport. The ghost-skeleton renderer was
+  alive but its only toggle lived in the dead transport builder, so the feature
+  was unreachable; it now emits the existing `SetPathPreviewEnabled/Count`.
+- Dropped `SelectClip` command: exact duplicate of `LoadClip`, never emitted.
+- Renamed the `PMG Runtime` tab to `Graph`: fixes the parent/child `Runtime`
+  name collision and matches the existing "see the Graph tab" help text.
+- Merged the three Graph build subtabs (Author / From spec / Quick self-edge)
+  into one `Build` tab with an Author/Spec/Quick source radio. 9 -> 7 tabs.
+- Uniform native `SeparatorText` section headers (Mode / Transport / Display on
+  the main window; Inputs; Motion Space; Build Source).
+
+### Deliberately skipped (rationale)
+
+| Item | Why skipped | Revisit when |
+|---|---|---|
+| Split `ViewerUiState` into per-panel sub-structs | It is a flat copy-snapshot; reads fine. Split = churn across `MakeUiState()` and every read site for no behavior gain. | A data set keeps moving together across several panels. |
+| Split `ApplyUiCommand` flat switch into helpers | The ~110-line one-liner dispatch reads as a table; helpers add jump cost. | The switch outgrows a screen or a case gains real logic. |
+| Reduce to one accent color | Heatmap, phase-timeline, and green/amber/red status colors are semantic encodings, not chrome. | Never for data-viz; only if a non-semantic chrome accent appears. |
+| Normalize input-field / button widths | Layout-regression risk, no render tests to catch breakage, low readability gain. | A width inconsistency actually misreads in use. |
+| Finish command-seam migration | ~14 `ViewerUiCommandType` values still have no emitter (legacy tabs call workspace methods directly). Intentional incremental-migration debt, not breakage. | Next seam-migration phase (see "Remaining Dear ImGui references"). |
+
+### Possible extensions / potentials
+
+- `SeparatorText` swap in the denser legacy Graph-build / Transition-Grid
+  dividers -- same one-line change, left out to keep commits tight.
+- Tab-merge follow-through: if Build sources still feel redundant in use,
+  collapse Author/Spec/Quick further, or fold Coverage into Runtime.
+- Migrate Transition-Grid + Graph tabs behind the state/command seam (the
+  "next migration target" already named above).
+- Restart-graph button and next-step hint were dropped with the dead transport
+  builder; recoverable from history at `e4dc753`. Re-add to the live UI only if
+  users ask.
+- Stale repro step `docs/audits/baseline-20260618.md:168` ("PMG Runtime -> From
+  spec") -- left as a dated historical snapshot; sync only if that audit is
+  re-run.
