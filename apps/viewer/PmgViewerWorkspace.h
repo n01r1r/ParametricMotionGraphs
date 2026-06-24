@@ -125,11 +125,9 @@ private:
     static float ComputeGroundOffset(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip);
     float ActiveReferenceDuration() const;
 
-    void BuildWorkflowSection();
-    void BuildTransportSection();
-    void BuildDisplaySection();
     void BuildDistanceGridSection();
     void BuildGraphSection();
+    void BuildGraphBuildTab();
     void BuildGraphAuthorTab();
     void BuildGraphSpecTab();
     void BuildGraphQuickTab();
@@ -319,6 +317,7 @@ private:
     ViewerSkeletonPoseMode skeleton_pose_mode_ = ViewerSkeletonPoseMode::Current;
     GraphOrigin graph_origin_ = GraphOrigin::None;
     bool graph_open_runtime_tab_ = false;
+    int graph_build_source_ = 0;  // Build tab source: 0 author, 1 spec, 2 quick
     float graph_desired_parameter_ = 0.0f;
     // Full vector target request for graph runtime UI. Overrides the 1D slider
     // graph_desired_parameter_ when valid.

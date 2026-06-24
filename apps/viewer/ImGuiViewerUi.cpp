@@ -536,6 +536,21 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
         float phase = state.phase;
         if (ImGui::SliderFloat("Phase", &phase, 0.0f, 1.0f, "%.3f"))
             Push(commands, ViewerUiCommandType::SetPhase, -1, phase);
+
+        // Path preview: ghost skeletons across the active clip (clip & blend modes).
+        bool path_preview = state.path_preview_enabled;
+        if (ImGui::Checkbox("Path preview", &path_preview))
+            Push(commands, ViewerUiCommandType::SetPathPreviewEnabled,
+                 path_preview ? 1 : 0);
+        if (state.path_preview_enabled) {
+            ImGui::SameLine();
+            int ghosts = state.path_preview_count;
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::SliderInt("Ghosts", &ghosts, 2, 12))
+                Push(commands, ViewerUiCommandType::SetPathPreviewCount, ghosts);
+            ImGui::SameLine();
+            ImGui::TextDisabled("(cyan=start -> amber=end)");
+        }
     }
 
     if (ImGui::BeginTabBar("##viewer_tabs")) {

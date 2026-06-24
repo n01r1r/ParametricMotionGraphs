@@ -1061,7 +1061,7 @@ void PmgViewerWorkspace::BuildUi() {
                 BuildDistanceGridSection();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("PMG Runtime")) {
+            if (ImGui::BeginTabItem("Graph")) {
                 BuildGraphSection();
                 ImGui::EndTabItem();
             }
@@ -1177,8 +1177,7 @@ void PmgViewerWorkspace::ApplyUiCommands(
 
 void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
     switch (command.type) {
-    case ViewerUiCommandType::LoadClip:
-    case ViewerUiCommandType::SelectClip: LoadClip(command.index); break;
+    case ViewerUiCommandType::LoadClip: LoadClip(command.index); break;
     case ViewerUiCommandType::SetPlaybackMode:
         if (command.index < 0 || command.index > 2)
             throw std::invalid_argument("playback mode index must be in [0, 2]");
@@ -1325,128 +1324,6 @@ void PmgViewerWorkspace::StepFrame(int direction) {
     const float frame_phase = 1.0f / static_cast<float>(frame_count - 1);
     current_phase_ =
         WrapPhase(current_phase_ + static_cast<float>(direction) * frame_phase);
-}
-
-void PmgViewerWorkspace::BuildWorkflowSection() {
-    ImGui::TextWrapped("%s", status_message_.c_str());
-    ImGui::Separator();
-
-    // One-line next-step hint: keeps the build order (clip -> samples -> graph)
-    // discoverable without the multi-line step strip.
-    const char* next_hint = nullptr;
-    if (clip_.NumFrames() == 0) {
-        next_hint = "Next: load a clip in Inputs";
-    } else if (pmg_examples_.empty()) {
-        next_hint = "Next: add motion samples in Inputs";
-    } else if (!runtime_.Ready()) {
-        next_hint = "Next: build a graph in PMG Runtime";
-    }
-    if (next_hint != nullptr) {
-        ImGui::TextColored(ImVec4(0.55f, 0.70f, 0.95f, 1.0f), "%s", next_hint);
-        ImGui::Separator();
-    }
-
-    ImGui::TextDisabled("Mode");
-
-    // Mode lives only here. Clip playback is always available; parametric blend
-    // unlocks with a space; graph runtime unlocks once a graph is built.
-    int mode_int = static_cast<int>(mode_);
-    ImGui::RadioButton("Clip playback", &mode_int,
-                       static_cast<int>(ViewerPlaybackMode::ClipPlayback));
-
-    auto gated_radio = [&](const char* label, ViewerPlaybackMode value, bool enabled,
-                           const char* hint) {
-        if (enabled) {
-            ImGui::RadioButton(label, &mode_int, static_cast<int>(value));
-            return;
-        }
-        ImGui::BeginDisabled();
-        int disabled = mode_int;
-        ImGui::RadioButton(label, &disabled, static_cast<int>(value));
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::TextDisabled("(%s)", hint);
-    };
-    gated_radio("Parametric blend", ViewerPlaybackMode::ParametricBlend, pmg_space_ready_,
-                "add a clip");
-    gated_radio("Graph runtime", ViewerPlaybackMode::GraphRuntime,
-                runtime_.Ready(), "build graph");
-    mode_ = static_cast<ViewerPlaybackMode>(mode_int);
-}
-
-void PmgViewerWorkspace::BuildTransportSection() {
-    if (ImGui::Button(playing_ ? "Pause" : "Play ")) {
-        playing_ = !playing_;
-    }
-    const bool time_mode = !GraphRuntimeActive();
-    ImGui::SameLine();
-    ImGui::BeginDisabled(!time_mode);
-    if (ImGui::Button("< Frame")) {
-        StepFrame(-1);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Frame >")) {
-        StepFrame(1);
-    }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Reset")) {
-        ResetPlayback();
-    }
-    if (GraphRuntimeActive()) {
-        ImGui::SameLine();
-        if (ImGui::Button("Restart graph")) {
-            runtime_.Reset();
-        }
-    }
-
-    ImGui::SliderFloat("Speed", &playback_speed_, 0.1f, 3.0f, "%.2fx");
-
-    // Phase scrub: clip & blend only (the graph's phase is owned by the
-    // controller). Phase is the stored clock, so the slider reads/writes it
-    // directly. Auto-pause while dragging so playback doesn't fight it.
-    if (time_mode) {
-        float phase = current_phase_;
-        if (ImGui::SliderFloat("Phase", &phase, 0.0f, 1.0f, "%.3f")) {
-            current_phase_ = phase;
-        }
-        if (ImGui::IsItemActive()) {
-            playing_ = false;
-        }
-    } else if (runtime_.Ready()) {
-        ImGui::Text("Phase %.3f", runtime_.Snapshot().current_phase);
-    }
-
-    // Path preview: ghost skeletons sampled across the active clip so the start,
-    // middle(s), and end are visible at once (clip & blend modes).
-    if (time_mode) {
-        ImGui::Checkbox("Path preview", &path_preview_enabled_);
-        if (path_preview_enabled_) {
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(160.0f);
-            ImGui::SliderInt("Ghosts", &path_preview_count_, 2, 12);
-            ImGui::SameLine();
-            ImGui::TextDisabled("(cyan=start -> amber=end)");
-        }
-    }
-}
-
-void PmgViewerWorkspace::BuildDisplaySection() {
-    ImGui::TextDisabled("Skeleton pose");
-    int pose_mode = static_cast<int>(skeleton_pose_mode_);
-    ImGui::RadioButton("Current frame", &pose_mode,
-                       static_cast<int>(ViewerSkeletonPoseMode::Current));
-    ImGui::SameLine();
-    ImGui::RadioButton("Frame 0", &pose_mode,
-                       static_cast<int>(ViewerSkeletonPoseMode::Frame0));
-    ImGui::SameLine();
-    ImGui::RadioButton("Rest pose", &pose_mode,
-                       static_cast<int>(ViewerSkeletonPoseMode::Rest));
-    if (pose_mode != static_cast<int>(skeleton_pose_mode_)) {
-        skeleton_pose_mode_ = static_cast<ViewerSkeletonPoseMode>(pose_mode);
-    }
-    ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
-    ImGui::SliderFloat("Display scale", &display_scale_, 1.0f, 40.0f, "%.1fx");
 }
 
 // --- Distance Grid heatmap (transition visualization) ----------------------
