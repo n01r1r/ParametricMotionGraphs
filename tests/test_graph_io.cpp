@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <fstream>
 #include <stdexcept>
 
@@ -279,7 +280,110 @@ void WriteV9MetriclessFixture(const std::filesystem::path& path) {
 
 }  // namespace
 
+pmg::BuiltPmgArtifact MakeArtifact1D() {
+    pmg::ParametricMotionSpace space("walk", 1);
+    space.AddExample({17.0f}, MakeClip(0.0f), {"w_slow.bvh", 0, 2, "", "", ""});
+    space.AddExample({30.0f}, MakeClip(10.0f), {"w_fast.bvh", 0, 2, "", "", ""});
+    pmg::ParameterCalibration calibration;
+    calibration.metrics = {pmg::ParameterMetric::kTravelSpeed};
+    calibration.example_measured = {{17.0f}, {30.0f}};
+    calibration.metric_scales = {1.0f};
+    calibration.samples_per_axis = 5;
+    calibration.samples = {
+        {{17.0f}, {1.0f, 0.0f}},
+        {{30.0f}, {0.0f, 1.0f}},
+    };
+    space.SetParameterCalibration(calibration);
+    space.SetParameterSupport(pmg::ParameterSupport({{17.0f}, {30.0f}}));
+
+    pmg::ParametricMotionSpace run_space("run", 1);
+    run_space.AddExample({47.0f}, MakeClip(0.0f), {"r_slow.bvh", 0, 2, "", "", ""});
+    run_space.AddExample({70.0f}, MakeClip(10.0f), {"r_fast.bvh", 0, 2, "", "", ""});
+    run_space.SetParameterSupport(pmg::ParameterSupport({{47.0f}, {70.0f}}));
+
+    pmg::ParametricMotionGraph graph;
+    const int walk = graph.AddNode("walk", space);
+    const int run = graph.AddNode("run", run_space);
+    pmg::ParameterAabb box;
+    box.min_corner = {17.0f};
+    box.max_corner = {30.0f};
+    pmg::PmgEdge edge;
+    edge.source_node = walk;
+    edge.target_node = walk;
+    edge.samples.push_back({{17.0f}, box, 0.8f, 0.1f});
+    edge.samples.back().transition_distance = 0.42f;
+    edge.samples.back().target_phase_samples = {
+        {{17.0f}, 0.75f, 0.05f},
+        {{30.0f}, 0.85f, 0.15f},
+    };
+    graph.AddEdge(edge);
+
+    // Cross-node edge (walk -> run), as the gait graph produces.
+    pmg::ParameterAabb run_box;
+    run_box.min_corner = {47.0f};
+    run_box.max_corner = {70.0f};
+    pmg::PmgEdge cross;
+    cross.source_node = walk;
+    cross.target_node = run;
+    cross.samples.push_back({{30.0f}, run_box, 0.9f, 0.1f});
+    cross.samples.back().transition_distance = 1900.0f;
+    cross.samples.back().target_phase_samples = {{{47.0f}, 0.9f, 0.1f}};
+    graph.AddEdge(cross);
+
+    pmg::BuiltPmgArtifact artifact;
+    artifact.skeleton = MakeSkeleton();
+    artifact.graph = graph;
+    artifact.metadata.units = "BVH native units";
+    artifact.metadata.generated_frame_count = 3;
+    artifact.metadata.frames_per_second = 30.0f;
+
+    // Mimic a DROPPED cross-gait edge_build (edge_created=false) as the gait graph
+    // produces: a rejected source report whose target boxes are default-empty and
+    // whose reject_reason contains spaces.
+    pmg::EdgeBuildMetadata dropped;
+    dropped.source_node = "walk";
+    dropped.target_node = "run";
+    dropped.report.edge_created = false;
+    dropped.report.reject_reason = "a source sample cannot transition (Sec 6)";
+    pmg::SourceSampleBuildReport rejected;
+    rejected.source_parameter = {30.0f};
+    rejected.good_count = 0;
+    rejected.neutral_count = 0;
+    rejected.bad_count = 8;
+    rejected.min_distance = 1900.0f;
+    // Default/empty target boxes on a rejected sample are inverted ±inf, exactly
+    // as the builder leaves them; these must survive the text round-trip.
+    const float inf = std::numeric_limits<float>::infinity();
+    rejected.target_box_before_shrink.min_corner = {inf};
+    rejected.target_box_before_shrink.max_corner = {-inf};
+    rejected.target_box_after_shrink.min_corner = {inf};
+    rejected.target_box_after_shrink.max_corner = {-inf};
+    rejected.accepted = false;
+    rejected.reject_reason = "no GOOD target samples";
+    dropped.report.source_reports.push_back(rejected);
+    artifact.metadata.edge_builds.push_back(dropped);
+    return artifact;
+}
+
+// Regression: 1-D parametric spaces must round-trip through the text artifact.
+// All other coverage here is dim=2; the 1-D save/load path was previously
+// unexercised and silently failed to reload.
+void CheckDim1RoundTrip() {
+    const auto path =
+        std::filesystem::temp_directory_path() / "pmg_graph_dim1.txt";
+    const pmg::BuiltPmgArtifact original = MakeArtifact1D();
+    pmg::SavePmgArtifactText(original, path.string());
+    const pmg::BuiltPmgArtifact loaded =
+        pmg::LoadPmgArtifactText(path.string());
+    assert(loaded.graph.NumNodes() == 2);
+    assert(loaded.graph.Node(0).motion_space.ParameterDimension() == 1);
+    assert(loaded.graph.Node(0).motion_space.NumExamples() == 2);
+    assert(loaded.graph.Edge(0).samples.size() == 1);
+    assert(loaded.graph.Edge(0).samples[0].target_phase_samples.size() == 2);
+}
+
 int main() {
+    CheckDim1RoundTrip();
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() / "pmg_graph_io_test.pmg";
 
