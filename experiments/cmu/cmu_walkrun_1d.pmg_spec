@@ -1,0 +1,21 @@
+# EXPERIMENT (branch experiment/cmu-motion-space): CMU subject-16 1-D speed space.
+# Goal: test whether CMU mocap yields a smoother parametric manifold than the
+# Credo "Center" corpus -- WITHOUT retargeting. Legal because every example is
+# CMU subject 16 (one rig), so the strict skeleton gate passes; this space is a
+# standalone graph, NOT blended into the Center hull.
+#
+# Within-gait (smooth) case: two straight steady walks at different speed.
+#   16_31 pathV=17.1 cm/s, window 290-419 (loop-seam score 0.065)
+#   16_21 pathV=29.9 cm/s, window  10-129 (loop-seam score 0.050)
+# CMU is cm @120fps; cycle joint LeftFoot; contacts via --contact-joints.
+
+node cmu_walkrun 1
+registration cmu_walkrun LeftFoot - 3 0
+parameter_metrics cmu_walkrun travel_speed
+parameter_calibration cmu_walkrun 9
+parameter_support cmu_walkrun simplex
+
+example cmu_walkrun 17.1 bvh/16_31.bvh start_frame 290 end_frame 419
+example cmu_walkrun 69.9 bvh/16_45.bvh start_frame 5 end_frame 89
+
+expect cmu_walkrun spanned_axes 1
