@@ -200,6 +200,24 @@ int main() {
             pmg::ParameterMetric::kTravelSpeed, generated);
         assert(std::abs(achieved_turn_rate - target_measured[0]) < 0.15f);
         assert(std::abs(achieved_travel_speed - target_measured[1]) < 0.2f);
+
+        // Calibration inverse is now a deep seam on ParameterCalibration itself:
+        // callable with only the uncalibrated weights -- no motion space, clip, or
+        // artifact -- which is the testability win of the extraction. It must
+        // reproduce the space's calibrated path exactly (behavior-preserving move),
+        // and return a convex blend over the examples.
+        const std::vector<float> seam_weights =
+            first.BlendWeightsFor(authored_weights);
+        const std::vector<float> space_weights =
+            locomotion.ComputeLocalBlendWeights(query);
+        assert(seam_weights.size() ==
+               static_cast<std::size_t>(locomotion.NumExamples()));
+        assert(seam_weights == space_weights);
+        float seam_weight_sum = 0.0f;
+        for (const float weight : seam_weights) {
+            seam_weight_sum += weight;
+        }
+        assert(std::abs(seam_weight_sum - 1.0f) < 1.0e-3f);
     }
 
     // Steering smoothness diagnostic: sweeping the blend parameter across a

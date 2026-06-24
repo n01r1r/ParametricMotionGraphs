@@ -47,6 +47,19 @@ struct ParameterCalibration {
     ParameterVector metric_scales;  // positive normalization scale per metric
     std::vector<CalibrationSample> samples;
     int samples_per_axis = 0;  // 0 for imported/manual tables
+
+    // Inverse query: given the support-local (uncalibrated) blend weights for a
+    // request, return the blend weights whose blended clip achieves the same
+    // measured parameter, by inverse-distance lookup over the sampled grid. Pure
+    // over the stored table -- no motion space, clip, or artifact needed -- so
+    // the inverse map's accuracy and parameter-axis smoothness are unit-testable
+    // here directly, and the lookup body can be swapped (e.g. for a C1
+    // interpolant) without touching ParametricMotionSpace. The boundary jumps of
+    // this piecewise map at grid cells are the dominant parameter-axis velocity
+    // ripple; grid density (samples_per_axis) trades that against build cost.
+    // Precondition: non-empty samples (callers gate on HasParameterCalibration).
+    std::vector<float> BlendWeightsFor(
+        const std::vector<float>& uncalibrated_weights) const;
 };
 
 // Measured property of one generated clip. Throws for kNone or an unsupported

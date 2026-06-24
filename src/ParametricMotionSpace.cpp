@@ -251,39 +251,42 @@ ParameterVector ParametricMotionSpace::SampleSupportedParameter(std::mt19937& rn
     return Domain().SampleUniform(rng);
 }
 
-std::vector<float> ParametricMotionSpace::CalibratedBlendWeights(
-    const ParameterVector& parameter) const {
-    const ParameterCalibration& calibration = parameter_calibration_;
-    const std::vector<float> authored_weights =
-        UncalibratedBlendWeights(parameter);
+std::vector<float> ParameterCalibration::BlendWeightsFor(
+    const std::vector<float>& uncalibrated_weights) const {
+    // Inverse-distance lookup over the sampled grid, in normalized measured-metric
+    // space. The piecewise nature here (k-nearest grid samples) is what makes the
+    // map C0 at cell boundaries -- the parameter-axis velocity ripple measured
+    // across grid densities. Kept verbatim from the prior in-space inverse so the
+    // extraction is behavior-preserving; this is now the swap point for a C1 map.
+    const std::size_t example_count = example_measured.size();
 
-    ParameterVector target_measured(calibration.metrics.size(), 0.0f);
+    ParameterVector target_measured(metrics.size(), 0.0f);
     for (std::size_t example_index = 0;
-         example_index < examples_.size(); ++example_index) {
+         example_index < example_count; ++example_index) {
         for (std::size_t metric_index = 0;
-             metric_index < calibration.metrics.size(); ++metric_index) {
+             metric_index < metrics.size(); ++metric_index) {
             target_measured[metric_index] +=
-                authored_weights[example_index] *
-                calibration.example_measured[example_index][metric_index];
+                uncalibrated_weights[example_index] *
+                example_measured[example_index][metric_index];
         }
     }
 
-    std::vector<float> distances(calibration.samples.size(), 0.0f);
-    std::vector<std::size_t> order(calibration.samples.size());
+    std::vector<float> distances(samples.size(), 0.0f);
+    std::vector<std::size_t> order(samples.size());
     std::iota(order.begin(), order.end(), std::size_t{0});
     for (std::size_t sample_index = 0;
-         sample_index < calibration.samples.size(); ++sample_index) {
+         sample_index < samples.size(); ++sample_index) {
         distances[sample_index] = NormalizedMetricDistance(
             target_measured,
-            calibration.samples[sample_index].measured_parameter,
-            calibration.metric_scales);
+            samples[sample_index].measured_parameter,
+            metric_scales);
     }
     std::sort(order.begin(), order.end(),
               [&](std::size_t left, std::size_t right) {
                   return distances[left] < distances[right];
               });
 
-    std::vector<float> result(examples_.size(), 0.0f);
+    std::vector<float> result(example_count, 0.0f);
     std::size_t exact_count = 0;
     while (exact_count < order.size() &&
            distances[order[exact_count]] <= kExactParameterThreshold) {
@@ -293,10 +296,9 @@ std::vector<float> ParametricMotionSpace::CalibratedBlendWeights(
         const float exact_weight = 1.0f / static_cast<float>(exact_count);
         for (std::size_t exact_index = 0;
              exact_index < exact_count; ++exact_index) {
-            const CalibrationSample& sample =
-                calibration.samples[order[exact_index]];
+            const CalibrationSample& sample = samples[order[exact_index]];
             for (std::size_t example_index = 0;
-                 example_index < examples_.size(); ++example_index) {
+                 example_index < example_count; ++example_index) {
                 result[example_index] +=
                     exact_weight * sample.blend_weights[example_index];
             }
@@ -305,28 +307,35 @@ std::vector<float> ParametricMotionSpace::CalibratedBlendWeights(
     }
 
     const std::size_t neighbor_count = std::min<std::size_t>(
-        calibration.metrics.size() + 1, calibration.samples.size());
+        metrics.size() + 1, samples.size());
     float inverse_distance_sum = 0.0f;
     for (std::size_t neighbor = 0; neighbor < neighbor_count; ++neighbor) {
         inverse_distance_sum += 1.0f / distances[order[neighbor]];
     }
     if (!std::isfinite(inverse_distance_sum) ||
         inverse_distance_sum <= kSmallEpsilon) {
-        return calibration.samples[order.front()].blend_weights;
+        return samples[order.front()].blend_weights;
     }
 
     for (std::size_t neighbor = 0; neighbor < neighbor_count; ++neighbor) {
-        const CalibrationSample& sample =
-            calibration.samples[order[neighbor]];
+        const CalibrationSample& sample = samples[order[neighbor]];
         const float sample_weight =
             (1.0f / distances[order[neighbor]]) / inverse_distance_sum;
         for (std::size_t example_index = 0;
-             example_index < examples_.size(); ++example_index) {
+             example_index < example_count; ++example_index) {
             result[example_index] +=
                 sample_weight * sample.blend_weights[example_index];
         }
     }
     return result;
+}
+
+std::vector<float> ParametricMotionSpace::CalibratedBlendWeights(
+    const ParameterVector& parameter) const {
+    // Space owns the support geometry (uncalibrated weights); the calibration
+    // module owns the inverse measured-parameter map. One delegation, two seams.
+    return parameter_calibration_.BlendWeightsFor(
+        UncalibratedBlendWeights(parameter));
 }
 
 float MeasureParameterMetric(ParameterMetric metric, const MotionClip& clip) {

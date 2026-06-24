@@ -27,7 +27,13 @@
 node walk_2d 2
 registration walk_2d LeftAnkle - 3 0
 parameter_metrics walk_2d turn_rate travel_speed
-parameter_calibration walk_2d 5
+# Inverse-calibration grid: 9 knots/axis (was 5). The piecewise-linear inverse is
+# C0 at cell boundaries, so a coarse grid leaves a velocity ripple along the
+# parameter axis. Measured cal3/5/9/13: RMS speed 2nd-difference 0.35/0.31/0.23/0.16.
+# 9 is the smallest grid whose RMS (0.23) drops below the ~0.3 frame-quantization
+# noise floor; anchors stay exact (one-hot, achieved-speed delta 0). Convergence is
+# O(1/N), so finer grids only chase the noise floor -- a C1 inverse is the real lever.
+parameter_calibration walk_2d 9
 parameter_support walk_2d triangulated_2d
 
 example walk_2d -0.3 0.0 ../BVH/walkMoreCurve.bvh start_frame 1 end_frame 34
