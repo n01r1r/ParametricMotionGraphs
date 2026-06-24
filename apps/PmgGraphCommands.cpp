@@ -250,9 +250,13 @@ pmg::PmgBuilderConfig ParseBuilderConfigOptions(
         } else if (option == "--seed") {
             config.seed = static_cast<unsigned int>(std::stoul(require_value("--seed")));
         } else if (option == "--restrict-source-range") {
-            // Paper §6 opt-in: keep the transition-compatible source subset
-            // instead of all-or-nothing rejecting the whole edge.
+            // Paper §6 source-range restriction (now ON by default); accepted for
+            // back-compat / explicitness.
             config.restrict_source_range = true;
+        } else if (option == "--no-restrict-source-range") {
+            // Legacy all-or-nothing ablation: reject the whole edge if any source
+            // sample cannot transition.
+            config.restrict_source_range = false;
         } else {
             throw std::runtime_error("unknown builder option '" + option + "'");
         }

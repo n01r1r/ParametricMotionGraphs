@@ -45,7 +45,8 @@ edge_config run_cmu run_cmu 950 1300 4 6 41
 # achievable crossing is D~2709 (walk->run) / D~1932 (run->walk) at EVERY source
 # sample -- ~10x the within-gait self-edge (~250). No GOOD transition exists because
 # subject 16 has no walk<->run transition clip. Thresholds are set just above the
-# best D so the graph CONNECTS (usable), and --restrict-source-range keeps only the
+# best D so the graph CONNECTS (usable); the §6 source-range restriction (ON by
+# default; --no-restrict-source-range for legacy all-or-nothing) keeps only the
 # transition-compatible source end (fast walk -> run; fast run -> walk). These edges
 # are teleport-grade, NOT clean planted transitions: the faithful fix is a bridge
 # clip that CONTAINS the gait change (cf. walkToJog in the Center corpus), not tuning.

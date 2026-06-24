@@ -61,20 +61,22 @@ So the faithful topology is **2 nodes, not 3** -- jog sits *with* run on the far
 side of the wall (walk->jog 1472 is no better than walk->run 1274). Nodes:
 `walk_cmu` (16_31@17.1 <-> 16_21@29.9), `run_cmu` (16_36@47.1 <-> 16_45@69.9).
 
-## Build result (`--build-graph ... --restrict-source-range`)
+## Build result (`--build-graph`, source-range restriction ON by default)
 - Self-edges (walk->walk, run->run) build cleanly -> nodes are reliable.
-- Cross-edges only with the all-or-nothing rule relaxed via `--restrict-source-range`
-  (paper Sec 6): even the **best** crossing in the build's kovar metric is
-  D~2709 (walk->run) / D~1932 (run->walk) -- ~10x the self-edge (~250) at *every*
-  source sample. The graph CONNECTS but the cross edges are **teleport-grade**, not
-  clean planted transitions. Root cause: subject 16 has **no walk<->run transition
-  clip**. Faithful fix = a bridge clip that contains the gait change (cf. walkToJog
-  in the Center corpus), not threshold tuning.
+- Cross-edges build via the §6 source-range restriction (now the DEFAULT; use
+  `--no-restrict-source-range` for the legacy all-or-nothing drop). Even the
+  **best** crossing in the build's kovar metric is D~2709 (walk->run) / D~1932
+  (run->walk) -- ~10x the self-edge (~250) at *every* source sample. The graph
+  CONNECTS but the cross edges are **teleport-grade**, not clean planted
+  transitions. Root cause: subject 16 has **no walk<->run transition clip**.
+  Faithful fix = a bridge clip that contains the gait change (cf. walkToJog in the
+  Center corpus), not threshold tuning.
 
-## CLI change
-`apps/PmgGraphCommands.cpp`: wired the existing `restrict_source_range` builder flag
-(PR #57, was only on a runtime command) into `--build-graph` as
-`--restrict-source-range`.
+## CLI changes
+`apps/PmgGraphCommands.cpp`: wired the `restrict_source_range` builder flag (PR #57,
+was only on a runtime command) into `--build-graph`. The default was then flipped
+ON (faithful to paper §6's method), with `--no-restrict-source-range` exposing the
+legacy all-or-nothing ablation.
 
 ## KNOWN BUG discovered (pre-existing, unrelated to the above)
 A **dim=1** graph builds (V13) but `LoadPmgArtifactText` fails on reload
