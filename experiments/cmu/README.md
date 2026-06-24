@@ -44,3 +44,43 @@ so you can pick close-speed in-family pairs the sparse Center corpus can't suppl
 The lever is coverage, not per-clip smoothness -- consistent with the original
 clip-limit diagnosis. Blending CMU *into* the Center hull still needs retargeting
 (out of scope; a separate graph node remains the correct structure).
+
+---
+
+# Multi-node gait graph (sweep -> faithful topology)
+
+`cmu_gait_graph.pmg_spec`. Built data-driven from the full 10x10 transition-distance
+sweep (`out/transition_matrix.txt`, `--inspect-transition` on recut cycles).
+
+## Sweep finding
+- **within-walk** D = 10-230 (tight, reliable)
+- **within jog+run** D = 67-900; jog->run cheap (16_35->16_45 = 67)
+- **walk <-> jog/run wall**: D >= 998 for EVERY crossing
+
+So the faithful topology is **2 nodes, not 3** -- jog sits *with* run on the far
+side of the wall (walk->jog 1472 is no better than walk->run 1274). Nodes:
+`walk_cmu` (16_31@17.1 <-> 16_21@29.9), `run_cmu` (16_36@47.1 <-> 16_45@69.9).
+
+## Build result (`--build-graph ... --restrict-source-range`)
+- Self-edges (walk->walk, run->run) build cleanly -> nodes are reliable.
+- Cross-edges only with the all-or-nothing rule relaxed via `--restrict-source-range`
+  (paper Sec 6): even the **best** crossing in the build's kovar metric is
+  D~2709 (walk->run) / D~1932 (run->walk) -- ~10x the self-edge (~250) at *every*
+  source sample. The graph CONNECTS but the cross edges are **teleport-grade**, not
+  clean planted transitions. Root cause: subject 16 has **no walk<->run transition
+  clip**. Faithful fix = a bridge clip that contains the gait change (cf. walkToJog
+  in the Center corpus), not threshold tuning.
+
+## CLI change
+`apps/PmgGraphCommands.cpp`: wired the existing `restrict_source_range` builder flag
+(PR #57, was only on a runtime command) into `--build-graph` as
+`--restrict-source-range`.
+
+## KNOWN BUG discovered (pre-existing, unrelated to the above)
+A **dim=1** graph builds (V13) but `LoadPmgArtifactText` fails on reload
+("failed to read parameter vector") -> `--inspect-graph`/viewer/runtime cannot open
+a 1-D `.pmg`. All `tests/test_graph_io.cpp` round-trips use dim=2, so the 1-D path
+was never exercised. Independent of the `--restrict` change (reproduces on a full
+self-edge-only 1-D build). The graph builds and audits fine; only the
+text-artifact round-trip is broken. Needs a focused GraphIo fix + a dim=1
+round-trip test.

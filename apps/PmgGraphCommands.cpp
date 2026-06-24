@@ -249,6 +249,10 @@ pmg::PmgBuilderConfig ParseBuilderConfigOptions(
             }
         } else if (option == "--seed") {
             config.seed = static_cast<unsigned int>(std::stoul(require_value("--seed")));
+        } else if (option == "--restrict-source-range") {
+            // Paper §6 opt-in: keep the transition-compatible source subset
+            // instead of all-or-nothing rejecting the whole edge.
+            config.restrict_source_range = true;
         } else {
             throw std::runtime_error("unknown builder option '" + option + "'");
         }

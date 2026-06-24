@@ -1,0 +1,58 @@
+# EXPERIMENT (branch experiment/cmu-motion-space): faithful multi-node CMU gait graph.
+# Built data-driven from the full 10x10 transition-distance sweep (out/transition_matrix.txt).
+#
+# Topology is 2 nodes, NOT 3, because the sweep shows a hard WALL between walk and
+# the jog/run cluster (every walk<->fast crossing D>=998), while jog<->run is cheap
+# (16_35->16_45 D=67, 16_36->16_45 D=270). So jog sits WITH run on the far side of
+# the wall -- one "run" node spanning ~47-70 cm/s -- and walk is its own node.
+#
+# Node clips chosen for low loop-seam + clean within-node transition:
+#   walk_cmu: 16_31 @17.1, 16_21 @29.9  (within-D 15/79, seams 0.065/0.050)
+#   run_cmu : 16_36 @47.1, 16_45 @69.9  (within-D 270/893, seams 0.179/0.307)
+# Edge thresholds are native cm^2 from the sweep. The ~6x gap between self-edges
+# (~250/950) and cross-edges (~1350/1550) IS the measured cost of a gait change with
+# NO transition clip in the corpus (paper sec.6 limitation): the graph connects, but
+# the walk<->run edges are the reliability bottleneck, not a clean planted transition.
+
+node walk_cmu 1
+registration walk_cmu LeftFoot - 3 0
+parameter_metrics walk_cmu travel_speed
+parameter_calibration walk_cmu 9
+parameter_support walk_cmu simplex
+example walk_cmu 17.1 bvh/16_31.bvh start_frame 290 end_frame 419
+example walk_cmu 29.9 bvh/16_21.bvh start_frame 10 end_frame 129
+
+node run_cmu 1
+registration run_cmu LeftFoot - 3 0
+parameter_metrics run_cmu travel_speed
+parameter_calibration run_cmu 9
+parameter_support run_cmu simplex
+example run_cmu 47.1 bvh/16_36.bvh start_frame 45 end_frame 139
+example run_cmu 69.9 bvh/16_45.bvh start_frame 5 end_frame 89
+
+expect walk_cmu spanned_axes 1
+expect run_cmu spanned_axes 1
+
+edge walk_cmu walk_cmu
+edge_phase_range walk_cmu walk_cmu 0.70 0.95 0.05 0.30
+edge_config walk_cmu walk_cmu 250 450 4 6 41
+
+edge run_cmu run_cmu
+edge_phase_range run_cmu run_cmu 0.70 0.95 0.05 0.30
+edge_config run_cmu run_cmu 950 1300 4 6 41
+
+# CROSS-GAIT edges (the wall). In the build's kovar point-cloud metric the BEST
+# achievable crossing is D~2709 (walk->run) / D~1932 (run->walk) at EVERY source
+# sample -- ~10x the within-gait self-edge (~250). No GOOD transition exists because
+# subject 16 has no walk<->run transition clip. Thresholds are set just above the
+# best D so the graph CONNECTS (usable), and --restrict-source-range keeps only the
+# transition-compatible source end (fast walk -> run; fast run -> walk). These edges
+# are teleport-grade, NOT clean planted transitions: the faithful fix is a bridge
+# clip that CONTAINS the gait change (cf. walkToJog in the Center corpus), not tuning.
+edge walk_cmu run_cmu
+edge_phase_range walk_cmu run_cmu 0.60 0.95 0.05 0.40
+edge_config walk_cmu run_cmu 2750 3100 4 6 41
+
+edge run_cmu walk_cmu
+edge_phase_range run_cmu walk_cmu 0.60 0.95 0.05 0.40
+edge_config run_cmu walk_cmu 1950 2900 4 6 41
