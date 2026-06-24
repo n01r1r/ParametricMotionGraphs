@@ -3,8 +3,10 @@
 #include "pmg/Skeleton.h"
 #include "pmg/TransitionTypes.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 namespace {
 
@@ -261,6 +263,15 @@ int main() {
         assert(!result.report.edge_created);
         assert(!result.report.source_reports.empty());
         assert(result.report.source_reports.front().good_count == 0);
+
+        // §6 opt-in does not rescue a fully-incompatible pair: when EVERY source
+        // sample is skipped, no compatible sample remains and the edge is still
+        // rejected (edge_created stays false).
+        config.restrict_source_range = true;
+        const pmg::EdgeBuildResult restricted =
+            pmg::PmgBuilder::BuildEdgeWithReport(skeleton, 0, 1, space, other_space, config);
+        assert(restricted.edge.samples.empty());
+        assert(!restricted.report.edge_created);
     }
 
     // D1 (paper Sec 3.2 / Sec 6): an edge exists only if EVERY source sample can
@@ -299,6 +310,38 @@ int main() {
         const pmg::PmgEdge built =
             pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, narrow_source, static_target, config);
         assert(!built.samples.empty());
+
+        // §6 opt-in (paper Sec 6): the SAME wide source that the all-or-nothing
+        // default rejects now builds an edge over the compatible source samples,
+        // dropping the unreachable extremes. distance(source@p, static) grows
+        // monotonically with |p|, so the kept subset is the small-|p| side: every
+        // accepted sample is strictly closer to static than every dropped one.
+        config.restrict_source_range = true;
+        const pmg::EdgeBuildResult restricted_result =
+            pmg::PmgBuilder::BuildEdgeWithReport(skeleton, 0, 0, wide_source, static_target, config);
+        assert(restricted_result.report.edge_created);
+        assert(!restricted_result.edge.samples.empty());
+        int accepted_count = 0;
+        int restricted_count = 0;
+        float max_accepted_abs_p = 0.0f;
+        float min_restricted_abs_p = std::numeric_limits<float>::infinity();
+        for (const pmg::SourceSampleBuildReport& report :
+             restricted_result.report.source_reports) {
+            const float abs_p = std::abs(report.source_parameter[0]);
+            if (report.accepted) {
+                ++accepted_count;
+                max_accepted_abs_p = std::max(max_accepted_abs_p, abs_p);
+            } else {
+                ++restricted_count;
+                min_restricted_abs_p = std::min(min_restricted_abs_p, abs_p);
+            }
+        }
+        assert(accepted_count > 0);    // some source samples reach -> edge exists
+        assert(restricted_count > 0);  // some are dropped -> genuinely restricted
+        assert(max_accepted_abs_p < min_restricted_abs_p);  // clean small-|p| subset
+        // every kept source sample becomes one transition sample
+        assert(restricted_result.edge.samples.size() ==
+               static_cast<std::size_t>(accepted_count));
     }
     {
         // PmgBuilder_SamplesInsideTriangulatedSupport
