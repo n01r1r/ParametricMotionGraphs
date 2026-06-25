@@ -86,3 +86,40 @@ Viewer ctest 5/5.
 - Stale repro step `docs/audits/baseline-20260618.md:168` ("PMG Runtime -> From
   spec") -- left as a dated historical snapshot; sync only if that audit is
   re-run.
+
+## Rendering pass (2026-06-25)
+
+Scene-rendering / readability features on `dev/ui`, no seam change. Viewer ctest
+5/5; full ctest 50/50.
+
+### Done
+
+- **Configurable floor color** (`96f7703`). The floor was a hardcoded grey
+  constant; it now flows `RenderScene::floor_color` -> scene shader, with a
+  `ColorEdit3` "Floor color" in the Display section (tint the world grid
+  gold/red/etc. live). Same commit adds `DiagnosticLine::alpha` + a `uAlpha`
+  uniform and a blended diagnostic-line pass (opaque geometry stays `alpha=1`).
+- **Diluted path-preview ghosts** (`8f2251d`). Path preview now defaults on (the
+  toggle existed but off, so the trail looked "gone"). The opaque cyan->amber
+  gradient became a near-uniform cool grey-blue at low per-ghost alpha (scaled
+  down as ghost count rises), so overlapping onion-skin ghosts read as a faint
+  cloud, not a tangle. Only lightness ramps dim->bright for the time cue.
+- **Parameter-sweep root-path overlay** (`627f62f`). New blend-mode diagnostic:
+  `RecomputeParamSweepPaths` blends the space at 5 values across the view axis
+  and caches each integrated root trajectory; `AppendParamSweepPaths` draws them
+  translucent, blue(slow)->red(fast). Toggle "Param-sweep paths", default on.
+  Shows how the travel path changes with the blend parameter (the onion-skin
+  only showed one parameter at a time).
+- **Capsule mannequin skeleton** (`82da47f`). `BoneSegment::radius` gives each
+  bone a girth by child-joint role (`MannequinBoneGirth`: trunk / head+proximal
+  / extremity), with sphere caps both ends so a limb chain reads as one smooth
+  capsule body instead of uniform wire. Girth scales with display + skeleton
+  scale.
+
+### Deliberately skipped (rationale)
+
+| Item | Why skipped | Revisit when |
+|---|---|---|
+| Per-axis / runtime tunables for ghost alpha, sweep count, girth | Constants read fine and tune in one line; no demand for live sliders. | A user actually wants to dial these in-session. |
+| N-D param-sweep refresh on sibling-axis drag | Cached on space rebuild only; correct for the 1-D spaces this targets. | An N-D space needs the overlay to follow a held axis. |
+| Order-independent transparency for trails | Depth-write + back-to-front-ish cylinder draw reads fine for faint trails. | Translucent overlap artifacts actually misread. |
