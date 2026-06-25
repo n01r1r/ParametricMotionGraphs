@@ -266,7 +266,7 @@ private:
     // sampled across the active clip so the start, middle(s), and end of the
     // motion are all visible at once. Ghosts always use the full root path so
     // they spread along the trajectory, independent of the in-place toggle.
-    bool path_preview_enabled_ = false;
+    bool path_preview_enabled_ = true;
     int path_preview_count_ = 5;
     // Measured turn rate (rad/s) of GenerateClip across the blend-parameter
     // axis. A smooth steering response is monotone and spike-free; this is the

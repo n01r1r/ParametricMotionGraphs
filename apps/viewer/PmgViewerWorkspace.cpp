@@ -550,6 +550,11 @@ void PmgViewerWorkspace::AppendPathPreview() {
     // Roughly two-thirds of the live bone radius: clearly visible as a trail
     // while staying thinner than the active skeleton.
     const float ghost_radius = 0.065f * display_scale_;
+    // Translucent so overlapping onion-skin ghosts read as a faint cloud instead
+    // of a tangle of opaque bars; per-ghost alpha falls with the count so a dense
+    // trail does not saturate to a solid wall.
+    const float ghost_alpha =
+        std::clamp(1.1f / static_cast<float>(ghost_count), 0.12f, 0.40f);
     for (int ghost = 0; ghost < ghost_count; ++ghost) {
         const float phase =
             static_cast<float>(ghost) / static_cast<float>(ghost_count - 1);
@@ -557,11 +562,11 @@ void PmgViewerWorkspace::AppendPathPreview() {
         if (ghost_pose.NumJoints() != skeleton->NumJoints()) {
             continue;
         }
-        // Cool (cyan) at the start fading to warm (amber) at the end, so the
-        // motion's direction in time reads at a glance.
-        const glm::vec3 ghost_color =
-            glm::mix(glm::vec3(0.20f, 0.75f, 0.95f),
-                     glm::vec3(0.98f, 0.62f, 0.20f), phase);
+        // Near-uniform cool grey-blue; only the lightness ramps dim->bright so the
+        // start->end direction still reads without clashing colors when paths
+        // overlap.
+        const float shade = glm::mix(0.45f, 0.85f, phase);
+        const glm::vec3 ghost_color(shade * 0.78f, shade * 0.86f, shade);
         const std::vector<glm::vec3> ghost_world =
             PoseWorldPositions(ghost_pose, *skeleton, ground_offset);
         for (int joint_index = 0; joint_index < skeleton->NumJoints();
@@ -575,6 +580,7 @@ void PmgViewerWorkspace::AppendPathPreview() {
                 ghost_world[static_cast<std::size_t>(joint_index)],
                 ghost_color,
                 ghost_radius,
+                ghost_alpha,
             });
         }
     }

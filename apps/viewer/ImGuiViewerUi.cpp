@@ -548,7 +548,7 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
             if (ImGui::SliderInt("Ghosts", &ghosts, 2, 12))
                 Push(commands, ViewerUiCommandType::SetPathPreviewCount, ghosts);
             ImGui::SameLine();
-            ImGui::TextDisabled("(cyan=start -> amber=end)");
+            ImGui::TextDisabled("(translucent trail, dim=start -> bright=end)");
         }
     }
 
