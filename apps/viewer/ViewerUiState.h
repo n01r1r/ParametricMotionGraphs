@@ -41,6 +41,7 @@ struct ViewerUiState {
     float phase = 0.0f;
     float skeleton_scale = 1.0f;
     float display_scale = 10.0f;
+    float floor_color[3] = {0.52f, 0.55f, 0.60f};
     int selected_clip_index = -1;
     int selected_spec_index = -1;
     std::string status_message;
@@ -82,7 +83,7 @@ struct ViewerUiState {
 enum class ViewerUiCommandType {
     LoadClip, SetPlaybackMode, TogglePlayback, ResetPlayback,
     StepFrame, SetPlaybackSpeed, SetPhase, SetPathPreviewEnabled,
-    SetPathPreviewCount, SetSkeletonScale, SetDisplayScale,
+    SetPathPreviewCount, SetSkeletonScale, SetDisplayScale, SetFloorColor,
     SetScalarParameter, SetVectorParameter, RebuildMotionSpace,
     RecomputeHeatmap, SaveHeatmapCsv, BuildGraphRuntime, ResetGraphRuntime,
     SetDesiredRuntimeNode, SetDirectSteeringMode, SetGotoMode, SaveArtifact,

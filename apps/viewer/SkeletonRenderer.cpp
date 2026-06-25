@@ -27,7 +27,6 @@ constexpr float kShadowFarPlane = 400.0f;
 
 constexpr float kPi = 3.14159265358979323846f;
 
-const glm::vec3 kFloorColor(0.52f, 0.55f, 0.60f);
 const glm::vec3 kBoneColor(0.86f, 0.44f, 0.24f);
 const glm::vec3 kJointColor(0.96f, 0.78f, 0.26f);
 const glm::vec3 kMarkerColor(0.30f, 0.85f, 0.40f);
@@ -62,6 +61,7 @@ in vec4 vLightSpacePos;
 uniform vec3 uLightToDir;
 uniform vec3 uColor;
 uniform int uIsFloor;
+uniform float uAlpha;
 uniform sampler2D uShadowMap;
 out vec4 FragColor;
 
@@ -111,7 +111,7 @@ void main() {
     vec3 ambient = 0.32 * baseColor;
     vec3 lit = ambient + (1.0 - shadow) * 0.85 * diffuse * baseColor;
     lit = pow(lit, vec3(1.0 / 2.2));
-    FragColor = vec4(lit, 1.0);
+    FragColor = vec4(lit, uAlpha);
 }
 )GLSL";
 
@@ -258,6 +258,7 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
     const GLint model_location = glGetUniformLocation(program, "uModel");
     const GLint color_location = glGetUniformLocation(program, "uColor");
     const GLint is_floor_location = glGetUniformLocation(program, "uIsFloor");
+    const GLint alpha_location = glGetUniformLocation(program, "uAlpha");
 
     auto set_model = [&](const glm::mat4& model) {
         glUniformMatrix4fv(model_location, 1, GL_FALSE, glm::value_ptr(model));
@@ -268,8 +269,13 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
             glUniform1i(is_floor_location, is_floor);
         }
     };
+    // Opaque geometry below; diagnostic lines override per-line. (uAlpha is a no-op
+    // on the depth program, whose location resolves to -1.)
+    if (!is_depth_pass) {
+        glUniform1f(alpha_location, 1.0f);
+    }
 
-    set_object_color(kFloorColor, 1);
+    set_object_color(scene.floor_color, 1);
     set_model(glm::mat4(1.0f));
     floor_mesh_.Draw();
 
@@ -305,11 +311,18 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
                 glm::vec3(point.radius)));
             sphere_mesh_.Draw();
         }
+        // Translucent trails blend over the opaque scene; depth-write stays on so
+        // they still occlude each other plausibly (order-independent enough for
+        // faint ghost clouds).
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         for (const DiagnosticLine& line : scene.diagnostic_lines) {
             set_object_color(line.color, 0);
+            glUniform1f(alpha_location, line.alpha);
             set_model(BoneModelMatrix(line.start, line.end, line.radius));
             cylinder_mesh_.Draw();
         }
+        glDisable(GL_BLEND);
     }
 }
 

@@ -23,6 +23,7 @@ struct DiagnosticLine {
     glm::vec3 end;
     glm::vec3 color;
     float radius = 0.25f;
+    float alpha = 1.0f;  // <1 = translucent (overlapping ghost trails read as a cloud)
 };
 
 // Algorithm-neutral scene description consumed by the viewer renderer.
@@ -37,6 +38,7 @@ struct RenderScene {
     std::vector<DiagnosticLine> diagnostic_lines;
     glm::vec3 light_to_direction{0.4f, 0.85f, 0.35f};
     glm::vec3 focus_point{0.0f, 8.0f, 0.0f};
+    glm::vec3 floor_color{0.52f, 0.55f, 0.60f};
 };
 
 }  // namespace pmgviewer

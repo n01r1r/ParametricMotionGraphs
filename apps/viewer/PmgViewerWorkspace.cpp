@@ -252,6 +252,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     glm::vec3 centroid(0.0f);
     scene_.joints.clear();
     scene_.bones.clear();
+    scene_.floor_color = floor_color_;
     scene_.joints.reserve(world_positions.size());
     const bool separate_end_sites = show_end_sites_separately_ && !hide_end_sites_;
     const float axis_length = 0.35f * display_scale_ * skeleton_scale_;
@@ -1083,6 +1084,9 @@ ViewerUiState PmgViewerWorkspace::MakeUiState() const {
                                              : current_phase_;
     state.skeleton_scale = skeleton_scale_;
     state.display_scale = display_scale_;
+    state.floor_color[0] = floor_color_.x;
+    state.floor_color[1] = floor_color_.y;
+    state.floor_color[2] = floor_color_.z;
     state.selected_clip_index = selected_file_index_;
     state.selected_spec_index = selected_spec_index_;
     state.status_message = status_message_;
@@ -1197,6 +1201,10 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
         skeleton_scale_ = std::clamp(command.x, 0.1f, 5.0f); break;
     case ViewerUiCommandType::SetDisplayScale:
         display_scale_ = std::clamp(command.x, 1.0f, 40.0f); break;
+    case ViewerUiCommandType::SetFloorColor:
+        if (command.values.size() == 3)
+            floor_color_ = {command.values[0], command.values[1], command.values[2]};
+        break;
     case ViewerUiCommandType::SetScalarParameter:
         if (command.index < 0 || command.index >= static_cast<int>(pmg_parameter_.size()))
             throw std::out_of_range("scalar parameter index is outside parameter vector");
