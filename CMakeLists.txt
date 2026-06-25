@@ -276,6 +276,21 @@ if(PMG_BUILD_TESTS)
             --tolerance 2.0
             --max-pop-ratio 8.0)
 
+    # Motion-quality regression gate. A deterministic random walk through the
+    # canonical graph (paper Sec 4-5 runtime: traversal + transitions) must keep
+    # the transition pop ratio (max/median per-step pose delta) bounded. The seed
+    # is fixed so the metric is reproducible; the 1.5 threshold has ~11% headroom
+    # over the current baseline (pop_ratio=1.349 @ --walk-seed 7) so it trips on a
+    # real transition/blend regression, not seed noise. Tighter than the --goto
+    # gate above (8.0), which only guards against gross blowups.
+    add_test(NAME cli_quality_gate_random_walk_walk_2d
+        COMMAND pmg_cli --random-walk
+            ${CMAKE_CURRENT_SOURCE_DIR}/specs/demo_walk_2d.pmg_spec
+            --seconds 8
+            --walk-seed 7
+            --min-transitions 3
+            --max-pop-ratio 1.5)
+
     # Unit fixtures. These are not presentation demos; they exercise edge
     # classification and transition-domain shrink behavior.
     add_test(NAME cli_build_artifact_selective
