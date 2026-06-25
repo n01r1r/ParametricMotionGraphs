@@ -292,9 +292,36 @@ std::vector<std::vector<float>> MatchedContactAnchors(
               [](const Descriptor& a, const Descriptor& b) {
                   return a.mean_phase < b.mean_phase;
               });
+    // Mean-phase order need not be each example's own phase order: two examples
+    // can disagree on whether (say) the left or right strike comes first. Such
+    // anchors cannot be co-registered (the warp must stay monotone per example),
+    // so keep, in mean order, only the chain that is strictly increasing in
+    // EVERY example. Dropped anchors are the genuinely incompatible ones; the
+    // kept chain is the common subset BuildRegistrationWarps can warp over.
+    constexpr float kMinAnchorSpacing = 1.0e-4f;
+    std::vector<float> last_phase(example_count, 0.0f);
+    std::vector<Descriptor> kept;
+    kept.reserve(descriptors.size());
+    for (const Descriptor& d : descriptors) {
+        bool monotone_everywhere = true;
+        for (std::size_t e = 0; e < example_count; ++e) {
+            const float phase = per_example[e].at(d.key)[d.index];
+            if (phase <= last_phase[e] + kMinAnchorSpacing) {
+                monotone_everywhere = false;
+                break;
+            }
+        }
+        if (!monotone_everywhere) {
+            continue;
+        }
+        for (std::size_t e = 0; e < example_count; ++e) {
+            last_phase[e] = per_example[e].at(d.key)[d.index];
+        }
+        kept.push_back(d);
+    }
     for (std::size_t e = 0; e < example_count; ++e) {
-        result[e].reserve(descriptors.size());
-        for (const Descriptor& d : descriptors) {
+        result[e].reserve(kept.size());
+        for (const Descriptor& d : kept) {
             result[e].push_back(per_example[e].at(d.key)[d.index]);
         }
     }

@@ -434,6 +434,9 @@ GraphSpec LoadGraphSpec(const std::string& path) {
                     ": expected registration <node> <cycle_joint|-> "
                     "<contact_joint_csv|-> <min_frames> <dtw:0|1>");
             }
+            int tolerant_structure = 0;
+            const bool has_tolerant =
+                static_cast<bool>(line >> tolerant_structure);
             auto node_it = std::find_if(
                 spec.nodes.begin(), spec.nodes.end(),
                 [&](const GraphSpecNode& node) { return node.name == node_name; });
@@ -449,10 +452,12 @@ GraphSpec LoadGraphSpec(const std::string& path) {
                                          ": duplicate registration for node '" +
                                          node_name + "'");
             }
-            if (min_contact_frames <= 0 || (dtw_refine != 0 && dtw_refine != 1)) {
+            if (min_contact_frames <= 0 || (dtw_refine != 0 && dtw_refine != 1) ||
+                (has_tolerant && tolerant_structure != 0 && tolerant_structure != 1)) {
                 throw std::runtime_error(
                     "LoadGraphSpec line " + std::to_string(line_number) +
-                    ": registration requires positive min_frames and dtw 0 or 1");
+                    ": registration requires positive min_frames, dtw 0 or 1, and "
+                    "optional tolerant_structure 0 or 1");
             }
             node_it->has_registration_config = true;
             node_it->cycle_joint = cycle_joint == "-" ? "" : cycle_joint;
@@ -461,6 +466,7 @@ GraphSpec LoadGraphSpec(const std::string& path) {
                                           : SplitCommaList(contact_joint_csv);
             node_it->min_contact_frames = min_contact_frames;
             node_it->dtw_refine = dtw_refine != 0;
+            node_it->tolerant_structure = tolerant_structure != 0;
             continue;
         }
 

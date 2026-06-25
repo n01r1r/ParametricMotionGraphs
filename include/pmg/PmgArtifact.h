@@ -17,6 +17,7 @@ struct NodeRegistrationMetadata {
     std::vector<std::string> contact_joints;
     int min_contact_frames = 3;
     bool dtw_refine = true;
+    bool tolerant_structure = false;
 };
 
 struct EdgeBuildMetadata {

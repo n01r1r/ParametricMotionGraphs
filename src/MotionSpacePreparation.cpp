@@ -72,6 +72,8 @@ NodeRegistrationMetadata ResolveRegistration(const GraphSpecNode& node,
         node.has_registration_config ? node.min_contact_frames : config.default_min_contact_frames;
     registration.dtw_refine =
         node.has_registration_config ? node.dtw_refine : config.default_dtw_refine;
+    registration.tolerant_structure =
+        node.has_registration_config && node.tolerant_structure;
     return registration;
 }
 
@@ -185,20 +187,25 @@ PreparedMotionSpaces PrepareMotionSpaces(const GraphSpec& spec,
 
             // Reject cross-family blend spaces before registration: every
             // example must be one looping cycle sharing one contact structure.
-            std::vector<std::vector<ContactInterval>> example_intervals;
-            std::vector<int> example_frame_counts;
-            example_intervals.reserve(production.Examples().size());
-            example_frame_counts.reserve(production.Examples().size());
-            for (const ExampleMotion& example : production.Examples()) {
-                example_intervals.push_back(DetectContacts(
-                    *reference_skeleton, example.clip, stages.contact_joint_indices,
-                    settings));
-                example_frame_counts.push_back(example.clip.NumFrames());
+            // Tolerant registration relaxes exactly this premise, so the guard is
+            // skipped when opted in (the tolerant path warps over the common
+            // anchor subset instead of demanding identical structure).
+            if (!stages.registration.tolerant_structure) {
+                std::vector<std::vector<ContactInterval>> example_intervals;
+                std::vector<int> example_frame_counts;
+                example_intervals.reserve(production.Examples().size());
+                example_frame_counts.reserve(production.Examples().size());
+                for (const ExampleMotion& example : production.Examples()) {
+                    example_intervals.push_back(DetectContacts(
+                        *reference_skeleton, example.clip, stages.contact_joint_indices,
+                        settings));
+                    example_frame_counts.push_back(example.clip.NumFrames());
+                }
+                RequireBlendableMotionFamily(example_intervals, example_frame_counts);
             }
-            RequireBlendableMotionFamily(example_intervals, example_frame_counts);
 
             RegisterSpaceByContacts(production, *reference_skeleton, stages.contact_joint_indices,
-                                    settings);
+                                    settings, stages.registration.tolerant_structure);
             stages.contact_registered = production;
 
             if (stages.registration.dtw_refine) {

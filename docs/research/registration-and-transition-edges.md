@@ -1,6 +1,6 @@
 # Research: the two roots of PMG quality limits, and two faithful tweaks
 
-Date: 2026-06-25. Status: B in progress, A designed. Branch: experiment/cmu-motion-space (research continues on a follow-up branch).
+Date: 2026-06-25. Status: B measured + kept (cleared the bar), A designed. Branch: feat/structure-tolerant-registration (off experiment/cmu-motion-space).
 
 ## Frame
 
@@ -22,6 +22,20 @@ R2 is the deeper root. Evidence (measured 2026-06-25): the CMU *within-gait* wal
 **Baseline (already measured).** `experiments/cmu/cmu_walk_1d.pmg_spec` (16_31↔16_21, 4-vs-3): no contact registration; `--audit-foot-skate` pre-foot-lock `max_foot_slide=0.53`, mid-sweep contacts ->1.
 
 **Evaluator / significance bar.** `--audit-foot-skate` *baseline* (pre-foot-lock) `max_foot_slide` and min mid-sweep contact coverage on the 16_31↔16_21 space, with tolerant contact registration ON vs the current no-contact-reg. Significant = a clear foot-slide drop AND contacts no longer collapsing to 1 mid-blend. (Foot-lock then stacks on top, but the point is to fix it at source.)
+
+**Result (measured 2026-06-25, branch `feat/structure-tolerant-registration`).** Wired tolerant registration end-to-end: the spec `registration` line takes an optional 6th field `<tolerant:0|1>`; when set, `PrepareMotionSpaces` skips `RequireBlendableMotionFamily` and calls `RegisterSpaceByContacts(..., tolerant=true)`. CMU spec is now `registration cmu_walk LeftFoot LeftFoot,RightFoot 3 0 1`. `--space-sweep` (11 steps) — naive (no contact reg) vs registered (tolerant) vs registered + foot-lock:
+
+| metric | naive | tolerant reg | tolerant + foot-lock |
+|---|---|---|---|
+| min_contacts | 0 | 2 | 2 |
+| min_contact_coverage | 0 | 64 | 62 |
+| max_foot_slide | 0.535 | 0.530 | **0.183** |
+| max_slide_rate | 3.58 | 4.06 | **1.98** |
+| max_adjacent_step | 0.91 | 1.64 | 1.64 |
+
+Verdict: **clears the bar, kept (opt-in, documented).** Contact-collapse is fixed decisively and on its own — naive loses ALL foot contact for 4 of 11 sweep steps (`min_contacts=0`); tolerant holds `min_contacts=2` across the whole sweep. Raw `max_foot_slide` from tolerant registration *alone* is flat (~0.53), but naive's low number is an artifact: mid-sweep the foot is airborne, so it cannot slide. Tolerant registration's real role is to preserve the contacts foot-lock needs — on the naive blend foot-lock has nothing to lock at the collapsed steps; on the tolerant blend it cuts slide to 0.183 (−66% vs naive). Strict registration cannot build this space at all (throws on 4-vs-3 structure). Honest cost: `max_adjacent_step` rises 0.91→1.64 because the registered blend moves both feet through real stance instead of collapsing toward a near-static degenerate pose.
+
+A real algorithm defect surfaced *during* measurement and was fixed: `MatchedContactAnchors` ordered anchors by their *mean* phase across examples, which is not each example's own order. CMU 16_31/16_21 disagree on left/right strike order, so one example's emitted list came out non-monotone and `TimeWarp::FromAnchors` threw "to anchors must be strictly increasing". Fix (`src/MotionRegistration.cpp`): greedily keep only the anchor chain that is strictly increasing in *every* example, dropping genuinely un-coregisterable anchors. Regression-tested by `TestMatchedContactAnchorsHandlesOrderConflict`. The original synthetic unit test never hit this — uniform data keeps mean order == per-example order, the false-confidence gap real mocap exposed.
 
 ## Tweak A (second): transition-clip-seeded edges
 

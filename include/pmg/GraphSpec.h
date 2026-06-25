@@ -18,6 +18,10 @@ struct GraphSpecNode {
     std::vector<std::string> contact_joints;
     int min_contact_frames = 3;
     bool dtw_refine = true;
+    // Opt-in: register examples with DIFFERENT contact structure by matching
+    // anchors over the common (joint, strike/lift, occurrence) subset instead of
+    // requiring identical anchor counts. Also skips the cross-family blend guard.
+    bool tolerant_structure = false;
     bool has_parameter_metrics_config = false;
     // Empty: Shepard weights. Otherwise one measured metric per parameter
     // axis, in axis order (KG04-style parameter accuracy).
@@ -64,6 +68,9 @@ struct GraphSpec {
 // Minimal whitespace-delimited spec:
 //   node <name> <parameter_dimension>
 //   registration <node> <cycle_joint|-> <contact_joint_csv|-> <min_frames> <dtw:0|1>
+//               [<tolerant_structure:0|1>]  # 1 = align examples with differing
+//               contact structure over their common anchor subset (skips the
+//               cross-family blend guard); omitted/0 = strict identical-structure
 //   parameter_metric <node> <turn_rate|travel_speed|none>  # legacy 1-D form
 //   parameter_metrics <node> <metric0> ... <metricN-1>
 //   parameter_calibration <node> <samples_per_axis>
