@@ -582,13 +582,6 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
     float display_scale = state.display_scale;
     if (ImGui::SliderFloat("Display scale", &display_scale, 1.0f, 40.0f, "%.1fx"))
         Push(commands, ViewerUiCommandType::SetDisplayScale, -1, display_scale);
-    float floor_color[3] = {state.floor_color[0], state.floor_color[1],
-                            state.floor_color[2]};
-    if (ImGui::ColorEdit3("Floor color", floor_color)) {
-        ViewerUiCommand command{ViewerUiCommandType::SetFloorColor};
-        command.values = {floor_color[0], floor_color[1], floor_color[2]};
-        commands.push_back(std::move(command));
-    }
     ImGui::End();
     return commands;
 }

@@ -26,6 +26,7 @@ constexpr float kShadowFarPlane = 400.0f;
 
 constexpr float kPi = 3.14159265358979323846f;
 
+const glm::vec3 kFloorColor(0.52f, 0.55f, 0.60f);
 const glm::vec3 kBoneColor(0.86f, 0.44f, 0.24f);
 const glm::vec3 kJointColor(0.96f, 0.78f, 0.26f);
 const glm::vec3 kMarkerColor(0.30f, 0.85f, 0.40f);
@@ -274,7 +275,7 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
         glUniform1f(alpha_location, 1.0f);
     }
 
-    set_object_color(scene.floor_color, 1);
+    set_object_color(kFloorColor, 1);
     set_model(glm::mat4(1.0f));
     floor_mesh_.Draw();
 

@@ -94,16 +94,19 @@ Scene-rendering / readability features on `dev/ui`, no seam change. Viewer ctest
 
 ### Done
 
-- **Configurable floor color** (`96f7703`). The floor was a hardcoded grey
-  constant; it now flows `RenderScene::floor_color` -> scene shader, with a
-  `ColorEdit3` "Floor color" in the Display section (tint the world grid
-  gold/red/etc. live). Same commit adds `DiagnosticLine::alpha` + a `uAlpha`
-  uniform and a blended diagnostic-line pass (opaque geometry stays `alpha=1`).
-- **Diluted path-preview ghosts** (`8f2251d`). Path preview now defaults on (the
-  toggle existed but off, so the trail looked "gone"). The opaque cyan->amber
-  gradient became a near-uniform cool grey-blue at low per-ghost alpha (scaled
-  down as ghost count rises), so overlapping onion-skin ghosts read as a faint
-  cloud, not a tangle. Only lightness ramps dim->bright for the time cue.
+- **Translucent diagnostic-line infra** (`96f7703`). Added `DiagnosticLine::alpha`
+  + a `uAlpha` uniform and a blended diagnostic-line pass (opaque geometry stays
+  `alpha=1`); used by the ghost trail and sweep overlay below. Originally shipped
+  with a `ColorEdit3` floor-color picker, **removed in the follow-up** (the
+  per-motion origin marker covers the actual need; the floor stays a constant).
+- **Origin marker** (follow-up). A distinct magenta disc + vertical pole at the
+  motion's phase-0 root (`AppendOriginMarker`), so the start point is identifiable
+  without recoloring the whole floor.
+- **Diluted path-preview ghosts** (`8f2251d`, strengthened in follow-up). Path
+  preview now defaults on (the toggle existed but off, so the trail looked
+  "gone"). After the first faint grey-blue pass read as too washed-out, the trail
+  is now a vivid saturated blue at higher per-ghost alpha (`clamp(3/count,
+  0.45..0.85)`), lightness ramping dark->bright for the start->end cue.
 - **Parameter-sweep root-path overlay** (`627f62f`). New blend-mode diagnostic:
   `RecomputeParamSweepPaths` blends the space at 5 values across the view axis
   and caches each integrated root trajectory; `AppendParamSweepPaths` draws them

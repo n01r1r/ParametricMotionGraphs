@@ -39,7 +39,6 @@ struct RenderScene {
     std::vector<DiagnosticLine> diagnostic_lines;
     glm::vec3 light_to_direction{0.4f, 0.85f, 0.35f};
     glm::vec3 focus_point{0.0f, 8.0f, 0.0f};
-    glm::vec3 floor_color{0.52f, 0.55f, 0.60f};
 };
 
 }  // namespace pmgviewer

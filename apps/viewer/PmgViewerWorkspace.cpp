@@ -274,7 +274,6 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     glm::vec3 centroid(0.0f);
     scene_.joints.clear();
     scene_.bones.clear();
-    scene_.floor_color = floor_color_;
     scene_.joints.reserve(world_positions.size());
     const bool separate_end_sites = show_end_sites_separately_ && !hide_end_sites_;
     const float axis_length = 0.35f * display_scale_ * skeleton_scale_;
@@ -445,6 +444,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     AppendRootCanonicalizationMarkers(pose);
     AppendPathPreview();
     AppendParamSweepPaths();
+    AppendOriginMarker();
 
     scene_.focus_point = centroid;
 }
@@ -575,11 +575,10 @@ void PmgViewerWorkspace::AppendPathPreview() {
     // Roughly two-thirds of the live bone radius: clearly visible as a trail
     // while staying thinner than the active skeleton.
     const float ghost_radius = 0.065f * display_scale_;
-    // Translucent so overlapping onion-skin ghosts read as a faint cloud instead
-    // of a tangle of opaque bars; per-ghost alpha falls with the count so a dense
-    // trail does not saturate to a solid wall.
+    // Translucent, but solid enough to read clearly against the floor; per-ghost
+    // alpha falls with the count so a dense trail does not saturate to a wall.
     const float ghost_alpha =
-        std::clamp(1.1f / static_cast<float>(ghost_count), 0.12f, 0.40f);
+        std::clamp(3.0f / static_cast<float>(ghost_count), 0.45f, 0.85f);
     for (int ghost = 0; ghost < ghost_count; ++ghost) {
         const float phase =
             static_cast<float>(ghost) / static_cast<float>(ghost_count - 1);
@@ -587,11 +586,11 @@ void PmgViewerWorkspace::AppendPathPreview() {
         if (ghost_pose.NumJoints() != skeleton->NumJoints()) {
             continue;
         }
-        // Near-uniform cool grey-blue; only the lightness ramps dim->bright so the
-        // start->end direction still reads without clashing colors when paths
-        // overlap.
-        const float shade = glm::mix(0.45f, 0.85f, phase);
-        const glm::vec3 ghost_color(shade * 0.78f, shade * 0.86f, shade);
+        // Vivid, saturated blue; the lightness ramps dark->bright so start->end
+        // direction reads while the color stays strong (not the washed-out grey of
+        // the first pass).
+        const float shade = glm::mix(0.55f, 1.0f, phase);
+        const glm::vec3 ghost_color(0.10f * shade, 0.40f * shade, 1.0f * shade);
         const std::vector<glm::vec3> ghost_world =
             PoseWorldPositions(ghost_pose, *skeleton, ground_offset);
         for (int joint_index = 0; joint_index < skeleton->NumJoints();
@@ -609,6 +608,34 @@ void PmgViewerWorkspace::AppendPathPreview() {
             });
         }
     }
+}
+
+void PmgViewerWorkspace::AppendOriginMarker() {
+    // Mark where the current motion starts (cycle phase-0 root) in a distinct
+    // color, so the origin is identifiable regardless of the floor color. A floor
+    // disc plus a vertical pole make it spottable from any camera angle.
+    const pmg::MotionClip* clip = nullptr;
+    if (ParametricBlendActive() && pmg_preview_clip_.NumFrames() > 0) {
+        clip = &pmg_preview_clip_;
+    } else if (mode_ == ViewerPlaybackMode::ClipPlayback && clip_.NumFrames() > 0) {
+        clip = &clip_;
+    }
+    if (clip == nullptr) {
+        return;
+    }
+    const pmg::Vec3& start = clip->frames.front().root_position;
+    const glm::vec3 base(start.x * display_scale_, 0.0f, start.z * display_scale_);
+    constexpr glm::vec3 kOriginColor(1.0f, 0.20f, 0.55f);  // magenta, off floor grey
+    const float disc_radius = 0.11f * display_scale_;
+    scene_.diagnostic_points.push_back(
+        {base + glm::vec3(0.0f, disc_radius * 0.4f, 0.0f), kOriginColor, disc_radius});
+    scene_.diagnostic_lines.push_back({
+        base,
+        base + glm::vec3(0.0f, 1.2f * display_scale_, 0.0f),
+        kOriginColor,
+        0.02f * display_scale_,
+        1.0f,
+    });
 }
 
 void PmgViewerWorkspace::AppendParamSweepPaths() {
@@ -1183,9 +1210,6 @@ ViewerUiState PmgViewerWorkspace::MakeUiState() const {
                                              : current_phase_;
     state.skeleton_scale = skeleton_scale_;
     state.display_scale = display_scale_;
-    state.floor_color[0] = floor_color_.x;
-    state.floor_color[1] = floor_color_.y;
-    state.floor_color[2] = floor_color_.z;
     state.selected_clip_index = selected_file_index_;
     state.selected_spec_index = selected_spec_index_;
     state.status_message = status_message_;
@@ -1302,10 +1326,6 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
         skeleton_scale_ = std::clamp(command.x, 0.1f, 5.0f); break;
     case ViewerUiCommandType::SetDisplayScale:
         display_scale_ = std::clamp(command.x, 1.0f, 40.0f); break;
-    case ViewerUiCommandType::SetFloorColor:
-        if (command.values.size() == 3)
-            floor_color_ = {command.values[0], command.values[1], command.values[2]};
-        break;
     case ViewerUiCommandType::SetScalarParameter:
         if (command.index < 0 || command.index >= static_cast<int>(pmg_parameter_.size()))
             throw std::out_of_range("scalar parameter index is outside parameter vector");

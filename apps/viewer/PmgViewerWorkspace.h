@@ -106,6 +106,9 @@ private:
     // translucent, one hue per parameter value.
     void RecomputeParamSweepPaths();
     void AppendParamSweepPaths();
+    // Distinct-colored marker at the motion's start (phase-0 root) so the origin
+    // is identifiable without recoloring the whole floor.
+    void AppendOriginMarker();
     void RebuildRootCanonicalizationMarkers();
     void AppendRootCanonicalizationMarkers(const pmg::Pose& current_pose);
 
@@ -234,7 +237,6 @@ private:
     // viewer scales geometry up for display. The metric/core stay native; this
     // never touches distances/thresholds (replaces the old loader x10 bake).
     float display_scale_ = 10.0f;
-    glm::vec3 floor_color_{0.52f, 0.55f, 0.60f};
 
     ViewerPlaybackMode mode_ = ViewerPlaybackMode::ClipPlayback;
     std::vector<PmgExample> pmg_examples_;
