@@ -17,7 +17,6 @@ constexpr int kCylinderRadialSegments = 16;
 constexpr int kSphereStacks = 14;
 constexpr int kSphereSectors = 20;
 constexpr float kFloorHalfExtent = 10000.0f;
-constexpr float kBoneRadius = 1.0f;
 constexpr float kJointRadius = 1.5f;
 
 constexpr float kLightDistance = 120.0f;    // light placed this far along its direction
@@ -281,8 +280,16 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
 
     set_object_color(kBoneColor, 0);
     for (const BoneSegment& bone : scene.bones) {
-        set_model(BoneModelMatrix(bone.parent_position, bone.child_position, kBoneRadius));
+        set_model(BoneModelMatrix(bone.parent_position, bone.child_position, bone.radius));
         cylinder_mesh_.Draw();
+        // Rounded caps at both ends turn the cylinder into a capsule, so a limb
+        // chain reads as one smooth body instead of a stack of cut tubes.
+        set_model(glm::scale(glm::translate(glm::mat4(1.0f), bone.parent_position),
+                             glm::vec3(bone.radius)));
+        sphere_mesh_.Draw();
+        set_model(glm::scale(glm::translate(glm::mat4(1.0f), bone.child_position),
+                             glm::vec3(bone.radius)));
+        sphere_mesh_.Draw();
     }
 
     set_object_color(kJointColor, 0);

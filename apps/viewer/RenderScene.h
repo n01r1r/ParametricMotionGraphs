@@ -10,6 +10,7 @@ namespace pmgviewer {
 struct BoneSegment {
     glm::vec3 parent_position;
     glm::vec3 child_position;
+    float radius = 1.0f;  // limb girth; rounded caps make it a capsule (mannequin)
 };
 
 struct DiagnosticPoint {

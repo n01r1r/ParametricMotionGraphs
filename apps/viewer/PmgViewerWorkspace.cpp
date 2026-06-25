@@ -30,6 +30,28 @@ constexpr int kSteeringCurveSamples = 24;  // turn-rate plot resolution
 
 glm::vec3 ToGlm(const pmg::Vec3& v) { return glm::vec3(v.x, v.y, v.z); }
 
+// Limb girth (capsule radius) by joint role, so the skeleton reads as a human
+// mannequin instead of uniform wire. `unit` carries the display + skeleton scale
+// so resizing keeps proportions. Matched against the lowercased child-joint name.
+float MannequinBoneGirth(const std::string& child_joint_lower, float unit) {
+    auto has = [&](const char* token) {
+        return child_joint_lower.find(token) != std::string::npos;
+    };
+    float fraction = 0.20f;  // default limb
+    if (has("hip") || has("pelvis") || has("spine") || has("chest") ||
+        has("torso") || has("abdomen") || has("back") || has("belly")) {
+        fraction = 0.45f;  // trunk
+    } else if (has("head") || has("neck") || has("thigh") || has("upleg") ||
+               has("upperleg") || has("femur") || has("shoulder") ||
+               has("collar") || has("clavicle")) {
+        fraction = 0.30f;  // head / proximal limb
+    } else if (has("hand") || has("finger") || has("thumb") || has("toe") ||
+               has("ball") || has("foot") || has("wrist") || has("ankle")) {
+        fraction = 0.12f;  // extremity
+    }
+    return fraction * unit;
+}
+
 glm::vec3 TransitionMarkerColor(int source_node, int target_node) {
     const std::array<glm::vec3, 6> kEdgeColors = {
         glm::vec3(0.94f, 0.45f, 0.14f),
@@ -277,6 +299,8 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
              joint_name_lower.find("ball") != std::string::npos);
         const glm::vec3 position = world_positions[static_cast<std::size_t>(joint_index)];
         centroid += position;
+        const float bone_girth =
+            MannequinBoneGirth(joint_name_lower, display_scale_ * skeleton_scale_);
 
         if (is_end_site) {
             if (!hide_end_sites_ && separate_end_sites) {
@@ -295,7 +319,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
                 if (joint.parent_index >= 0) {
                     scene_.bones.push_back({
                         world_positions[static_cast<std::size_t>(joint.parent_index)],
-                        position});
+                        position, bone_girth});
                 }
             }
         } else {
@@ -303,7 +327,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
             if (joint.parent_index >= 0) {
                 scene_.bones.push_back({
                     world_positions[static_cast<std::size_t>(joint.parent_index)],
-                    position});
+                    position, bone_girth});
             }
         }
 
