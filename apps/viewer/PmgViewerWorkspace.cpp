@@ -420,6 +420,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
 
     AppendRootCanonicalizationMarkers(pose);
     AppendPathPreview();
+    AppendParamSweepPaths();
 
     scene_.focus_point = centroid;
 }
@@ -581,6 +582,29 @@ void PmgViewerWorkspace::AppendPathPreview() {
                 ghost_color,
                 ghost_radius,
                 ghost_alpha,
+            });
+        }
+    }
+}
+
+void PmgViewerWorkspace::AppendParamSweepPaths() {
+    if (!show_param_sweep_paths_ || !ParametricBlendActive()) {
+        return;
+    }
+    // Just above the floor and the per-anchor trajectories so the fan of paths
+    // reads clearly; translucent so overlapping segments blend.
+    const float y = 0.045f * display_scale_;
+    const float radius = 0.03f * display_scale_;
+    for (const auto& [color, path] : param_sweep_paths_) {
+        for (std::size_t i = 1; i < path.size(); ++i) {
+            scene_.diagnostic_lines.push_back({
+                glm::vec3(path[i - 1].x * display_scale_, y,
+                          path[i - 1].z * display_scale_),
+                glm::vec3(path[i].x * display_scale_, y,
+                          path[i].z * display_scale_),
+                color,
+                radius,
+                0.55f,
             });
         }
     }
@@ -996,6 +1020,7 @@ void PmgViewerWorkspace::RebuildPmgSpace() {
     }
     pmg_space_ready_ = true;
     RecomputeSteeringCurve();
+    RecomputeParamSweepPaths();
 }
 
 void PmgViewerWorkspace::RecomputeSteeringCurve() {
@@ -1037,6 +1062,49 @@ void PmgViewerWorkspace::RecomputeSteeringCurve() {
         }
         steering_turn_rate_curve_.push_back(turn_rate);
         steering_travel_speed_curve_.push_back(travel_speed);
+    }
+}
+
+void PmgViewerWorkspace::RecomputeParamSweepPaths() {
+    param_sweep_paths_.clear();
+    if (!pmg_space_ready_ || pmg_space_.NumExamples() == 0) {
+        return;
+    }
+    const int axis = std::clamp(pmg_view_axis_, 0, pmg_dimension_ - 1);
+    if (axis >= static_cast<int>(pmg_parameter_min_.size()) ||
+        pmg_parameter_.size() != pmg_parameter_min_.size()) {
+        return;
+    }
+    const float fps = pmg_examples_.empty()
+                          ? 30.0f
+                          : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
+    const float span =
+        std::max(pmg_parameter_max_[axis] - pmg_parameter_min_[axis], kEpsilon);
+    // ponytail: holds the other axes at the current blend, so for an N-D space the
+    // overlay only refreshes on rebuild, not when a sibling axis is dragged. Fine
+    // for the 1-D spaces this targets; revisit if N-D cross-axis preview is wanted.
+    pmg::ParameterVector query = pmg_parameter_;
+    param_sweep_paths_.reserve(kParamSweepPathCount);
+    for (int i = 0; i < kParamSweepPathCount; ++i) {
+        const float alpha =
+            static_cast<float>(i) / static_cast<float>(kParamSweepPathCount - 1);
+        query[axis] = pmg_parameter_min_[axis] + alpha * span;
+        try {
+            const pmg::MotionClip clip = pmg_space_.GenerateClip(query, fps);
+            std::vector<glm::vec3> path;
+            path.reserve(clip.frames.size());
+            for (const pmg::Pose& frame : clip.frames) {
+                path.emplace_back(frame.root_position.x, 0.0f,
+                                  frame.root_position.z);
+            }
+            // Blue (slow end of the axis) -> red (fast end), one hue per value so
+            // the paths stay distinguishable where they bunch together.
+            const glm::vec3 color = glm::mix(glm::vec3(0.25f, 0.55f, 0.95f),
+                                             glm::vec3(0.95f, 0.45f, 0.25f), alpha);
+            param_sweep_paths_.emplace_back(color, std::move(path));
+        } catch (const std::exception&) {
+            // Skip an un-generatable sample; the rest still draw.
+        }
     }
 }
 
@@ -1085,6 +1153,7 @@ ViewerUiState PmgViewerWorkspace::MakeUiState() const {
     state.graph_runtime_active = GraphRuntimeActive();
     state.path_preview_enabled = path_preview_enabled_;
     state.path_preview_count = path_preview_count_;
+    state.param_sweep_paths_enabled = show_param_sweep_paths_;
     state.playback_speed = playback_speed_;
     state.phase = state.graph_runtime_active ? runtime_.Snapshot().current_phase
                                              : current_phase_;
@@ -1203,6 +1272,8 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
         path_preview_enabled_ = command.index != 0; break;
     case ViewerUiCommandType::SetPathPreviewCount:
         path_preview_count_ = std::clamp(command.index, 2, 12); break;
+    case ViewerUiCommandType::SetParamSweepPaths:
+        show_param_sweep_paths_ = command.index != 0; break;
     case ViewerUiCommandType::SetSkeletonScale:
         skeleton_scale_ = std::clamp(command.x, 0.1f, 5.0f); break;
     case ViewerUiCommandType::SetDisplayScale:

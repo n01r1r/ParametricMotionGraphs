@@ -100,6 +100,12 @@ private:
     // (start .. middle(s) .. end) and append faded ghost skeletons so the whole
     // motion is visible at once. No-op unless path_preview_enabled_.
     void AppendPathPreview();
+    // Parameter-sweep path overlay: blend the space at several parameter values
+    // across the view axis and cache each one's integrated root trajectory, so
+    // the user sees how the travel path changes with the blend parameter. Drawn
+    // translucent, one hue per parameter value.
+    void RecomputeParamSweepPaths();
+    void AppendParamSweepPaths();
     void RebuildRootCanonicalizationMarkers();
     void AppendRootCanonicalizationMarkers(const pmg::Pose& current_pose);
 
@@ -268,6 +274,11 @@ private:
     // they spread along the trajectory, independent of the in-place toggle.
     bool path_preview_enabled_ = true;
     int path_preview_count_ = 5;
+    // Parameter-sweep root-path overlay (blend mode). Cached on space rebuild;
+    // each entry is {hue, native-space xz polyline}.
+    bool show_param_sweep_paths_ = true;
+    static constexpr int kParamSweepPathCount = 5;
+    std::vector<std::pair<glm::vec3, std::vector<glm::vec3>>> param_sweep_paths_;
     // Measured turn rate (rad/s) of GenerateClip across the blend-parameter
     // axis. A smooth steering response is monotone and spike-free; this is the
     // in-GUI counterpart to the dev/core steering-smoothness diagnostic.

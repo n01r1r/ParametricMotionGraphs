@@ -550,6 +550,17 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
             ImGui::SameLine();
             ImGui::TextDisabled("(translucent trail, dim=start -> bright=end)");
         }
+
+        // Parameter-sweep overlay: how the travel path changes across the blend
+        // axis (blend mode only).
+        if (state.motion_space_ready) {
+            bool sweep_paths = state.param_sweep_paths_enabled;
+            if (ImGui::Checkbox("Param-sweep paths", &sweep_paths))
+                Push(commands, ViewerUiCommandType::SetParamSweepPaths,
+                     sweep_paths ? 1 : 0);
+            ImGui::SameLine();
+            ImGui::TextDisabled("(blue=slow -> red=fast)");
+        }
     }
 
     if (ImGui::BeginTabBar("##viewer_tabs")) {
