@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace pmg {
 
@@ -233,6 +235,72 @@ std::vector<float> ContactAnchorPhases(
     return anchors;
 }
 
+std::vector<std::vector<float>> MatchedContactAnchors(
+    const std::vector<std::vector<ContactInterval>>& example_intervals,
+    const std::vector<int>& example_frame_counts) {
+    const std::size_t example_count = example_intervals.size();
+    std::vector<std::vector<float>> result(example_count);
+    if (example_count == 0) {
+        return result;
+    }
+    // Role key = (joint_index, event): 0 = strike, 1 = lift. For each example,
+    // collect the interior (0<phase<1) phases per key, sorted by occurrence.
+    using Key = std::pair<int, int>;
+    std::vector<std::map<Key, std::vector<float>>> per_example(example_count);
+    auto push_interior = [](std::vector<float>& v, float phase) {
+        if (phase > 0.0f && phase < 1.0f) v.push_back(phase);
+    };
+    for (std::size_t e = 0; e < example_count; ++e) {
+        for (const ContactInterval& interval : example_intervals[e]) {
+            push_interior(per_example[e][{interval.joint_index, 0}],
+                          interval.StrikePhase(example_frame_counts[e]));
+            push_interior(per_example[e][{interval.joint_index, 1}],
+                          interval.LiftPhase(example_frame_counts[e]));
+        }
+        for (auto& kv : per_example[e]) {
+            std::sort(kv.second.begin(), kv.second.end());
+        }
+    }
+    // A matched anchor exists for (key, occurrence i) only if EVERY example has at
+    // least i+1 of that key. Keep min-count occurrences per key; drop the rest.
+    struct Descriptor {
+        Key key;
+        std::size_t index;
+        float mean_phase;
+    };
+    std::vector<Descriptor> descriptors;
+    for (const auto& kv : per_example[0]) {
+        const Key& key = kv.first;
+        std::size_t common = kv.second.size();
+        for (std::size_t e = 1; e < example_count; ++e) {
+            const auto it = per_example[e].find(key);
+            common = std::min(common,
+                              it == per_example[e].end() ? std::size_t{0}
+                                                         : it->second.size());
+        }
+        for (std::size_t i = 0; i < common; ++i) {
+            float sum = 0.0f;
+            for (std::size_t e = 0; e < example_count; ++e) {
+                sum += per_example[e].at(key)[i];
+            }
+            descriptors.push_back({key, i, sum / static_cast<float>(example_count)});
+        }
+    }
+    // Canonical order: by mean phase, so each example's emitted list follows one
+    // shared logical ordering (the contract BuildRegistrationWarps expects).
+    std::sort(descriptors.begin(), descriptors.end(),
+              [](const Descriptor& a, const Descriptor& b) {
+                  return a.mean_phase < b.mean_phase;
+              });
+    for (std::size_t e = 0; e < example_count; ++e) {
+        result[e].reserve(descriptors.size());
+        for (const Descriptor& d : descriptors) {
+            result[e].push_back(per_example[e].at(d.key)[d.index]);
+        }
+    }
+    return result;
+}
+
 void RequireBlendableMotionFamily(
     const std::vector<std::vector<ContactInterval>>& example_intervals,
     const std::vector<int>& example_frame_counts) {
@@ -350,9 +418,35 @@ void RegisterSpaceByContacts(
     ParametricMotionSpace& space,
     const Skeleton& skeleton,
     const std::vector<int>& contact_joints,
-    const ContactDetectionSettings& settings) {
+    const ContactDetectionSettings& settings,
+    bool tolerant_structure) {
     if (space.NumExamples() == 0) {
         throw std::runtime_error("RegisterSpaceByContacts: space has no examples");
+    }
+
+    // Tolerant path (opt-in): align examples with DIFFERENT contact structure by
+    // matching anchors per (joint, strike/lift, occurrence) and warping over the
+    // common subset, instead of requiring identical anchor counts. Faithful §3
+    // tweak; default off keeps byte-identical legacy behavior.
+    if (tolerant_structure) {
+        std::vector<std::vector<ContactInterval>> example_intervals;
+        std::vector<int> example_frame_counts;
+        example_intervals.reserve(space.Examples().size());
+        example_frame_counts.reserve(space.Examples().size());
+        for (const ExampleMotion& example : space.Examples()) {
+            example_intervals.push_back(
+                DetectContacts(skeleton, example.clip, contact_joints, settings));
+            example_frame_counts.push_back(example.clip.NumFrames());
+        }
+        std::vector<std::vector<float>> matched =
+            MatchedContactAnchors(example_intervals, example_frame_counts);
+        if (matched.empty() || matched.front().empty()) {
+            throw std::runtime_error(
+                "RegisterSpaceByContacts: tolerant registration found no contact "
+                "anchor common to every example");
+        }
+        space.SetExampleTimeWarps(BuildRegistrationWarps(matched));
+        return;
     }
 
     std::vector<std::vector<float>> example_anchor_phases;

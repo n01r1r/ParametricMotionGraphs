@@ -22,6 +22,18 @@ std::vector<float> ContactAnchorPhases(
 std::vector<TimeWarp> BuildRegistrationWarps(
     const std::vector<std::vector<float>>& example_anchor_phases);
 
+// Structure-tolerant anchor matching (paper §3 tweak). Examples may differ in
+// contact structure (e.g. 4 vs 3 contact intervals). Anchors are tagged by
+// (joint, strike/lift) and matched per occurrence; a matched anchor is kept only
+// when EVERY example has that occurrence, so the result is one equal-length phase
+// list per example over the contacts common to all -- ready for
+// BuildRegistrationWarps. Extra contacts unique to some examples are dropped from
+// the registration set (the clip still blends, just is not pinned there). Returns
+// equal-length lists (possibly empty inner lists if no common anchor exists).
+std::vector<std::vector<float>> MatchedContactAnchors(
+    const std::vector<std::vector<ContactInterval>>& example_intervals,
+    const std::vector<int>& example_frame_counts);
+
 // Enforce the motion-family premise for a parametric blend space. Heck-Gleicher
 // and KG04 blend only structurally similar, registered example motions, so a
 // blend space must hold a single motion family. Each example must be one looping
@@ -48,12 +60,15 @@ void RequireBlendableMotionFamily(
 
 // Convenience: detect contacts on every example of `space`, derive anchors,
 // and install the registration warps so EvaluatePose blends structurally
-// corresponding moments. Throws if the examples' contact structures differ.
+// corresponding moments. With tolerant_structure=false (default) the examples
+// must share contact structure (throws otherwise). With tolerant_structure=true
+// it uses MatchedContactAnchors to register examples whose contact counts differ.
 void RegisterSpaceByContacts(
     ParametricMotionSpace& space,
     const Skeleton& skeleton,
     const std::vector<int>& contact_joints,
-    const ContactDetectionSettings& settings);
+    const ContactDetectionSettings& settings,
+    bool tolerant_structure = false);
 
 struct DtwRefineSettings {
     int window_size = 5;            // frames per point cloud in the DTW cost
