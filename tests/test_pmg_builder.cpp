@@ -264,9 +264,9 @@ int main() {
         assert(!result.report.source_reports.empty());
         assert(result.report.source_reports.front().good_count == 0);
 
-        // §6 opt-in does not rescue a fully-incompatible pair: when EVERY source
-        // sample is skipped, no compatible sample remains and the edge is still
-        // rejected (edge_created stays false).
+        // §6 restriction (default) does not rescue a fully-incompatible pair: when
+        // EVERY source sample is skipped, no compatible sample remains and the edge
+        // is still rejected (edge_created stays false).
         config.restrict_source_range = true;
         const pmg::EdgeBuildResult restricted =
             pmg::PmgBuilder::BuildEdgeWithReport(skeleton, 0, 1, space, other_space, config);
@@ -290,6 +290,9 @@ int main() {
         pmg::PmgBuilderConfig config = SmallConfig();
         config.good_transition_threshold = 0.05f;
         config.bad_transition_threshold = 20.0f;
+        // Legacy all-or-nothing ABLATION (source-range restriction is now ON by
+        // default): assert the whole-edge rejection that the default would relax.
+        config.restrict_source_range = false;
 
         // Wide source: large swing at |p|~1 cannot reach the static target.
         pmg::ParametricMotionSpace wide_source("wide", 1);
@@ -311,8 +314,8 @@ int main() {
             pmg::PmgBuilder::BuildEdge(skeleton, 0, 0, narrow_source, static_target, config);
         assert(!built.samples.empty());
 
-        // §6 opt-in (paper Sec 6): the SAME wide source that the all-or-nothing
-        // default rejects now builds an edge over the compatible source samples,
+        // §6 default (paper Sec 6): the SAME wide source that the all-or-nothing
+        // ablation rejects builds an edge over the compatible source samples,
         // dropping the unreachable extremes. distance(source@p, static) grows
         // monotonically with |p|, so the kept subset is the small-|p| side: every
         // accepted sample is strictly closer to static than every dropped one.

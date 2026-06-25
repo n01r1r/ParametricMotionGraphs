@@ -55,12 +55,38 @@ void WriteParameter(std::ostream& output, const ParameterVector& parameter) {
     }
 }
 
+// MSVC's operator>>(float) does not parse the "inf"/"-inf"/"nan" that
+// operator<<(float) writes, so non-finite values (e.g. the +inf/-inf corners of
+// a default/empty ParameterAabb on a rejected edge) fail to round-trip. Read
+// every serialized float through this helper to keep <<-then->> symmetric.
+float ReadSerializedFloat(std::istream& input) {
+    float value = 0.0f;
+    input >> value;
+    if (input.fail()) {
+        input.clear();
+        std::string token;
+        if (!(input >> token)) {
+            return value;
+        }
+        if (token == "inf" || token == "+inf") {
+            value = std::numeric_limits<float>::infinity();
+        } else if (token == "-inf") {
+            value = -std::numeric_limits<float>::infinity();
+        } else if (token == "nan" || token == "-nan" || token == "nan(ind)") {
+            value = std::numeric_limits<float>::quiet_NaN();
+        } else {
+            input.setstate(std::ios::failbit);
+        }
+    }
+    return value;
+}
+
 ParameterVector ReadParameter(std::istream& input) {
     std::size_t size = 0;
     input >> size;
     ParameterVector parameter(size);
     for (float& value : parameter) {
-        input >> value;
+        value = ReadSerializedFloat(input);
     }
     if (!input) {
         throw std::runtime_error("LoadPmgArtifactText: failed to read parameter vector");
@@ -979,9 +1005,13 @@ PmgArtifactMetadata ReadMetadata(
                     "LoadPmgArtifactText: invalid source_report record");
             }
             source.source_parameter = ReadParameter(input);
-            input >> source.good_count >> source.neutral_count >> source.bad_count
-                  >> source.min_distance >> source.p25_distance
-                  >> source.median_distance >> source.max_distance;
+            // Distance summaries default to +inf on a no-candidate sample, so they
+            // must round-trip non-finite values too.
+            input >> source.good_count >> source.neutral_count >> source.bad_count;
+            source.min_distance = ReadSerializedFloat(input);
+            source.p25_distance = ReadSerializedFloat(input);
+            source.median_distance = ReadSerializedFloat(input);
+            source.max_distance = ReadSerializedFloat(input);
             source.target_box_before_shrink = ReadAabb(input);
             source.target_box_after_shrink = ReadAabb(input);
             input >> accepted >> std::quoted(source.reject_reason);

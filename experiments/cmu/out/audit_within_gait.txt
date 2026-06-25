@@ -1,0 +1,39 @@
+contact settings: height_threshold=1.9423 speed_threshold=5.88945 min_contact_frames=2
+--- sweep baseline ---
+step,parameter,contacts,contact_frames,foot_slide,slide_rate
+0,17.1,4,106,0.410371,1.34223
+1,18.7,3,16,0.270019,2.94567
+2,20.3,1,6,0.132656,2.65314
+3,21.9,1,6,0.169369,3.38739
+4,23.5,1,2,0.028304,1.69825
+5,25.1,1,2,0.0310124,1.86075
+6,26.7,1,2,0.0262651,1.57592
+7,28.3,4,11,0.0640964,1.93169
+8,29.9,4,84,0.534887,2.74344
+baseline_min_contacts=1
+baseline_min_contact_coverage=2
+baseline_max_foot_slide=0.534887
+baseline_max_slide_rate=3.38739
+baseline_max_adjacent_step=1.27191
+--- sweep locked ---
+step,parameter,contacts,contact_frames,foot_slide,slide_rate
+0,17.1,4,108,0.116895,0.45806
+1,18.7,3,20,0.0369162,1.05489
+2,20.3,1,7,0.0115593,0.198161
+3,21.9,1,7,0.0145169,0.248862
+4,23.5,1,4,0.0274993,0.824982
+5,25.1,1,4,0.0333976,1.00193
+6,26.7,1,4,0.0244466,0.7334
+7,28.3,3,17,0.0651973,0.869301
+8,29.9,4,80,0.0206542,0.495354
+locked_min_contacts=1
+locked_min_contact_coverage=4
+locked_max_foot_slide=0.116895
+locked_max_slide_rate=1.05489
+locked_max_adjacent_step=1.27191
+baseline_max_foot_slide=0.534887
+locked_max_foot_slide=0.116895
+baseline_max_slide_rate=3.38739
+locked_max_slide_rate=1.05489
+foot_slide_reduction_percent=78.1458
+conclusion=FOOT_LOCK_REDUCES_SLIDE

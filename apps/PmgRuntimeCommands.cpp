@@ -961,7 +961,9 @@ RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
         } else if (option == "--self-edge-cyclic-metric") {
             options.builder.self_edge_cyclic_metric = true;
         } else if (option == "--restrict-source-range") {
-            options.builder.restrict_source_range = true;
+            options.builder.restrict_source_range = true;  // ON by default; explicit
+        } else if (option == "--no-restrict-source-range") {
+            options.builder.restrict_source_range = false;  // legacy all-or-nothing
         } else if (option == "--preroll-policy") {
             const std::string value = require_value("--preroll-policy");
             if (value == "clamp") {

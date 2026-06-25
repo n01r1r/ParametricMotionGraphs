@@ -1,0 +1,18 @@
+=== walk_cmu -> run_cmu ===
+diagnose edge: walk_cmu -> run_cmu
+config: TGOOD=2750 TBAD=3100 metric=kovar_directional_point_cloud source_samples=4 target_samples=6
+transition_samples=6
+edge_created=yes
+source sample reports: 6
+  [0] source=[17.1] accepted=yes
+      D min=2709.56 p25=2716.17 median=2750.18 max=3952.46
+      counts GOOD=4 NEUTRAL=1 BAD=3
+=== run_cmu -> walk_cmu ===
+diagnose edge: run_cmu -> walk_cmu
+config: TGOOD=1950 TBAD=2900 metric=kovar_directional_point_cloud source_samples=4 target_samples=6
+transition_samples=1
+edge_created=no
+reject_reason=a source sample cannot transition to the target space (best distance 2797.810791 > TGOOD 1950.000000): spaces not transition-compatible over the whole source range (paper Sec 6) -- restrict the source range, pick compatible clips, or raise TGOOD
+source sample reports: 2
+  [0] source=[47.1] accepted=yes
+      D min=1932.14 p25=2510.99 median=2645 max=2854.95
