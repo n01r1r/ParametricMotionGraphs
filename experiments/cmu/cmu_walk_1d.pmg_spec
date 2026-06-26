@@ -10,7 +10,10 @@
 # CMU is cm @120fps; cycle joint LeftFoot; contacts via --contact-joints.
 
 node cmu_walk 1
-registration cmu_walk LeftFoot - 3 0
+# tolerant_structure=1 (6th field): 16_31 and 16_21 have different contact
+# counts (4 vs 3 intervals/cycle), so strict registration throws; tolerant
+# registration warps over their common (joint, strike/lift) anchor subset.
+registration cmu_walk LeftFoot LeftFoot,RightFoot 3 0 1
 parameter_metrics cmu_walk travel_speed
 parameter_calibration cmu_walk 9
 parameter_support cmu_walk simplex
