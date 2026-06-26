@@ -1340,16 +1340,8 @@ void PmgViewerWorkspace::BuildGraphSection() {
         return;
     }
 
-    if (ImGui::BeginTabItem("Author")) {
-        BuildGraphAuthorTab();
-        ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("From spec")) {
-        BuildGraphSpecTab();
-        ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Quick self-edge")) {
-        BuildGraphQuickTab();
+    if (ImGui::BeginTabItem("Build")) {
+        BuildGraphBuildTab();
         ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Coverage")) {
@@ -1366,6 +1358,23 @@ void PmgViewerWorkspace::BuildGraphSection() {
     }
     graph_open_runtime_tab_ = false;
     ImGui::EndTabBar();
+}
+
+void PmgViewerWorkspace::BuildGraphBuildTab() {
+    // One Build tab, three sources: Author = manual snapshot + edges (saveable),
+    // Spec = from .pmg_spec (saveable), Quick = scratch self-edge (not saveable).
+    ImGui::SeparatorText("Source");
+    ImGui::RadioButton("Author", &graph_build_source_, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("Spec", &graph_build_source_, 1);
+    ImGui::SameLine();
+    ImGui::RadioButton("Quick", &graph_build_source_, 2);
+    ImGui::Separator();
+    switch (graph_build_source_) {
+    case 1: BuildGraphSpecTab(); break;
+    case 2: BuildGraphQuickTab(); break;
+    default: BuildGraphAuthorTab(); break;
+    }
 }
 
 void PmgViewerWorkspace::BuildGraphSpecTab() {
@@ -1616,7 +1625,7 @@ void PmgViewerWorkspace::BuildGraphAuthorTab() {
 void PmgViewerWorkspace::BuildGraphRuntimeTab() {
     if (!runtime_.Ready()) {
         ImGui::TextDisabled(
-            "No live graph. Build one from Author, From spec, or Quick self-edge.");
+            "No live graph. Build one from the Build tab (Author / Spec / Quick).");
         return;
     }
 

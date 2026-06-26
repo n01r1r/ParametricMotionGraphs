@@ -86,3 +86,45 @@ Viewer ctest 5/5.
 - Stale repro step `docs/audits/baseline-20260618.md:168` ("PMG Runtime -> From
   spec") -- left as a dated historical snapshot; sync only if that audit is
   re-run.
+
+## Rendering pass (2026-06-25)
+
+Scene-rendering / readability features on `dev/ui`, no seam change. Viewer ctest
+5/5; full ctest 50/50.
+
+### Done
+
+- **Translucent diagnostic-line infra** (`96f7703`). Added `DiagnosticLine::alpha`
+  + a `uAlpha` uniform and a blended diagnostic-line pass (opaque geometry stays
+  `alpha=1`); used by the ghost trail and sweep overlay below. Originally shipped
+  with a `ColorEdit3` floor-color picker, **removed in the follow-up** (the
+  per-motion origin marker covers the actual need; the floor stays a constant).
+- **Origin floor cell** (follow-up). The shader tints the single checkerboard
+  cell under the motion's phase-0 root gold (`uFloorHasOrigin`/`uFloorOriginXz`,
+  fed from `AppendOriginMarker` -> `RenderScene::floor_origin`). The rest of the
+  floor keeps the grey grid; no extra geometry. Replaces an earlier magenta
+  disc + pole marker.
+- **Diluted path-preview ghosts** (`8f2251d`, strengthened in follow-up). Path
+  preview now defaults on (the toggle existed but off, so the trail looked
+  "gone"). After the first faint grey-blue pass read as too washed-out, the trail
+  is now a vivid saturated blue at higher per-ghost alpha (`clamp(3/count,
+  0.45..0.85)`), lightness ramping dark->bright for the start->end cue.
+- **Parameter-sweep root-path overlay** (`627f62f`). New blend-mode diagnostic:
+  `RecomputeParamSweepPaths` blends the space at 5 values across the view axis
+  and caches each integrated root trajectory; `AppendParamSweepPaths` draws them
+  translucent, blue(slow)->red(fast). Toggle "Param-sweep paths", default on.
+  Shows how the travel path changes with the blend parameter (the onion-skin
+  only showed one parameter at a time).
+- **Capsule mannequin skeleton** (`82da47f`). `BoneSegment::radius` gives each
+  bone a girth by child-joint role (`MannequinBoneGirth`: trunk / head+proximal
+  / extremity), with sphere caps both ends so a limb chain reads as one smooth
+  capsule body instead of uniform wire. Girth scales with display + skeleton
+  scale.
+
+### Deliberately skipped (rationale)
+
+| Item | Why skipped | Revisit when |
+|---|---|---|
+| Per-axis / runtime tunables for ghost alpha, sweep count, girth | Constants read fine and tune in one line; no demand for live sliders. | A user actually wants to dial these in-session. |
+| N-D param-sweep refresh on sibling-axis drag | Cached on space rebuild only; correct for the 1-D spaces this targets. | An N-D space needs the overlay to follow a held axis. |
+| Order-independent transparency for trails | Depth-write + back-to-front-ish cylinder draw reads fine for faint trails. | Translucent overlap artifacts actually misread. |

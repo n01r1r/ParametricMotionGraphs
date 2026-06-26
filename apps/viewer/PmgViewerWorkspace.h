@@ -100,6 +100,15 @@ private:
     // (start .. middle(s) .. end) and append faded ghost skeletons so the whole
     // motion is visible at once. No-op unless path_preview_enabled_.
     void AppendPathPreview();
+    // Parameter-sweep path overlay: blend the space at several parameter values
+    // across the view axis and cache each one's integrated root trajectory, so
+    // the user sees how the travel path changes with the blend parameter. Drawn
+    // translucent, one hue per parameter value.
+    void RecomputeParamSweepPaths();
+    void AppendParamSweepPaths();
+    // Distinct-colored marker at the motion's start (phase-0 root) so the origin
+    // is identifiable without recoloring the whole floor.
+    void AppendOriginMarker();
     void RebuildRootCanonicalizationMarkers();
     void AppendRootCanonicalizationMarkers(const pmg::Pose& current_pose);
 
@@ -125,11 +134,9 @@ private:
     static float ComputeGroundOffset(const pmg::Skeleton& skeleton, const pmg::MotionClip& clip);
     float ActiveReferenceDuration() const;
 
-    void BuildWorkflowSection();
-    void BuildTransportSection();
-    void BuildDisplaySection();
     void BuildDistanceGridSection();
     void BuildGraphSection();
+    void BuildGraphBuildTab();
     void BuildGraphAuthorTab();
     void BuildGraphSpecTab();
     void BuildGraphQuickTab();
@@ -267,8 +274,13 @@ private:
     // sampled across the active clip so the start, middle(s), and end of the
     // motion are all visible at once. Ghosts always use the full root path so
     // they spread along the trajectory, independent of the in-place toggle.
-    bool path_preview_enabled_ = false;
+    bool path_preview_enabled_ = true;
     int path_preview_count_ = 5;
+    // Parameter-sweep root-path overlay (blend mode). Cached on space rebuild;
+    // each entry is {hue, native-space xz polyline}.
+    bool show_param_sweep_paths_ = true;
+    static constexpr int kParamSweepPathCount = 5;
+    std::vector<std::pair<glm::vec3, std::vector<glm::vec3>>> param_sweep_paths_;
     // Measured turn rate (rad/s) of GenerateClip across the blend-parameter
     // axis. A smooth steering response is monotone and spike-free; this is the
     // in-GUI counterpart to the dev/core steering-smoothness diagnostic.
@@ -319,6 +331,7 @@ private:
     ViewerSkeletonPoseMode skeleton_pose_mode_ = ViewerSkeletonPoseMode::Current;
     GraphOrigin graph_origin_ = GraphOrigin::None;
     bool graph_open_runtime_tab_ = false;
+    int graph_build_source_ = 0;  // Build tab source: 0 author, 1 spec, 2 quick
     float graph_desired_parameter_ = 0.0f;
     // Full vector target request for graph runtime UI. Overrides the 1D slider
     // graph_desired_parameter_ when valid.

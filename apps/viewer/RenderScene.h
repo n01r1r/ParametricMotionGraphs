@@ -10,6 +10,7 @@ namespace pmgviewer {
 struct BoneSegment {
     glm::vec3 parent_position;
     glm::vec3 child_position;
+    float radius = 1.0f;  // limb girth; rounded caps make it a capsule (mannequin)
 };
 
 struct DiagnosticPoint {
@@ -23,6 +24,7 @@ struct DiagnosticLine {
     glm::vec3 end;
     glm::vec3 color;
     float radius = 0.25f;
+    float alpha = 1.0f;  // <1 = translucent (overlapping ghost trails read as a cloud)
 };
 
 // Algorithm-neutral scene description consumed by the viewer renderer.
@@ -37,6 +39,9 @@ struct RenderScene {
     std::vector<DiagnosticLine> diagnostic_lines;
     glm::vec3 light_to_direction{0.4f, 0.85f, 0.35f};
     glm::vec3 focus_point{0.0f, 8.0f, 0.0f};
+    // Tints the single floor checkerboard cell under (x,z) gold (motion origin).
+    bool has_floor_origin = false;
+    glm::vec3 floor_origin{0.0f};
 };
 
 }  // namespace pmgviewer

@@ -37,6 +37,7 @@ struct ViewerUiState {
     bool graph_runtime_active = false;
     bool path_preview_enabled = false;
     int path_preview_count = 5;
+    bool param_sweep_paths_enabled = true;
     float playback_speed = 1.0f;
     float phase = 0.0f;
     float skeleton_scale = 1.0f;
@@ -80,9 +81,9 @@ struct ViewerUiState {
 };
 
 enum class ViewerUiCommandType {
-    LoadClip, SelectClip, SetPlaybackMode, TogglePlayback, ResetPlayback,
+    LoadClip, SetPlaybackMode, TogglePlayback, ResetPlayback,
     StepFrame, SetPlaybackSpeed, SetPhase, SetPathPreviewEnabled,
-    SetPathPreviewCount, SetSkeletonScale, SetDisplayScale,
+    SetPathPreviewCount, SetParamSweepPaths, SetSkeletonScale, SetDisplayScale,
     SetScalarParameter, SetVectorParameter, RebuildMotionSpace,
     RecomputeHeatmap, SaveHeatmapCsv, BuildGraphRuntime, ResetGraphRuntime,
     SetDesiredRuntimeNode, SetDirectSteeringMode, SetGotoMode, SaveArtifact,

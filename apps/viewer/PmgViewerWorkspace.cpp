@@ -30,6 +30,28 @@ constexpr int kSteeringCurveSamples = 24;  // turn-rate plot resolution
 
 glm::vec3 ToGlm(const pmg::Vec3& v) { return glm::vec3(v.x, v.y, v.z); }
 
+// Limb girth (capsule radius) by joint role, so the skeleton reads as a human
+// mannequin instead of uniform wire. `unit` carries the display + skeleton scale
+// so resizing keeps proportions. Matched against the lowercased child-joint name.
+float MannequinBoneGirth(const std::string& child_joint_lower, float unit) {
+    auto has = [&](const char* token) {
+        return child_joint_lower.find(token) != std::string::npos;
+    };
+    float fraction = 0.20f;  // default limb
+    if (has("hip") || has("pelvis") || has("spine") || has("chest") ||
+        has("torso") || has("abdomen") || has("back") || has("belly")) {
+        fraction = 0.45f;  // trunk
+    } else if (has("head") || has("neck") || has("thigh") || has("upleg") ||
+               has("upperleg") || has("femur") || has("shoulder") ||
+               has("collar") || has("clavicle")) {
+        fraction = 0.30f;  // head / proximal limb
+    } else if (has("hand") || has("finger") || has("thumb") || has("toe") ||
+               has("ball") || has("foot") || has("wrist") || has("ankle")) {
+        fraction = 0.12f;  // extremity
+    }
+    return fraction * unit;
+}
+
 glm::vec3 TransitionMarkerColor(int source_node, int target_node) {
     const std::array<glm::vec3, 6> kEdgeColors = {
         glm::vec3(0.94f, 0.45f, 0.14f),
@@ -276,6 +298,8 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
              joint_name_lower.find("ball") != std::string::npos);
         const glm::vec3 position = world_positions[static_cast<std::size_t>(joint_index)];
         centroid += position;
+        const float bone_girth =
+            MannequinBoneGirth(joint_name_lower, display_scale_ * skeleton_scale_);
 
         if (is_end_site) {
             if (!hide_end_sites_ && separate_end_sites) {
@@ -294,7 +318,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
                 if (joint.parent_index >= 0) {
                     scene_.bones.push_back({
                         world_positions[static_cast<std::size_t>(joint.parent_index)],
-                        position});
+                        position, bone_girth});
                 }
             }
         } else {
@@ -302,7 +326,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
             if (joint.parent_index >= 0) {
                 scene_.bones.push_back({
                     world_positions[static_cast<std::size_t>(joint.parent_index)],
-                    position});
+                    position, bone_girth});
             }
         }
 
@@ -350,6 +374,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     scene_.marker_lines.clear();
     scene_.diagnostic_points.clear();
     scene_.diagnostic_lines.clear();
+    scene_.has_floor_origin = false;
 
     const ViewerRuntimeSnapshot runtime = runtime_.Snapshot();
     const auto& path_points = runtime.runtime_path_points;
@@ -419,6 +444,8 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
 
     AppendRootCanonicalizationMarkers(pose);
     AppendPathPreview();
+    AppendParamSweepPaths();
+    AppendOriginMarker();
 
     scene_.focus_point = centroid;
 }
@@ -549,6 +576,10 @@ void PmgViewerWorkspace::AppendPathPreview() {
     // Roughly two-thirds of the live bone radius: clearly visible as a trail
     // while staying thinner than the active skeleton.
     const float ghost_radius = 0.065f * display_scale_;
+    // Translucent, but solid enough to read clearly against the floor; per-ghost
+    // alpha falls with the count so a dense trail does not saturate to a wall.
+    const float ghost_alpha =
+        std::clamp(3.0f / static_cast<float>(ghost_count), 0.45f, 0.85f);
     for (int ghost = 0; ghost < ghost_count; ++ghost) {
         const float phase =
             static_cast<float>(ghost) / static_cast<float>(ghost_count - 1);
@@ -556,11 +587,11 @@ void PmgViewerWorkspace::AppendPathPreview() {
         if (ghost_pose.NumJoints() != skeleton->NumJoints()) {
             continue;
         }
-        // Cool (cyan) at the start fading to warm (amber) at the end, so the
-        // motion's direction in time reads at a glance.
-        const glm::vec3 ghost_color =
-            glm::mix(glm::vec3(0.20f, 0.75f, 0.95f),
-                     glm::vec3(0.98f, 0.62f, 0.20f), phase);
+        // Vivid, saturated blue; the lightness ramps dark->bright so start->end
+        // direction reads while the color stays strong (not the washed-out grey of
+        // the first pass).
+        const float shade = glm::mix(0.55f, 1.0f, phase);
+        const glm::vec3 ghost_color(0.10f * shade, 0.40f * shade, 1.0f * shade);
         const std::vector<glm::vec3> ghost_world =
             PoseWorldPositions(ghost_pose, *skeleton, ground_offset);
         for (int joint_index = 0; joint_index < skeleton->NumJoints();
@@ -574,6 +605,49 @@ void PmgViewerWorkspace::AppendPathPreview() {
                 ghost_world[static_cast<std::size_t>(joint_index)],
                 ghost_color,
                 ghost_radius,
+                ghost_alpha,
+            });
+        }
+    }
+}
+
+void PmgViewerWorkspace::AppendOriginMarker() {
+    // Tint the single floor checkerboard cell under the motion's start (cycle
+    // phase-0 root) gold. The rest of the floor keeps the grey grid; the shader
+    // recolors only the cell containing this point, so no extra geometry is drawn.
+    const pmg::MotionClip* clip = nullptr;
+    if (ParametricBlendActive() && pmg_preview_clip_.NumFrames() > 0) {
+        clip = &pmg_preview_clip_;
+    } else if (mode_ == ViewerPlaybackMode::ClipPlayback && clip_.NumFrames() > 0) {
+        clip = &clip_;
+    }
+    if (clip == nullptr) {
+        return;
+    }
+    const pmg::Vec3& start = clip->frames.front().root_position;
+    scene_.has_floor_origin = true;
+    scene_.floor_origin =
+        glm::vec3(start.x * display_scale_, 0.0f, start.z * display_scale_);
+}
+
+void PmgViewerWorkspace::AppendParamSweepPaths() {
+    if (!show_param_sweep_paths_ || !ParametricBlendActive()) {
+        return;
+    }
+    // Just above the floor and the per-anchor trajectories so the fan of paths
+    // reads clearly; translucent so overlapping segments blend.
+    const float y = 0.045f * display_scale_;
+    const float radius = 0.03f * display_scale_;
+    for (const auto& [color, path] : param_sweep_paths_) {
+        for (std::size_t i = 1; i < path.size(); ++i) {
+            scene_.diagnostic_lines.push_back({
+                glm::vec3(path[i - 1].x * display_scale_, y,
+                          path[i - 1].z * display_scale_),
+                glm::vec3(path[i].x * display_scale_, y,
+                          path[i].z * display_scale_),
+                color,
+                radius,
+                0.55f,
             });
         }
     }
@@ -989,6 +1063,7 @@ void PmgViewerWorkspace::RebuildPmgSpace() {
     }
     pmg_space_ready_ = true;
     RecomputeSteeringCurve();
+    RecomputeParamSweepPaths();
 }
 
 void PmgViewerWorkspace::RecomputeSteeringCurve() {
@@ -1033,6 +1108,49 @@ void PmgViewerWorkspace::RecomputeSteeringCurve() {
     }
 }
 
+void PmgViewerWorkspace::RecomputeParamSweepPaths() {
+    param_sweep_paths_.clear();
+    if (!pmg_space_ready_ || pmg_space_.NumExamples() == 0) {
+        return;
+    }
+    const int axis = std::clamp(pmg_view_axis_, 0, pmg_dimension_ - 1);
+    if (axis >= static_cast<int>(pmg_parameter_min_.size()) ||
+        pmg_parameter_.size() != pmg_parameter_min_.size()) {
+        return;
+    }
+    const float fps = pmg_examples_.empty()
+                          ? 30.0f
+                          : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
+    const float span =
+        std::max(pmg_parameter_max_[axis] - pmg_parameter_min_[axis], kEpsilon);
+    // ponytail: holds the other axes at the current blend, so for an N-D space the
+    // overlay only refreshes on rebuild, not when a sibling axis is dragged. Fine
+    // for the 1-D spaces this targets; revisit if N-D cross-axis preview is wanted.
+    pmg::ParameterVector query = pmg_parameter_;
+    param_sweep_paths_.reserve(kParamSweepPathCount);
+    for (int i = 0; i < kParamSweepPathCount; ++i) {
+        const float alpha =
+            static_cast<float>(i) / static_cast<float>(kParamSweepPathCount - 1);
+        query[axis] = pmg_parameter_min_[axis] + alpha * span;
+        try {
+            const pmg::MotionClip clip = pmg_space_.GenerateClip(query, fps);
+            std::vector<glm::vec3> path;
+            path.reserve(clip.frames.size());
+            for (const pmg::Pose& frame : clip.frames) {
+                path.emplace_back(frame.root_position.x, 0.0f,
+                                  frame.root_position.z);
+            }
+            // Blue (slow end of the axis) -> red (fast end), one hue per value so
+            // the paths stay distinguishable where they bunch together.
+            const glm::vec3 color = glm::mix(glm::vec3(0.25f, 0.55f, 0.95f),
+                                             glm::vec3(0.95f, 0.45f, 0.25f), alpha);
+            param_sweep_paths_.emplace_back(color, std::move(path));
+        } catch (const std::exception&) {
+            // Skip an un-generatable sample; the rest still draw.
+        }
+    }
+}
+
 void PmgViewerWorkspace::RegeneratePreviewClip() {
     pmg_preview_dirty_ = false;
     pmg_preview_parameter_ = pmg_parameter_;
@@ -1061,7 +1179,7 @@ void PmgViewerWorkspace::BuildUi() {
                 BuildDistanceGridSection();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("PMG Runtime")) {
+            if (ImGui::BeginTabItem("Graph")) {
                 BuildGraphSection();
                 ImGui::EndTabItem();
             }
@@ -1078,6 +1196,7 @@ ViewerUiState PmgViewerWorkspace::MakeUiState() const {
     state.graph_runtime_active = GraphRuntimeActive();
     state.path_preview_enabled = path_preview_enabled_;
     state.path_preview_count = path_preview_count_;
+    state.param_sweep_paths_enabled = show_param_sweep_paths_;
     state.playback_speed = playback_speed_;
     state.phase = state.graph_runtime_active ? runtime_.Snapshot().current_phase
                                              : current_phase_;
@@ -1177,8 +1296,7 @@ void PmgViewerWorkspace::ApplyUiCommands(
 
 void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
     switch (command.type) {
-    case ViewerUiCommandType::LoadClip:
-    case ViewerUiCommandType::SelectClip: LoadClip(command.index); break;
+    case ViewerUiCommandType::LoadClip: LoadClip(command.index); break;
     case ViewerUiCommandType::SetPlaybackMode:
         if (command.index < 0 || command.index > 2)
             throw std::invalid_argument("playback mode index must be in [0, 2]");
@@ -1194,6 +1312,8 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
         path_preview_enabled_ = command.index != 0; break;
     case ViewerUiCommandType::SetPathPreviewCount:
         path_preview_count_ = std::clamp(command.index, 2, 12); break;
+    case ViewerUiCommandType::SetParamSweepPaths:
+        show_param_sweep_paths_ = command.index != 0; break;
     case ViewerUiCommandType::SetSkeletonScale:
         skeleton_scale_ = std::clamp(command.x, 0.1f, 5.0f); break;
     case ViewerUiCommandType::SetDisplayScale:
@@ -1325,128 +1445,6 @@ void PmgViewerWorkspace::StepFrame(int direction) {
     const float frame_phase = 1.0f / static_cast<float>(frame_count - 1);
     current_phase_ =
         WrapPhase(current_phase_ + static_cast<float>(direction) * frame_phase);
-}
-
-void PmgViewerWorkspace::BuildWorkflowSection() {
-    ImGui::TextWrapped("%s", status_message_.c_str());
-    ImGui::Separator();
-
-    // One-line next-step hint: keeps the build order (clip -> samples -> graph)
-    // discoverable without the multi-line step strip.
-    const char* next_hint = nullptr;
-    if (clip_.NumFrames() == 0) {
-        next_hint = "Next: load a clip in Inputs";
-    } else if (pmg_examples_.empty()) {
-        next_hint = "Next: add motion samples in Inputs";
-    } else if (!runtime_.Ready()) {
-        next_hint = "Next: build a graph in PMG Runtime";
-    }
-    if (next_hint != nullptr) {
-        ImGui::TextColored(ImVec4(0.55f, 0.70f, 0.95f, 1.0f), "%s", next_hint);
-        ImGui::Separator();
-    }
-
-    ImGui::TextDisabled("Mode");
-
-    // Mode lives only here. Clip playback is always available; parametric blend
-    // unlocks with a space; graph runtime unlocks once a graph is built.
-    int mode_int = static_cast<int>(mode_);
-    ImGui::RadioButton("Clip playback", &mode_int,
-                       static_cast<int>(ViewerPlaybackMode::ClipPlayback));
-
-    auto gated_radio = [&](const char* label, ViewerPlaybackMode value, bool enabled,
-                           const char* hint) {
-        if (enabled) {
-            ImGui::RadioButton(label, &mode_int, static_cast<int>(value));
-            return;
-        }
-        ImGui::BeginDisabled();
-        int disabled = mode_int;
-        ImGui::RadioButton(label, &disabled, static_cast<int>(value));
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::TextDisabled("(%s)", hint);
-    };
-    gated_radio("Parametric blend", ViewerPlaybackMode::ParametricBlend, pmg_space_ready_,
-                "add a clip");
-    gated_radio("Graph runtime", ViewerPlaybackMode::GraphRuntime,
-                runtime_.Ready(), "build graph");
-    mode_ = static_cast<ViewerPlaybackMode>(mode_int);
-}
-
-void PmgViewerWorkspace::BuildTransportSection() {
-    if (ImGui::Button(playing_ ? "Pause" : "Play ")) {
-        playing_ = !playing_;
-    }
-    const bool time_mode = !GraphRuntimeActive();
-    ImGui::SameLine();
-    ImGui::BeginDisabled(!time_mode);
-    if (ImGui::Button("< Frame")) {
-        StepFrame(-1);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Frame >")) {
-        StepFrame(1);
-    }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Reset")) {
-        ResetPlayback();
-    }
-    if (GraphRuntimeActive()) {
-        ImGui::SameLine();
-        if (ImGui::Button("Restart graph")) {
-            runtime_.Reset();
-        }
-    }
-
-    ImGui::SliderFloat("Speed", &playback_speed_, 0.1f, 3.0f, "%.2fx");
-
-    // Phase scrub: clip & blend only (the graph's phase is owned by the
-    // controller). Phase is the stored clock, so the slider reads/writes it
-    // directly. Auto-pause while dragging so playback doesn't fight it.
-    if (time_mode) {
-        float phase = current_phase_;
-        if (ImGui::SliderFloat("Phase", &phase, 0.0f, 1.0f, "%.3f")) {
-            current_phase_ = phase;
-        }
-        if (ImGui::IsItemActive()) {
-            playing_ = false;
-        }
-    } else if (runtime_.Ready()) {
-        ImGui::Text("Phase %.3f", runtime_.Snapshot().current_phase);
-    }
-
-    // Path preview: ghost skeletons sampled across the active clip so the start,
-    // middle(s), and end are visible at once (clip & blend modes).
-    if (time_mode) {
-        ImGui::Checkbox("Path preview", &path_preview_enabled_);
-        if (path_preview_enabled_) {
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(160.0f);
-            ImGui::SliderInt("Ghosts", &path_preview_count_, 2, 12);
-            ImGui::SameLine();
-            ImGui::TextDisabled("(cyan=start -> amber=end)");
-        }
-    }
-}
-
-void PmgViewerWorkspace::BuildDisplaySection() {
-    ImGui::TextDisabled("Skeleton pose");
-    int pose_mode = static_cast<int>(skeleton_pose_mode_);
-    ImGui::RadioButton("Current frame", &pose_mode,
-                       static_cast<int>(ViewerSkeletonPoseMode::Current));
-    ImGui::SameLine();
-    ImGui::RadioButton("Frame 0", &pose_mode,
-                       static_cast<int>(ViewerSkeletonPoseMode::Frame0));
-    ImGui::SameLine();
-    ImGui::RadioButton("Rest pose", &pose_mode,
-                       static_cast<int>(ViewerSkeletonPoseMode::Rest));
-    if (pose_mode != static_cast<int>(skeleton_pose_mode_)) {
-        skeleton_pose_mode_ = static_cast<ViewerSkeletonPoseMode>(pose_mode);
-    }
-    ImGui::SliderFloat("Skeleton scale", &skeleton_scale_, 0.1f, 5.0f, "%.2fx");
-    ImGui::SliderFloat("Display scale", &display_scale_, 1.0f, 40.0f, "%.1fx");
 }
 
 // --- Distance Grid heatmap (transition visualization) ----------------------

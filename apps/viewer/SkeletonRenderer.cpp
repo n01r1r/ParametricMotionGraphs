@@ -17,7 +17,6 @@ constexpr int kCylinderRadialSegments = 16;
 constexpr int kSphereStacks = 14;
 constexpr int kSphereSectors = 20;
 constexpr float kFloorHalfExtent = 10000.0f;
-constexpr float kBoneRadius = 1.0f;
 constexpr float kJointRadius = 1.5f;
 
 constexpr float kLightDistance = 120.0f;    // light placed this far along its direction
@@ -62,6 +61,9 @@ in vec4 vLightSpacePos;
 uniform vec3 uLightToDir;
 uniform vec3 uColor;
 uniform int uIsFloor;
+uniform float uAlpha;
+uniform int uFloorHasOrigin;
+uniform vec2 uFloorOriginXz;
 uniform sampler2D uShadowMap;
 out vec4 FragColor;
 
@@ -102,6 +104,13 @@ void main() {
         vec2 fw = fwidth(cellUv);
         float blur = clamp(max(fw.x, fw.y), 0.0, 1.0);
         baseColor = mix(mix(darkTile, lightTile, checker), flatTile, blur);
+        if (uFloorHasOrigin == 1 &&
+            all(equal(cellId, floor(uFloorOriginXz / cellSize)))) {
+            // The motion-origin cell: gold, keeping a faint checker variation so
+            // it still reads as one tile of the same grid.
+            vec3 goldTile = vec3(0.85, 0.62, 0.13);
+            baseColor = mix(goldTile * 0.78, goldTile, checker);
+        }
         vec2 seam = abs(fract(cellUv - 0.5) - 0.5) / max(fw, vec2(1.0e-5));
         float line = 1.0 - min(min(seam.x, seam.y), 1.0);
         baseColor = mix(baseColor, baseColor * 0.70, line * 0.6);
@@ -111,7 +120,7 @@ void main() {
     vec3 ambient = 0.32 * baseColor;
     vec3 lit = ambient + (1.0 - shadow) * 0.85 * diffuse * baseColor;
     lit = pow(lit, vec3(1.0 / 2.2));
-    FragColor = vec4(lit, 1.0);
+    FragColor = vec4(lit, uAlpha);
 }
 )GLSL";
 
@@ -258,6 +267,7 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
     const GLint model_location = glGetUniformLocation(program, "uModel");
     const GLint color_location = glGetUniformLocation(program, "uColor");
     const GLint is_floor_location = glGetUniformLocation(program, "uIsFloor");
+    const GLint alpha_location = glGetUniformLocation(program, "uAlpha");
 
     auto set_model = [&](const glm::mat4& model) {
         glUniformMatrix4fv(model_location, 1, GL_FALSE, glm::value_ptr(model));
@@ -268,15 +278,34 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
             glUniform1i(is_floor_location, is_floor);
         }
     };
+    // Opaque geometry below; diagnostic lines override per-line. (uAlpha is a no-op
+    // on the depth program, whose location resolves to -1.)
+    if (!is_depth_pass) {
+        glUniform1f(alpha_location, 1.0f);
+    }
 
     set_object_color(kFloorColor, 1);
+    if (!is_depth_pass) {
+        glUniform1i(glGetUniformLocation(program, "uFloorHasOrigin"),
+                    scene.has_floor_origin ? 1 : 0);
+        glUniform2f(glGetUniformLocation(program, "uFloorOriginXz"),
+                    scene.floor_origin.x, scene.floor_origin.z);
+    }
     set_model(glm::mat4(1.0f));
     floor_mesh_.Draw();
 
     set_object_color(kBoneColor, 0);
     for (const BoneSegment& bone : scene.bones) {
-        set_model(BoneModelMatrix(bone.parent_position, bone.child_position, kBoneRadius));
+        set_model(BoneModelMatrix(bone.parent_position, bone.child_position, bone.radius));
         cylinder_mesh_.Draw();
+        // Rounded caps at both ends turn the cylinder into a capsule, so a limb
+        // chain reads as one smooth body instead of a stack of cut tubes.
+        set_model(glm::scale(glm::translate(glm::mat4(1.0f), bone.parent_position),
+                             glm::vec3(bone.radius)));
+        sphere_mesh_.Draw();
+        set_model(glm::scale(glm::translate(glm::mat4(1.0f), bone.child_position),
+                             glm::vec3(bone.radius)));
+        sphere_mesh_.Draw();
     }
 
     set_object_color(kJointColor, 0);
@@ -305,11 +334,18 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
                 glm::vec3(point.radius)));
             sphere_mesh_.Draw();
         }
+        // Translucent trails blend over the opaque scene; depth-write stays on so
+        // they still occlude each other plausibly (order-independent enough for
+        // faint ghost clouds).
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         for (const DiagnosticLine& line : scene.diagnostic_lines) {
             set_object_color(line.color, 0);
+            glUniform1f(alpha_location, line.alpha);
             set_model(BoneModelMatrix(line.start, line.end, line.radius));
             cylinder_mesh_.Draw();
         }
+        glDisable(GL_BLEND);
     }
 }
 
