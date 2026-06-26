@@ -48,4 +48,28 @@ std::vector<Vec3> ComputeJointWorldPositions(
     return positions;
 }
 
+float MeanJointDistance(
+    const std::vector<Vec3>& first_positions,
+    const std::vector<Vec3>& second_positions) {
+    if (first_positions.empty() ||
+        first_positions.size() != second_positions.size()) {
+        return 0.0f;
+    }
+    float distance_sum = 0.0f;
+    for (std::size_t joint = 0; joint < first_positions.size(); ++joint) {
+        distance_sum +=
+            (second_positions[joint] - first_positions[joint]).Norm();
+    }
+    return distance_sum / static_cast<float>(first_positions.size());
+}
+
+float MeanJointDistance(
+    const Skeleton& skeleton,
+    const Pose& first,
+    const Pose& second) {
+    return MeanJointDistance(
+        ComputeJointWorldPositions(skeleton, first),
+        ComputeJointWorldPositions(skeleton, second));
+}
+
 }  // namespace pmg

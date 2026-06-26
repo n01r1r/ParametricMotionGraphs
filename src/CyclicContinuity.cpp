@@ -76,23 +76,6 @@ float WrappedYawDelta(float current, float previous) {
     return WrapPi(current - previous);
 }
 
-float MeanJointDistance(
-    const Skeleton& skeleton,
-    const Pose& first,
-    const Pose& second) {
-    const std::vector<Vec3> first_positions =
-        ComputeJointWorldPositions(skeleton, first);
-    const std::vector<Vec3> second_positions =
-        ComputeJointWorldPositions(skeleton, second);
-
-    float distance_sum = 0.0f;
-    for (std::size_t joint = 0; joint < first_positions.size(); ++joint) {
-        distance_sum +=
-            (second_positions[joint] - first_positions[joint]).Norm();
-    }
-    return distance_sum / static_cast<float>(first_positions.size());
-}
-
 float Median(std::vector<float> values) {
     if (values.empty()) {
         return 0.0f;

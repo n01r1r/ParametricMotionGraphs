@@ -150,22 +150,6 @@ float ContactSlide(
     return max_drift;
 }
 
-// Mean joint world distance between two equally-sized poses.
-float MeanJointDistance(
-    const pmg::Skeleton& skeleton,
-    const pmg::Pose& first,
-    const pmg::Pose& second) {
-    const std::vector<pmg::Vec3> first_positions =
-        pmg::ComputeJointWorldPositions(skeleton, first);
-    const std::vector<pmg::Vec3> second_positions =
-        pmg::ComputeJointWorldPositions(skeleton, second);
-    float sum = 0.0f;
-    for (std::size_t i = 0; i < first_positions.size(); ++i) {
-        sum += (first_positions[i] - second_positions[i]).Norm();
-    }
-    return sum / static_cast<float>(first_positions.size());
-}
-
 // Sweep the first parameter dimension across the space's domain (other
 // dimensions pinned at the domain midpoint), generate a clip per step, and
 // measure: contacts found per step, worst foot slide inside any contact, and

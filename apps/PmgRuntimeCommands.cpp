@@ -58,21 +58,6 @@ std::vector<std::string> SplitCommaList(const std::string& text) {
     return items;
 }
 
-float MeanJointDistance(
-    const pmg::Skeleton& skeleton,
-    const pmg::Pose& first,
-    const pmg::Pose& second) {
-    const std::vector<pmg::Vec3> first_positions =
-        pmg::ComputeJointWorldPositions(skeleton, first);
-    const std::vector<pmg::Vec3> second_positions =
-        pmg::ComputeJointWorldPositions(skeleton, second);
-    float sum = 0.0f;
-    for (std::size_t i = 0; i < first_positions.size(); ++i) {
-        sum += (first_positions[i] - second_positions[i]).Norm();
-    }
-    return sum / static_cast<float>(first_positions.size());
-}
-
 // ---------------------------------------------------------------------------
 // Phase 4: paper applications, validated numerically.
 //   --random-walk  random transitions through the PMG; popping metric

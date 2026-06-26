@@ -43,5 +43,16 @@ A real algorithm defect surfaced *during* measurement and was fixed: `MatchedCon
 
 **Sketch.** A spec `transition_edge <src> <tgt> <clip> [window]`: register the clip's start against the source node space and its end against the target node space; emit an edge whose transition sample is anchored on the real clip rather than a synthesized blend point. Evaluator: random-walk `pop_ratio` across the seeded edge vs the synthesized/teleport edge.
 
+**Design + decision (2026-06-26, NOT yet implemented).** Investigation showed the
+runtime *cross-fades* source/target poses (`RuntimeController.cpp:246`) and the edge
+stores no frames, so endpoint-only seeding cannot beat the D-minimizing search across
+the cross-family pose gap (`min D ~2709`). The clip helps only if its on-manifold
+bridge frames are *stored and played*. Chosen path: **A2** — `PmgEdge` carries an
+optional bridge `MotionClip`, runtime plays `source -> bridge -> target`, serialized
+in `GraphIo`. The spec-only "bridge node" trick (A1) was **rejected** (relies on the
+cyclic-node machinery; raises a fundamental doubt about `.pmg_spec` reliability for
+planted transitions). Full design, formulas, code sketch, evaluator, and open
+questions: [`transition-clip-edges-A2-design.md`](transition-clip-edges-A2-design.md).
+
 ## Not worth it (per the faithful-first + significance bar)
 C1 calibration interpolant (gain < noise floor), linear->geodesic blend (departs from faithful PMG), 1-D polyline support (YAGNI), full motion-matching (different system, production-only).
