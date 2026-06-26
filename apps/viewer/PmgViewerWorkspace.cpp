@@ -374,6 +374,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
     scene_.marker_lines.clear();
     scene_.diagnostic_points.clear();
     scene_.diagnostic_lines.clear();
+    scene_.has_floor_origin = false;
 
     const ViewerRuntimeSnapshot runtime = runtime_.Snapshot();
     const auto& path_points = runtime.runtime_path_points;
@@ -611,9 +612,9 @@ void PmgViewerWorkspace::AppendPathPreview() {
 }
 
 void PmgViewerWorkspace::AppendOriginMarker() {
-    // Mark where the current motion starts (cycle phase-0 root) in a distinct
-    // color, so the origin is identifiable regardless of the floor color. A floor
-    // disc plus a vertical pole make it spottable from any camera angle.
+    // Tint the single floor checkerboard cell under the motion's start (cycle
+    // phase-0 root) gold. The rest of the floor keeps the grey grid; the shader
+    // recolors only the cell containing this point, so no extra geometry is drawn.
     const pmg::MotionClip* clip = nullptr;
     if (ParametricBlendActive() && pmg_preview_clip_.NumFrames() > 0) {
         clip = &pmg_preview_clip_;
@@ -624,18 +625,9 @@ void PmgViewerWorkspace::AppendOriginMarker() {
         return;
     }
     const pmg::Vec3& start = clip->frames.front().root_position;
-    const glm::vec3 base(start.x * display_scale_, 0.0f, start.z * display_scale_);
-    constexpr glm::vec3 kOriginColor(1.0f, 0.20f, 0.55f);  // magenta, off floor grey
-    const float disc_radius = 0.11f * display_scale_;
-    scene_.diagnostic_points.push_back(
-        {base + glm::vec3(0.0f, disc_radius * 0.4f, 0.0f), kOriginColor, disc_radius});
-    scene_.diagnostic_lines.push_back({
-        base,
-        base + glm::vec3(0.0f, 1.2f * display_scale_, 0.0f),
-        kOriginColor,
-        0.02f * display_scale_,
-        1.0f,
-    });
+    scene_.has_floor_origin = true;
+    scene_.floor_origin =
+        glm::vec3(start.x * display_scale_, 0.0f, start.z * display_scale_);
 }
 
 void PmgViewerWorkspace::AppendParamSweepPaths() {

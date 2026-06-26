@@ -62,6 +62,8 @@ uniform vec3 uLightToDir;
 uniform vec3 uColor;
 uniform int uIsFloor;
 uniform float uAlpha;
+uniform int uFloorHasOrigin;
+uniform vec2 uFloorOriginXz;
 uniform sampler2D uShadowMap;
 out vec4 FragColor;
 
@@ -102,6 +104,13 @@ void main() {
         vec2 fw = fwidth(cellUv);
         float blur = clamp(max(fw.x, fw.y), 0.0, 1.0);
         baseColor = mix(mix(darkTile, lightTile, checker), flatTile, blur);
+        if (uFloorHasOrigin == 1 &&
+            all(equal(cellId, floor(uFloorOriginXz / cellSize)))) {
+            // The motion-origin cell: gold, keeping a faint checker variation so
+            // it still reads as one tile of the same grid.
+            vec3 goldTile = vec3(0.85, 0.62, 0.13);
+            baseColor = mix(goldTile * 0.78, goldTile, checker);
+        }
         vec2 seam = abs(fract(cellUv - 0.5) - 0.5) / max(fw, vec2(1.0e-5));
         float line = 1.0 - min(min(seam.x, seam.y), 1.0);
         baseColor = mix(baseColor, baseColor * 0.70, line * 0.6);
@@ -276,6 +285,12 @@ void SkeletonRenderer::DrawSceneGeometry(const RenderScene& scene, GLuint progra
     }
 
     set_object_color(kFloorColor, 1);
+    if (!is_depth_pass) {
+        glUniform1i(glGetUniformLocation(program, "uFloorHasOrigin"),
+                    scene.has_floor_origin ? 1 : 0);
+        glUniform2f(glGetUniformLocation(program, "uFloorOriginXz"),
+                    scene.floor_origin.x, scene.floor_origin.z);
+    }
     set_model(glm::mat4(1.0f));
     floor_mesh_.Draw();
 

@@ -99,9 +99,11 @@ Scene-rendering / readability features on `dev/ui`, no seam change. Viewer ctest
   `alpha=1`); used by the ghost trail and sweep overlay below. Originally shipped
   with a `ColorEdit3` floor-color picker, **removed in the follow-up** (the
   per-motion origin marker covers the actual need; the floor stays a constant).
-- **Origin marker** (follow-up). A distinct magenta disc + vertical pole at the
-  motion's phase-0 root (`AppendOriginMarker`), so the start point is identifiable
-  without recoloring the whole floor.
+- **Origin floor cell** (follow-up). The shader tints the single checkerboard
+  cell under the motion's phase-0 root gold (`uFloorHasOrigin`/`uFloorOriginXz`,
+  fed from `AppendOriginMarker` -> `RenderScene::floor_origin`). The rest of the
+  floor keeps the grey grid; no extra geometry. Replaces an earlier magenta
+  disc + pole marker.
 - **Diluted path-preview ghosts** (`8f2251d`, strengthened in follow-up). Path
   preview now defaults on (the toggle existed but off, so the trail looked
   "gone"). After the first faint grey-blue pass read as too washed-out, the trail
