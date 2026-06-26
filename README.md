@@ -6,7 +6,7 @@ OpenGL viewer.
 This project implements the core PMG transition pipeline on a single-family,
 single-node, sparse walking motion space. It includes sampled transition-region
 construction, a Kovar-style transition metric, runtime lookup, cyclic-window
-cleanup, and target-directed steering (V12 artifact persistence, phase-gated
+cleanup, and target-directed steering (V13 artifact persistence, phase-gated
 lookup, conservative reachable-box intersection).
 
 It does **not** reproduce KG04 automatic motion-space construction, multi-node
@@ -29,7 +29,7 @@ box.
 | Domain data | `ParametricMotionSpace`, `ParametricMotionGraph`, `TransitionTypes` | motion spaces, nodes, edges, samples |
 | Offline algorithm | `MotionSpacePreparation`, `PmgBuilder`, `PmgOfflinePipeline` | registration, transition search, artifact construction |
 | Runtime algorithm | `RuntimeController`, `GoalDirectedLocomotion`, `AlignmentStrategy` | phase-gated transitions, alignment, pose stream |
-| Input/persistence | `GraphSpec`, `GraphIo` | spec adapter; V2-V12 artifact compatibility |
+| Input/persistence | `GraphSpec`, `GraphIo` | spec adapter; V2-V13 artifact compatibility |
 | CLI | `apps/Pmg*Commands.cpp` | validate, build, inspect, diagnose, run |
 | Viewer | `ViewerHost`, `PmgViewerWorkspace`, `ViewerRuntimeModule` | platform/render host, PMG UI, runtime adapter |
 
@@ -48,7 +48,7 @@ offline construction -> `BuildPmgOfflinePipeline`; runtime stream ->
 
 ```text
 .pmg_spec -> LoadGraphSpec -> BuildPmgOfflinePipeline -> BuiltPmgArtifact
-          -> GraphIo V12 file -> RuntimeController -> world-space Pose stream
+          -> GraphIo V13 file -> RuntimeController -> world-space Pose stream
                                       ^
                          CLI direct / ViewerRuntimeModule adapter
 ```
@@ -80,7 +80,7 @@ as paper-equivalent without reporting its config.
   rejected more requests, and did not improve worst transition artifacts.
 - Builder may reject declared edges; all rejected edges make build fail.
 - Offline preparation still opens BVH filesystem paths.
-- Reader compatibility covers V2-V12; writer emits V12 only.
+- Reader compatibility covers V2-V13; writer emits V13 only.
 - Viewer requires optional OpenGL dependencies enabled by `PMG_BUILD_VIEWER`.
 
 ## Completion path

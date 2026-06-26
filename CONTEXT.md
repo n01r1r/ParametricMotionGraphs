@@ -22,7 +22,7 @@ Canonical terms: [docs/domain-glossary.md](docs/domain-glossary.md).
 2. `src/PmgOfflinePipeline.cpp`: prepare spaces, build nodes/edges, return artifact.
 3. `src/MotionSpacePreparation.cpp`: load/register examples.
 4. `src/PmgBuilder.cpp`: sample and classify transitions.
-5. `src/GraphIo.cpp`: read V2-V12, write V12.
+5. `src/GraphIo.cpp`: read V2-V13, write V13.
 6. `src/RuntimeController.cpp`: project request, select edge, wait for phase gate,
    align transition, emit world-space poses.
 7. `apps/viewer/ViewerRuntimeModule.cpp`: adapt controller lifecycle/status/trace
@@ -68,7 +68,7 @@ Not implemented / limited:
 
 Sparse demo support requires projection. Edge construction is sampling-based
 and may reject edges. Offline preparation still knows BVH paths. Artifact writes
-are V12-only. Viewer is optional and OpenGL-dependent.
+are V13-only. Viewer is optional and OpenGL-dependent.
 
 Current animation-quality evidence is report-only: accepted transitions still
 include visible-pop cases, and contact mismatch is common. The 5-frame blend

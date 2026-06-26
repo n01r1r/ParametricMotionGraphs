@@ -1,7 +1,0 @@
-wrote graph: out/cmu_gait.pmg
-format=PMG_GRAPH_V13
-nodes=2 edges=4
-warning: Cyclic continuity warning: 4/4 cyclic samples are weak. Worst: node 'run_cmu' p=[69.9] clip '16_45.bvh' weak_yaw_rate (seam_ratio=0.895409, root_ratio=1.01007, yaw_ratio=7.15403, contact_drift=0).
-skeleton_joints=38
-generated_frame_count=48
-frames_per_second=30
