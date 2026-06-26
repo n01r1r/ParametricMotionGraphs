@@ -62,13 +62,18 @@ a direct interpolation of a source-manifold pose and a target-manifold pose.
 ## 2. Why this breaks across families (walk <-> jog)
 
 Within a family the blend is fine because near pose pairs exist. Across families
-they do not. Measured pose-seam distances (`fixture_walk_2d_jog_crossfamily` header;
-`cmu_gait_graph` header):
+they do not. Measured (sources reproduce on demand):
 
 ```
-pose-seam   jog <-> walk : 217 .. 246          walk <-> walk : 2.6 .. 50
-best D      walk -> run  : ~2709  (self-edge ~250, so ~10x)
+pose-seam   anything x jogCurve : 217 .. 246    walk x walk : 2.6 .. 6.5    walk x fast-walk(2x) : 37 .. 50
+best D      walk -> run         : 2709.56        within-walk D : 10 .. 230  (so ~12x the within-family floor)
 ```
+
+- pose-seam rows: `docs/audits/jolt-cross-family-diagnosis-20260623.md:36-38`
+  (`--audit-registration-phase-alignment` on the walk_2d single-family hull + jog anchor).
+- D rows: `experiments/cmu/out/cross_edge_diagnosis.txt:8` (walk_cmu->run_cmu,
+  `D min=2709.56`) and `experiments/cmu/README.md:56` (within-walk band). Regenerate
+  with the `diagnose edge` command in that README.
 
 There is **no close pose pair inside the two cyclic spaces**. So
 `(1-a)*walk (+) a*jog` traverses poses on *neither* manifold — not walk, not jog.
@@ -81,8 +86,10 @@ not remove them.
 **Endpoint-only seeding** (derive `phi_s, phi_t, params` from the clip, emit a
 `TransitionSample`, no model change) cannot help: the seed clip's first cycle *is* a
 walk cyclic pose and its last cycle *is* a jog cyclic pose, so its endpoints live in
-the same candidate set the synthesized search already minimizes over. `min D ~2709`
-is a floor no endpoint choice clears. The clip's value is **not** its endpoints — it
+the same candidate set the synthesized search already minimizes over. This is
+**analytic** — endpoints ⊂ search candidate set ⇒ no endpoint choice beats the search
+minimum — so it holds regardless of the exact D; the measured `D min=2709.56` floor
+just shows how far that minimum sits from a blendable seam. The clip's value is **not** its endpoints — it
 is the **on-manifold intermediate frames** that actually connect walk to jog, and
 those only help if **stored and played**:
 
@@ -143,6 +150,16 @@ version tag; absent => `nullopt` => old synthesized behavior, byte-identical).
 `GraphIo` (de)serialize + runtime playback + evaluator. Touches the artifact format,
 so version-bump + round-trip test required.
 
+**Build order (de-risk before paying for the format change).** The §5 go/no-go
+needs only the runtime branch — *not* the serialization. Sequence:
+1. Hardcode a trimmed+aligned `walkToJog` bridge into the runtime `if (edge.bridge)`
+   path (in-memory `PmgEdge`, no spec line, no `GraphIo`).
+2. Run §5 on it. Bar missed ⇒ discard — the entire spec/`GraphIo`/version-bump cost
+   is never paid.
+3. Bar cleared ⇒ then add `transition_edge` parse + `GraphIo` (de)serialize +
+   round-trip test.
+Steps 1–2 are throwaway and touch no artifact format.
+
 **Faithfulness / opt-in.** `transition_edge` is additive; a plain `edge` is
 unchanged. Default path (no bridge) stays byte-identical. This is the direct,
 honest fix for R1, not a tuning knob.
@@ -155,8 +172,18 @@ pmg_cli ... --random-walk --steps N        # pop_ratio over traversed edges
 `pop_ratio` = max per-transition pose pop / threshold (`local_pop_ratio`,
 `src/TransitionQuality.cpp:191,301`). Compare **bridged edge vs synthesized edge**
 on a walk<->jog graph (Center corpus: `walkCurve`/`jogCurve` nodes + `walkToJog`
-bridge). Significant = cross-family `pop_ratio` drops clearly toward within-family
-levels. If it does not clear the bar -> discard per faithful-first.
+bridge).
+
+**Pre-registered bar (set before running, no post-hoc goalpost):** bridged
+cross-family `pop_ratio` ≤ **1.0** (i.e. reclassified `kSmooth`, pose pop within
+threshold), AND ≥ **3x** lower than the same edge's synthesized `pop_ratio`. Miss
+either ⇒ discard per faithful-first.
+
+**Confound (do not over-read a win):** the bridged edge plays *captured* frames,
+the synthesized edge plays a *linear blend*. A win shows "captured intermediate
+beats lerp," which is sufficient for the R1 go/no-go but does **not** isolate this
+specific planted-transition design from "any mocap bridge would do." Fine for
+deciding to ship; not a validation of the design over alternatives.
 
 ## 6. Open questions (recorded, not resolved)
 
