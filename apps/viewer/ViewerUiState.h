@@ -60,6 +60,9 @@ struct ViewerUiState {
     std::vector<float> motion_space_parameter_max;
     int motion_space_view_axis = 0;
     bool motion_space_preview_in_place = false;
+    // Default on: parametric blends foot-skate, so the grounded (IK foot-locked)
+    // preview is the honest default; toggle off to see the raw blend.
+    bool motion_space_foot_lock = true;
     std::string motion_space_weight_error;
     std::vector<float> motion_space_local_blend_weights;
     std::vector<float> motion_space_turn_rate_curve;
@@ -89,7 +92,7 @@ enum class ViewerUiCommandType {
     SetDesiredRuntimeNode, SetDirectSteeringMode, SetGotoMode, SaveArtifact,
     LoadGraphArtifact, BuildArtifactFromSpec, SetMotionSpaceDimension,
     SetNextSampleParameter, AddMotionSample, SetMotionSpaceViewAxis,
-    SetMotionSpacePreviewInPlace, SetMotionSampleParameter,
+    SetMotionSpacePreviewInPlace, SetMotionSpaceFootLock, SetMotionSampleParameter,
     RemoveMotionSample, ClearMotionSpace, SetShowJointNames,
     SetShowEndSitesSeparately, SetHideEndSites, SetDrawLocalJointAxes,
     SetMarkLikelyFootJoints, SetSkeletonPoseMode

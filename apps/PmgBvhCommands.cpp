@@ -4,7 +4,6 @@
 #include "pmg/BvhLoader.h"
 #include "pmg/CandidateWindowExtractor.h"
 #include "pmg/CorpusAudit.h"
-#include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
 #include "pmg/GraphIo.h"

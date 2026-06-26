@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/MathTypes.h"
 #include "pmg/RootCanonicalization.h"
@@ -1162,6 +1163,31 @@ void PmgViewerWorkspace::RegeneratePreviewClip() {
                           ? 30.0f
                           : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
     pmg_preview_clip_ = pmg_space_.GenerateClip(pmg_parameter_, fps);
+
+    // IK foot-lock post-process: parametric blends leave the stance foot sliding
+    // (foot-skate). Pin it on the generated output (Kovar cleanup). This needs no
+    // contact Registration -- it detects contacts on the blended clip directly --
+    // so it works even when the node declares no contact joints. Ankles resolved
+    // from the skeleton by name; if absent, the raw blend is shown unchanged.
+    if (pmg_foot_lock_enabled_ && pmg_preview_clip_.NumFrames() >= 2) {
+        std::vector<int> foot_joints;
+        for (const char* joint_name : {"LeftAnkle", "RightAnkle"}) {
+            for (int joint_index = 0; joint_index < pmg_skeleton_.NumJoints();
+                 ++joint_index) {
+                if (pmg_skeleton_.joints[joint_index].name == joint_name) {
+                    foot_joints.push_back(joint_index);
+                    break;
+                }
+            }
+        }
+        if (!foot_joints.empty()) {
+            pmg::FootLockSettings lock_settings;
+            lock_settings.contacts = pmg::EstimateContactSettings(
+                pmg_skeleton_, pmg_preview_clip_, foot_joints);
+            pmg::LockFootContacts(
+                pmg_skeleton_, pmg_preview_clip_, foot_joints, lock_settings);
+        }
+    }
 }
 
 // --- ImGui UI ---------------------------------------------------------------
@@ -1224,6 +1250,7 @@ ViewerUiState PmgViewerWorkspace::MakeUiState() const {
     state.motion_space_parameter_max = pmg_parameter_max_;
     state.motion_space_view_axis = pmg_view_axis_;
     state.motion_space_preview_in_place = pmg_preview_in_place_;
+    state.motion_space_foot_lock = pmg_foot_lock_enabled_;
     state.motion_space_turn_rate_curve = steering_turn_rate_curve_;
     state.motion_space_travel_speed_curve = steering_travel_speed_curve_;
     if (pmg_preview_clip_.NumFrames() >= 2) {
@@ -1355,6 +1382,12 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
         break;
     case ViewerUiCommandType::SetMotionSpacePreviewInPlace:
         pmg_preview_in_place_ = command.index != 0;
+        break;
+    case ViewerUiCommandType::SetMotionSpaceFootLock:
+        // Foot-lock rewrites the preview clip's stance legs, so the cached clip
+        // must be regenerated when the toggle changes.
+        pmg_foot_lock_enabled_ = command.index != 0;
+        pmg_preview_dirty_ = true;
         break;
     case ViewerUiCommandType::SetShowJointNames:
         show_joint_names_ = command.index != 0;

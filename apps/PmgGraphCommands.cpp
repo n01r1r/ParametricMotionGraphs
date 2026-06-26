@@ -2,7 +2,6 @@
 
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/CyclicContinuity.h"
-#include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
 #include "pmg/GraphIo.h"

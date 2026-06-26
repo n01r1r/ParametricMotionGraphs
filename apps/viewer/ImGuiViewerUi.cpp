@@ -450,6 +450,16 @@ void BuildMotionSpace(const ViewerUiState& state,
                                 ? "(root locked: cycle in place)"
                                 : "(trajectory: integrated root path)");
 
+        bool foot_lock = state.motion_space_foot_lock;
+        if (ImGui::Checkbox("Foot-lock (IK)", &foot_lock)) {
+            Push(commands, ViewerUiCommandType::SetMotionSpaceFootLock,
+                 foot_lock ? 1 : 0);
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled(foot_lock
+                                ? "(stance feet pinned: skate removed)"
+                                : "(raw blend: feet may slide)");
+
         DrawSteeringPlots(state);
         DrawPhaseTimeline(state);
 

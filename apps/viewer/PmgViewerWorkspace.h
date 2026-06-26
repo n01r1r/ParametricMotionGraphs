@@ -270,6 +270,10 @@ private:
     // character cycles in place (inspect the pose) instead of tracing its
     // integrated trajectory across the floor.
     bool pmg_preview_in_place_ = false;
+    // Default on: IK foot-lock post-process on the generated preview clip removes
+    // the parametric blend's residual foot-skate (Kovar cleanup on synthesis
+    // output). See RegeneratePreviewClip.
+    bool pmg_foot_lock_enabled_ = true;
     // Onion-skin path preview (clip & blend modes): draw faded ghost skeletons
     // sampled across the active clip so the start, middle(s), and end of the
     // motion are all visible at once. Ghosts always use the full root path so
