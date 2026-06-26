@@ -1,3 +1,20 @@
+# Getting the CMU data
+
+The corpus is **not** vendored or a submodule — it lives outside this repo so a
+plain `clone` (and `clone --recursive`) stays small. Source:
+[github.com/Shriinivas/cmubvh](https://github.com/Shriinivas/cmubvh) (~1 GB full).
+
+- **Experiment clips (small, regenerable):** `bash fetch.sh` (subject 16) or
+  `bash fetch.sh 86` (subject 86). Lands in gitignored `bvh/` / `bvh86/`.
+- **Full corpus (dev / `audit-corpus`):** clone the upstream repo anywhere and
+  point the CLI at it — no in-repo copy needed:
+  `git clone https://github.com/Shriinivas/cmubvh` then
+  `pmg_cli audit-corpus --corpus-root /path/to/cmubvh --out outputs/cmu_audit`.
+- **Release builds:** ship without the corpus; users obtain it separately via the
+  link above. No `--recursive` pull.
+
+---
+
 # CMU motion-space experiment (branch `experiment/cmu-motion-space`)
 
 Question: does CMU mocap give a **smoother parametric manifold** than the Credo

@@ -1,9 +1,16 @@
 # Tweak A design: transition-clip bridge edges (path A2)
 
-Date: 2026-06-26. Status: **designed, NOT implemented** (recorded for later). Decision:
-build **A2** (edge carries + plays a real bridge clip). A1 (bridge-node spec trick)
-**rejected** — see the open question below. Companion to
+Date: 2026-06-26. Status: **spiked 2026-06-27 → NO-GO, closed** (was: designed, not
+implemented). Decision was **A2** (edge carries + plays a real bridge clip); the spike
+built the runtime branch + an isolating harness, measured it, and **the bridge does
+not beat the synthesized cross-fade on the available corpus class**. A1 (bridge-node
+spec trick) was **rejected** at design time (open question below). Companion to
 [`registration-and-transition-edges.md`](registration-and-transition-edges.md) §"Tweak A".
+
+> **See §7 (Empirical verdict) for the close-out.** The design below (§1–6) stands as
+> the analysis that motivated the spike; §7 reports what the spike actually found and
+> why the premise (cross-family edges are too off-manifold to cross-fade) did not hold
+> at runtime.
 
 This note pins *why* the obvious small versions of Tweak A cannot work, then specs
 the build that can. Nothing here is wired yet.
@@ -199,3 +206,65 @@ deciding to ship; not a validation of the design over alternatives.
   same convention the runtime schedules on.
 - CMU 16_08 (run->stop) is only `.amc`, not converted; walkToJog is the only ready
   Center-corpus seed. A second seed would strengthen the measurement.
+
+## 7. Empirical verdict (spike, 2026-06-27) — NO-GO, A2 closed
+
+Spiked on the **CMU walk↔run** graph (`experiments/cmu/cmu_gait_graph.pmg_spec`) with
+the local `16_55.bvh` walk→run bridge — a throwaway: a `RuntimeController` bridge
+playback branch (`SetEdgeBridge` + two-seam point-cloud anchoring) plus a `--bridge-ab`
+harness that forces one isolated `src→tgt` transition twice (synth cross-fade vs played
+bridge) and compares. All spike code **reverted after measuring**; numbers recorded
+here and in agent memory (`pmg-tweak-a-transition-clip-edges`).
+
+**Result — the bridge loses or ties on every metric, every regime.** Clean
+single-transition runs at the real default blend window (**5 frames**, not the 41 in
+`edge_config` — that 41 is the build grid):
+
+| crossing (blend=5) | synth pop / foot-skate | bridged pop / foot-skate |
+|---|---|---|
+| hard slow-walk→fast-run | **1.17 / 1.29** | 1.37 / 4.78 (bridge worse) |
+| easy fast-walk→fast-run | 1.20 / 3.26 | 1.14 / 3.16 (tie) |
+
+Pop swept across blend windows 41/15/9/5 and a pre-registered foot-skate metric both
+agree: **synth ≥ bridge throughout.** The bridge interior is genuinely smooth
+(on-manifold ramp); its only blemish is a hard-cut entry seam (rigid alignment fixes
+root, not foot-phase). A full A2 with short seam-blends could fix that, but the ceiling
+is the *tie* — there is no headroom to win.
+
+**Why the §2 premise failed at runtime.** §2 measured a high *build-time* Kovar
+distance (`D min=2709.56`) and inferred the cross-fade must traverse impossible
+intermediate poses. It does not. The runtime pop depends on the **per-frame pose gap at
+the best-aligned frame pair** (MeanJointDistance), not on `D` (whose magnitude scales
+with point count/window and is not a per-frame quantity). Walk↔run `D=2709` yet the
+runtime pop is ~1.0, because `FindOptimalTransition` selects a *compatible* frame pair
+(fast-walk frame ≈ slow-run frame) and a 5-frame blend between close endpoints is
+smooth. High build-`D` ≠ runtime artifact.
+
+**Not pursuable on other CMU data either (the general reason).** A cheap predictor
+(`--manifold-probe`, also throwaway/reverted) — best-aligned-pair pose gap, where
+predicted per-frame step ≈ gap/5·1.5 pops only if it exceeds the ~2.4 median walk step
+— measured on subject-86 trial `86_02` (the multi-action subject, auto-segmented by
+root xz-speed + root height):
+
+| walk → | best-pair pose gap | predicted step | result |
+|---|---|---|---|
+| within-walk (floor) | 0.49 | 0.15 | — |
+| standing / punch | **0.76** | 0.23 | smooth |
+| run | 1.87 | 0.56 | smooth |
+| jump | 2.77 | 0.83 | smooth |
+| squat (worst) | 4.94 | 1.48 | smooth |
+
+Every disjoint family — even squat — stays below the pop threshold. **Punch / squat /
+jump each pass through a near-neutral standing pose that also exists in walk** (the
+walk↔standing gap 0.76 is *closer* than walk↔run), so alignment always finds a
+compatible frame and the cross-fade routes through it. A captured bridge beats the
+cross-fade only where **no** compatible frame pair exists anywhere — which essentially
+never happens between natural human motions that each include an upright moment.
+Subject-16 = locomotion (shared gait manifold); subject-86 = everyday actions (shared
+standing pose). Neither supplies the no-shared-frame condition A2 needs.
+
+**Conclusion.** A2 has no headroom on this corpus class; the PMG point-cloud-aligned
+cross-fade already produces smooth walk↔non-walk transitions. The R1 "edges are
+synthesized, no clip contains the transition" concern is **not a runtime defect** here.
+Tweak A is closed NO-GO. The `--corpus-root` full-CMU path stays the lever for graph
+*density*, not for transition smoothness.

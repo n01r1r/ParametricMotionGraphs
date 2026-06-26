@@ -139,7 +139,11 @@ post-process audit, structure-tolerant contact registration.
   Gate to reopen: `pmg_cli audit-corpus --corpus-root /path/to/cmubvh`. No
   code missing.
 - **Visual transition quality (pops)** — report-only; cross-family data gap,
-  blend guard correct, not a code bug.
+  blend guard correct, not a code bug. **RESOLVED 2026-06-27:** the transition-clip
+  bridge idea (Tweak A2) was spiked and measured **NO-GO** — the point-cloud-aligned
+  cross-fade is already smooth (runtime pop ~1.0) even across walk↔run/punch/squat/jump,
+  because alignment always finds a compatible frame pair (shared near-neutral pose).
+  Closed; see `docs/research/transition-clip-edges-A2-design.md` §7.
 
 To "finish": supply a compatible multi-clip corpus (CMU gate) **or** formally
 scope as PMG-core demo (README already states this). Decision, not engineering.
