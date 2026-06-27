@@ -537,6 +537,8 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("Reset")) Push(commands, ViewerUiCommandType::ResetPlayback);
+    ImGui::SameLine();
+    if (ImGui::Button("Recenter")) Push(commands, ViewerUiCommandType::RecenterToOrigin);
 
     float speed = state.playback_speed;
     if (ImGui::SliderFloat("Speed", &speed, 0.1f, 3.0f, "%.2fx"))

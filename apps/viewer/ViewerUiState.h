@@ -84,7 +84,7 @@ struct ViewerUiState {
 };
 
 enum class ViewerUiCommandType {
-    LoadClip, SetPlaybackMode, TogglePlayback, ResetPlayback,
+    LoadClip, SetPlaybackMode, TogglePlayback, ResetPlayback, RecenterToOrigin,
     StepFrame, SetPlaybackSpeed, SetPhase, SetPathPreviewEnabled,
     SetPathPreviewCount, SetParamSweepPaths, SetSkeletonScale, SetDisplayScale,
     SetScalarParameter, SetVectorParameter, RebuildMotionSpace,

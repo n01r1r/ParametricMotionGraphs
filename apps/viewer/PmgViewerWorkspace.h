@@ -201,6 +201,11 @@ private:
     void HandleShortcuts();
     void StepFrame(int direction);  // +1 / -1 frame; clip & blend modes only
     void ResetPlayback();
+    // Snap the rendered skeleton back to the world origin (display-only; captures
+    // the current root as an offset subtracted in RebuildScene). Lets a character
+    // that has walked off-screen, or a large CMU-scale skeleton, be recentered
+    // without touching motion data.
+    void RecenterToOrigin();
     bool ParametricBlendActive() const;
     bool GraphRuntimeActive() const;
 
@@ -222,6 +227,12 @@ private:
     pmg::Skeleton skeleton_;
     pmg::MotionClip clip_;
     float ground_offset_ = 0.0f;
+    // Horizontal world offset subtracted from the rendered root so "Recenter"
+    // puts the skeleton at the origin. recenter_pending_ captures the live root
+    // on the next RebuildScene.
+    float recenter_offset_x_ = 0.0f;
+    float recenter_offset_z_ = 0.0f;
+    bool recenter_pending_ = false;
 
     bool playing_ = true;
     float playback_speed_ = 1.0f;
