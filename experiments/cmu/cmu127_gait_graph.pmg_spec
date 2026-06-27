@@ -1,0 +1,43 @@
+# EXPERIMENT: CMU subject-127 2-node walk/run gait graph (promotion from corpus sweep).
+# Subject 127 = 2nd-richest locomotion subject (36 loco-band clips; 14 walk + 22 run,
+# max ~79 cm/s) after subject 16. Clips are short single-activity takes. Windows from
+# --extract-candidate-windows; note the extractor favors low-seam STANDING segments,
+# so walk windows here trade some loop quality for real forward travel.
+#   walk_127: 127_31 win254-343 ~12cm/s, 127_22 win70-197 ~38cm/s
+#   run_127 : 127_27 win56-164 ~42cm/s, 127_07 win64-144 ~79cm/s
+# Thresholds are placeholders pending --diagnose-graph-edge (127's native kovar D unknown).
+
+node walk_127 1
+registration walk_127 LeftFoot - 3 0
+parameter_metrics walk_127 travel_speed
+parameter_calibration walk_127 9
+parameter_support walk_127 simplex
+example walk_127 12.1 bvh127/127_31.bvh start_frame 254 end_frame 343
+example walk_127 38.0 bvh127/127_22.bvh start_frame 70 end_frame 197
+
+node run_127 1
+registration run_127 LeftFoot - 3 0
+parameter_metrics run_127 travel_speed
+parameter_calibration run_127 9
+parameter_support run_127 simplex
+example run_127 42.0 bvh127/127_27.bvh start_frame 56 end_frame 164
+example run_127 79.0 bvh127/127_07.bvh start_frame 64 end_frame 144
+
+expect walk_127 spanned_axes 1
+expect run_127 spanned_axes 1
+
+edge walk_127 walk_127
+edge_phase_range walk_127 walk_127 0.70 0.95 0.05 0.30
+edge_config walk_127 walk_127 2000 4000 4 6 41
+
+edge run_127 run_127
+edge_phase_range run_127 run_127 0.70 0.95 0.05 0.30
+edge_config run_127 run_127 2000 4000 4 6 41
+
+edge walk_127 run_127
+edge_phase_range walk_127 run_127 0.60 0.95 0.05 0.40
+edge_config walk_127 run_127 4000 6000 4 6 41
+
+edge run_127 walk_127
+edge_phase_range run_127 walk_127 0.60 0.95 0.05 0.40
+edge_config run_127 walk_127 4000 6000 4 6 41

@@ -85,9 +85,11 @@ side of the wall (walk->jog 1472 is no better than walk->run 1274). Nodes:
   **best** crossing in the build's kovar metric is D~2709 (walk->run) / D~1932
   (run->walk) -- ~10x the self-edge (~250) at *every* source sample. The graph
   CONNECTS but the cross edges are **teleport-grade**, not clean planted
-  transitions. Root cause: subject 16 has **no walk<->run transition clip**.
-  Faithful fix = a bridge clip that contains the gait change (cf. walkToJog in the
-  Center corpus), not threshold tuning.
+  transitions. Root cause: subject 16 has **no walk<->run transition clip**. The
+  high build-time Kovar D is a topology/coverage **warning**, not automatically a
+  runtime teleport/pop. A2 (a stored bridge clip that contains the gait change) was
+  spiked and closed **NO-GO** -- it did not beat the runtime cross-fade. The lever
+  for cross-gait quality is corpus density/coverage, not a bridge edge or tuning.
 
 ## CLI changes
 `apps/PmgGraphCommands.cpp`: wired the `restrict_source_range` builder flag (PR #57,
@@ -95,11 +97,10 @@ was only on a runtime command) into `--build-graph`. The default was then flippe
 ON (faithful to paper §6's method), with `--no-restrict-source-range` exposing the
 legacy all-or-nothing ablation.
 
-## KNOWN BUG discovered (pre-existing, unrelated to the above)
-A **dim=1** graph builds (V13) but `LoadPmgArtifactText` fails on reload
-("failed to read parameter vector") -> `--inspect-graph`/viewer/runtime cannot open
-a 1-D `.pmg`. All `tests/test_graph_io.cpp` round-trips use dim=2, so the 1-D path
-was never exercised. Independent of the `--restrict` change (reproduces on a full
-self-edge-only 1-D build). The graph builds and audits fine; only the
-text-artifact round-trip is broken. Needs a focused GraphIo fix + a dim=1
-round-trip test.
+## FIXED: dim=1 round-trip
+Earlier a **dim=1** graph built (V13) but `LoadPmgArtifactText` failed on reload
+("failed to read parameter vector"), so `--inspect-graph`/viewer/runtime could not
+open a 1-D `.pmg`. Root cause was the non-finite float parse (the +inf/-inf corners
+of a rejected edge's AABB), **not** dimensionality -- fixed via `ReadSerializedFloat`
+in `src/GraphIo.cpp`. Regression coverage: `CheckDim1RoundTrip` in
+`tests/test_graph_io.cpp` (saves+loads a 1-D artifact, asserts nodes/examples/samples).

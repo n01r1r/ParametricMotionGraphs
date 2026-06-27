@@ -47,9 +47,12 @@ edge_config run_cmu run_cmu 950 1300 4 6 41
 # subject 16 has no walk<->run transition clip. Thresholds are set just above the
 # best D so the graph CONNECTS (usable); the §6 source-range restriction (ON by
 # default; --no-restrict-source-range for legacy all-or-nothing) keeps only the
-# transition-compatible source end (fast walk -> run; fast run -> walk). These edges
-# are teleport-grade, NOT clean planted transitions: the faithful fix is a bridge
-# clip that CONTAINS the gait change (cf. walkToJog in the Center corpus), not tuning.
+# transition-compatible source end (fast walk -> run; fast run -> walk). The high
+# build-time Kovar D is a topology/coverage WARNING (cross-gait manifold distance),
+# not automatically a runtime teleport/pop. A2 (a stored bridge clip that CONTAINS
+# the gait change) was spiked and closed NO-GO -- it did not beat the runtime
+# cross-fade. The lever for cross-gait quality is corpus density/coverage (a real
+# walk<->run transition clip), not a bridge edge and not threshold tuning.
 edge walk_cmu run_cmu
 edge_phase_range walk_cmu run_cmu 0.60 0.95 0.05 0.40
 edge_config walk_cmu run_cmu 2750 3100 4 6 41
