@@ -2,6 +2,7 @@
 
 #include "pmg/AlignmentStrategy.h"
 #include "pmg/BvhLoader.h"
+#include "pmg/FootLocking.h"
 #include "pmg/ForwardKinematics.h"
 #include "pmg/GoalDirectedLocomotion.h"
 #include "pmg/GraphIo.h"
@@ -150,6 +151,9 @@ struct RandomWalkOptions {
     // measures the candidate before scheduling. Core RuntimeController and
     // viewer scheduling remain unchanged.
     pmg::TransitionQualityGateConfig quality_gate;
+    // Report stance foot-slide of the streamed motion, before/after a
+    // post-process foot lock. Evidence only; nothing is rendered or saved.
+    bool report_foot_skate = false;
 };
 
 struct TransitionQualityGateCounts {
@@ -335,6 +339,119 @@ EvaluateProspectiveTransitionGate(
             artifact.skeleton, quality_poses, transition_pose_index,
             quality_context, quality_config);
     return pmg::EvaluateTransitionQualityGate(quality, gate_config);
+}
+
+// Stance foot-slide of the streamed motion: how far each contact foot's world
+// position drifts during its own contact interval (should be ~0 for a planted
+// foot). Measured on the captured pose stream before and after LockFootContacts,
+// so the runtime blend's residual skate -- and the post-process cut -- are both
+// observable. Report-only; the controller/viewer scheduling is unchanged.
+struct RuntimeFootSkate {
+    float mean_slide_before = 0.0f;
+    float mean_slide_after = 0.0f;
+    int intervals = 0;
+};
+
+float MeanStanceSlide(
+    const pmg::Skeleton& skeleton,
+    const pmg::MotionClip& clip,
+    const std::vector<pmg::ContactInterval>& intervals) {
+    float total = 0.0f;
+    int count = 0;
+    for (const pmg::ContactInterval& interval : intervals) {
+        const pmg::Vec3 base = pmg::ComputeJointWorldPositions(
+            skeleton,
+            clip.frames[static_cast<std::size_t>(interval.first_frame)])
+                [static_cast<std::size_t>(interval.joint_index)];
+        float max_drift = 0.0f;
+        for (int frame = interval.first_frame; frame <= interval.last_frame;
+             ++frame) {
+            const pmg::Vec3 here = pmg::ComputeJointWorldPositions(
+                skeleton, clip.frames[static_cast<std::size_t>(frame)])
+                    [static_cast<std::size_t>(interval.joint_index)];
+            const float dx = here.x - base.x;
+            const float dy = here.y - base.y;
+            const float dz = here.z - base.z;
+            max_drift = std::max(
+                max_drift, std::sqrt(dx * dx + dy * dy + dz * dz));
+        }
+        total += max_drift;
+        ++count;
+    }
+    return count > 0 ? total / static_cast<float>(count) : 0.0f;
+}
+
+RuntimeFootSkate ReportRuntimeFootSkate(
+    const pmg::Skeleton& skeleton,
+    const std::vector<pmg::Pose>& poses,
+    const std::vector<int>& contact_indices,
+    int min_contact_frames,
+    float frames_per_second) {
+    RuntimeFootSkate report;
+    if (contact_indices.empty() || poses.size() < 2) {
+        return report;
+    }
+    pmg::MotionClip clip;
+    clip.frames_per_second = frames_per_second;
+    clip.frames = poses;
+    pmg::ContactDetectionSettings settings =
+        pmg::EstimateContactSettings(skeleton, clip, contact_indices);
+    settings.min_contact_frames = min_contact_frames;
+    // Detect intervals once on the raw stream and reuse them for both
+    // measurements, so before/after compare identical frame ranges.
+    const std::vector<pmg::ContactInterval> intervals =
+        pmg::DetectContacts(skeleton, clip, contact_indices, settings);
+    report.intervals = static_cast<int>(intervals.size());
+    report.mean_slide_before = MeanStanceSlide(skeleton, clip, intervals);
+
+    pmg::FootLockSettings lock_settings;
+    lock_settings.contacts = settings;
+    pmg::LockFootContacts(skeleton, clip, contact_indices, lock_settings);
+    report.mean_slide_after = MeanStanceSlide(skeleton, clip, intervals);
+    return report;
+}
+
+std::vector<int> ContactIndicesForNode(
+    const pmg::BuiltPmgArtifact& artifact,
+    int node_index,
+    const std::string& fallback_contact_csv,
+    int& min_contact_frames_out) {
+    const RuntimeContactJoints joints =
+        ResolveRuntimeContactJoints(artifact, node_index);
+    min_contact_frames_out = joints.min_contact_frames;
+    std::vector<int> indices;
+    if (joints.left >= 0) {
+        indices.push_back(joints.left);
+    }
+    if (joints.right >= 0 && joints.right != joints.left) {
+        indices.push_back(joints.right);
+    }
+    if (!indices.empty()) {
+        return indices;
+    }
+    // The registration carried no contact joints (cycle_joint only): resolve the
+    // CLI-provided foot names against the skeleton directly so the report still
+    // has feet to track.
+    for (const std::string& name : SplitCommaList(fallback_contact_csv)) {
+        const int joint_index = FindJointIndex(artifact.skeleton, name);
+        if (joint_index >= 0) {
+            indices.push_back(joint_index);
+        }
+    }
+    return indices;
+}
+
+void PrintRuntimeFootSkate(const RuntimeFootSkate& report) {
+    const float reduction = report.mean_slide_before > 1.0e-6f
+        ? 100.0f * (report.mean_slide_before - report.mean_slide_after) /
+              report.mean_slide_before
+        : 0.0f;
+    std::cout << "foot_skate_intervals=" << report.intervals << "\n";
+    std::cout << "foot_skate_mean_slide_before=" << report.mean_slide_before
+              << "\n";
+    std::cout << "foot_skate_mean_slide_after=" << report.mean_slide_after
+              << "\n";
+    std::cout << "foot_skate_reduction_pct=" << reduction << "\n";
 }
 
 // Paper application A: stream random transitions through the graph and verify
@@ -556,6 +673,15 @@ int RandomWalkCommand(const RandomWalkOptions& options) {
     std::cout << "quality_gate_skipped_insufficient_data="
               << quality_gate_counts.insufficient_data << "\n";
 
+    if (options.report_foot_skate) {
+        int min_contact_frames = options.min_contact_frames;
+        const std::vector<int> contact_indices = ContactIndicesForNode(
+            artifact, 0, options.contact_joints_csv, min_contact_frames);
+        PrintRuntimeFootSkate(ReportRuntimeFootSkate(
+            artifact.skeleton, poses, contact_indices, min_contact_frames,
+            artifact.metadata.frames_per_second));
+    }
+
     if (dump_transitions) {
         std::ofstream csv(options.dump_transitions_csv);
         if (!csv) {
@@ -717,6 +843,9 @@ struct GotoOptions {
     float max_pop_ratio = -1.0f;
     // Override the steering arrival-ease distance; negative = use config default.
     float arrival_distance = -1.0f;
+    // Report stance foot-slide of the streamed path, before/after a post-process
+    // foot lock. Evidence only; nothing is rendered or saved.
+    bool report_foot_skate = false;
 };
 
 // Paper application B/C: goal-directed locomotion through semantic control.
@@ -836,6 +965,15 @@ int GotoCommand(const GotoOptions& options) {
     std::cout << "median_step=" << stats.median_step << "\n";
     std::cout << "max_step=" << stats.max_step << "\n";
     std::cout << "pop_ratio=" << stats.Ratio() << "\n";
+
+    if (options.report_foot_skate) {
+        int min_contact_frames = options.min_contact_frames;
+        const std::vector<int> contact_indices = ContactIndicesForNode(
+            artifact, 0, options.contact_joints_csv, min_contact_frames);
+        PrintRuntimeFootSkate(ReportRuntimeFootSkate(
+            artifact.skeleton, poses, contact_indices, min_contact_frames,
+            artifact.metadata.frames_per_second));
+    }
 
     bool failed = false;
     if (options.tolerance >= 0.0f && reached_at_seconds < 0.0f) {
@@ -981,6 +1119,8 @@ RandomWalkOptions ParseRandomWalkOptions(int argc, char** argv) {
                 std::stof(require_value("--max-foot-height-delta"));
         } else if (option == "--reject-contact-mismatch") {
             options.quality_gate.reject_contact_mismatch = true;
+        } else if (option == "--report-foot-skate") {
+            options.report_foot_skate = true;
         } else {
             throw std::runtime_error("unknown random-walk option '" + option + "'");
         }
@@ -1028,6 +1168,8 @@ GotoOptions ParseGotoOptions(int argc, char** argv) {
                 std::stof(require_value("--facing-tolerance-degrees"));
         } else if (option == "--trace") {
             options.trace = true;
+        } else if (option == "--report-foot-skate") {
+            options.report_foot_skate = true;
         } else {
             throw std::runtime_error("unknown goto option '" + option + "'");
         }
