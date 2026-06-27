@@ -39,6 +39,22 @@ Legacy simplex fixture/demo.
 Use only for three-anchor simplex regression. It is not the canonical
 presentation or CTest demo.
 
+### CMU mocap demos
+
+Curated high-quality CMU clips, tracked directly under `BVH/` (self-contained,
+no fetch step). Same method as `demo_walk_2d`, applied to standard mocap:
+
+- `cmu_walk_1d.pmg_spec` — subject 16, 1-D walking-speed blend (`16_31` ~17.1
+  cm/s ↔ `16_21` ~29.9 cm/s). Safe within-gait aux demo.
+- `cmu_walkrun_1d.pmg_spec` — subject 16, walk↔run speed axis (`16_31`, `16_45`).
+- `cmu_gait_graph.pmg_spec` — subject 16, 2-node walk/run graph (`16_21/31/36/45`).
+- `cmu78_gait_graph.pmg_spec` — subject 78 (gate PASS), 2-node walk/run graph
+  (`78_10/27/29/30`).
+
+Provenance: CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu), subjects
+16 and 78; clip filename `NN_MM.bvh` = subject_trial. Subjects 127/86 were
+evaluated but excluded (127 calibration-loose, 86 data-blocked).
+
 ## Regression / audit specs
 
 ## Unit fixtures
