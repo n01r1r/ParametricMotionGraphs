@@ -1,0 +1,68 @@
+# NEGATIVE RESULT (documented failed attempt): a same-skeleton 3-node
+# stand -> walk -> jog graph is NOT buildable from the Center corpus.
+#
+# This spec FAILS the strict joint-offset gate:
+#   error: PrepareMotionSpaces: joint[4] offset mismatch:
+#          reference=(0,-0.269225,0) candidate=(0,-0.4,0)
+# i.e. standStill and walkCurve/jogCurve are DIFFERENT skeletons.
+#
+# Full-offset skeleton groups (md5 of all OFFSET lines):
+#   Group A (06ea4620): standStill, standReallyStill, walkCurvedLong
+#   Group B (6953dd4e): walkCurve, jogCurve, walkToJog, walkStraightTwiceAsFast,
+#                       walkTightCurve, walkMoreCurve, walkSpiral, walkFastSpiral
+# Stand exists only in Group A; jog only in Group B. No single rig holds all three,
+# so a strict same-skeleton stand->walk->jog graph needs retargeting (forbidden).
+# Feasible halves built separately:
+#   - walk->jog: specs/credo_walk_jog.pmg_spec (Group B, BUILDS; bridge clip exists)
+#   - stand->walk: possible in Group A (standStill + walkCurvedLong, min D~60)
+# Kept as the record of the attempt; do not expect this file to validate/build.
+
+node stand 1
+registration stand LeftAnkle - 3 0
+parameter_metrics stand travel_speed
+parameter_calibration stand 9
+parameter_support stand simplex
+example stand 0.05 ../BVH/standStill.bvh start_frame 1 end_frame 40
+example stand 0.07 ../BVH/standReallyStill.bvh start_frame 1 end_frame 40
+
+node walk 1
+registration walk LeftAnkle - 3 0
+parameter_metrics walk travel_speed
+parameter_calibration walk 9
+parameter_support walk simplex
+example walk 9.9 ../BVH/walkCurve.bvh start_frame 127 end_frame 160
+example walk 10.0 ../BVH/walkCurve.bvh start_frame 125 end_frame 158
+
+node jog 1
+registration jog LeftAnkle - 3 0
+parameter_metrics jog travel_speed
+parameter_calibration jog 9
+parameter_support jog simplex
+example jog 21.9 ../BVH/jogCurve.bvh start_frame 1 end_frame 24
+example jog 21.5 ../BVH/jogCurve.bvh start_frame 3 end_frame 26
+
+# Self-edges: keep each locomotion node loopable.
+edge walk walk
+edge_phase_range walk walk 0.70 0.95 0.05 0.30
+edge_config walk walk 120 234 3 6 41
+
+edge jog jog
+edge_phase_range jog jog 0.70 0.95 0.05 0.30
+edge_config jog jog 300 600 3 6 41
+
+# Transition edges (the audit target). Thresholds set just above measured raw min D.
+edge stand walk
+edge_phase_range stand walk 0.60 0.95 0.05 0.40
+edge_config stand walk 110 220 4 6 41
+
+edge walk stand
+edge_phase_range walk stand 0.60 0.95 0.05 0.40
+edge_config walk stand 110 220 4 6 41
+
+edge walk jog
+edge_phase_range walk jog 0.60 0.95 0.05 0.40
+edge_config walk jog 300 520 4 6 41
+
+edge jog walk
+edge_phase_range jog walk 0.60 0.95 0.05 0.40
+edge_config jog walk 260 480 4 6 41

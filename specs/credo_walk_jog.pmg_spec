@@ -1,0 +1,53 @@
+# EXPLORATORY AUDIT (not a release demo): Group-B same-skeleton walk -> jog graph.
+# This is the FEASIBLE half of the requested stand->walk->jog graph: the strict
+# joint-offset gate splits the Center corpus so that NO single skeleton holds
+# stand + walk + jog. Full-offset skeleton groups:
+#   Group A (hash 06ea4620): standStill, standReallyStill, walkCurvedLong
+#   Group B (hash 6953dd4e): walkCurve, jogCurve, walkToJog, walkStraightTwiceAsFast,
+#                            walkTightCurve, walkMoreCurve, walkSpiral, walkFastSpiral
+# Stand lives only in Group A; jog only in Group B. So stand->walk is possible in
+# Group A (stand + walkCurvedLong) and walk->jog is possible in Group B, but the two
+# cannot be merged without retargeting (forbidden by the audit constraints).
+#
+# Group B is the strong case: it contains walkToJog.bvh, a RECORDED walk->jog
+# transition on this exact rig, so walk and jog poses are genuinely close.
+# Measured raw min Kovar D (--dump-distance-grid): walk->jog 275, jog->walk 237 --
+# far below the CMU subj16 cross-gait wall (D~2709, no transition clip existed).
+#
+# Cyclic windows (cycle_joint LeftAnkle):
+#   walk: walkCurve 127-160  loop-seam score 0.012 (clean)
+#   jog : jogCurve   1-24     loop-seam score 0.447 (marginal; short curvy clip)
+# Two same-clip windows per node satisfy the >=2-example simplex rule; this audit
+# tests EDGE feasibility, not within-node parametric span (spanned_axes 0).
+
+node walk 1
+registration walk LeftAnkle - 3 0
+parameter_metrics walk travel_speed
+parameter_calibration walk 9
+parameter_support walk simplex
+example walk 9.9 ../BVH/walkCurve.bvh start_frame 127 end_frame 160
+example walk 10.0 ../BVH/walkCurve.bvh start_frame 125 end_frame 158
+
+node jog 1
+registration jog LeftAnkle - 3 0
+parameter_metrics jog travel_speed
+parameter_calibration jog 9
+parameter_support jog simplex
+example jog 21.9 ../BVH/jogCurve.bvh start_frame 1 end_frame 24
+example jog 21.5 ../BVH/jogCurve.bvh start_frame 3 end_frame 26
+
+edge walk walk
+edge_phase_range walk walk 0.70 0.95 0.05 0.30
+edge_config walk walk 120 234 3 6 41
+
+edge jog jog
+edge_phase_range jog jog 0.70 0.95 0.05 0.30
+edge_config jog jog 300 600 3 6 41
+
+edge walk jog
+edge_phase_range walk jog 0.60 0.95 0.05 0.40
+edge_config walk jog 300 520 4 6 41
+
+edge jog walk
+edge_phase_range jog walk 0.60 0.95 0.05 0.40
+edge_config jog walk 260 480 4 6 41
