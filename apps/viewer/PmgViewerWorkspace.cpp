@@ -1198,16 +1198,12 @@ void PmgViewerWorkspace::RegeneratePreviewClip() {
     // so it works even when the node declares no contact joints. Ankles resolved
     // from the skeleton by name; if absent, the raw blend is shown unchanged.
     if (pmg_foot_lock_enabled_ && pmg_preview_clip_.NumFrames() >= 2) {
-        std::vector<int> foot_joints;
-        for (const char* joint_name : {"LeftAnkle", "RightAnkle"}) {
-            for (int joint_index = 0; joint_index < pmg_skeleton_.NumJoints();
-                 ++joint_index) {
-                if (pmg_skeleton_.joints[joint_index].name == joint_name) {
-                    foot_joints.push_back(joint_index);
-                    break;
-                }
-            }
-        }
+        // Reuse the viewer's contact-joint resolver: it honors the
+        // --contact-joints override and otherwise substring-matches
+        // "ankle"/"foot" case-insensitively, so CMU skeletons (LeftFoot/
+        // RightFoot) lock too. The old exact "LeftAnkle"/"RightAnkle" match
+        // silently no-op'd on CMU.
+        const std::vector<int> foot_joints = ResolveContactJointIndices();
         if (!foot_joints.empty()) {
             pmg::FootLockSettings lock_settings;
             lock_settings.contacts = pmg::EstimateContactSettings(
