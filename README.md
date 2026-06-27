@@ -47,6 +47,11 @@ triangulated support, one self-edge. Cross-family jog is intentionally
 excluded. Missing domain corners are projected into authored support, not
 synthesized.
 
+Curated CMU mocap demos use clips tracked directly under `BVH/` (subjects 16 and
+78, `NN_MM.bvh` = subject_trial; CMU Graphics Lab MoCap Database):
+`specs/cmu_walk_1d.pmg_spec` (1-D walking-speed blend), `cmu_walkrun_1d`,
+`cmu_gait_graph` (subj16 walk/run), `cmu78_gait_graph` (subj78 walk/run).
+
 ## Known limitations
 
 - Demo support is sparse; missing 2-D corners are projected, not synthesized.

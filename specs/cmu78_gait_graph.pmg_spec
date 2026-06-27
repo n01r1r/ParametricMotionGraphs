@@ -1,0 +1,50 @@
+# EXPERIMENT: CMU subject-78 2-node walk/run gait graph (promotion from corpus sweep).
+# Subject 78 = run-heavy locomotion subject (35 clips; many clean 40-76 cm/s run windows,
+# thinner walk band). Windows picked with the new --min-window-speed extractor filter
+# (drops near-standing low-seam windows; see cmu127 audit), then best-seam in each band:
+#   walk_78: 78_27 win195-284 ~21cm/s (seam 5.6), 78_30 win495-644 ~34cm/s (seam 3.4)
+#   run_78 : 78_29 win60-164  ~46cm/s (seam 1.7), 78_10 win15-104  ~66cm/s (seam 8.4)
+# Walk top (34) -> run bottom (46) gap is clean (clearer gait separation than subj 127's
+# 38/42 near-merge). Thresholds CALIBRATED 2026-06-27 from --diagnose-graph-edge (build
+# point-cloud kovar D, native squared-sum units). Per-edge interior min-D / acceptance:
+#   walk self  min-D 346-1394 -> 1600/3200 (6/6 sources accepted; both ends GOOD)
+#   run  self  min-D 422-887  -> 1500/3500 (6/6; slow anchor 46 loose: min 422 but
+#              median ~3808 -- mirror of subj127's slow-walk outlier)
+#   walk->run  min-D ~1900    -> 2200/4500 (6/6; moderate crossing)
+#   run->walk  min-D 2126(slow)/4434(fast) -> 2800/4800 (slow-run 46/48 only; fast-run
+#              66/62/64/65 reject = faithful paper-sec.6 source-range restriction)
+
+node walk_78 1
+registration walk_78 LeftFoot - 3 0
+parameter_metrics walk_78 travel_speed
+parameter_calibration walk_78 9
+parameter_support walk_78 simplex
+example walk_78 21.0 ../BVH/78_27.bvh start_frame 195 end_frame 284
+example walk_78 34.0 ../BVH/78_30.bvh start_frame 495 end_frame 644
+
+node run_78 1
+registration run_78 LeftFoot - 3 0
+parameter_metrics run_78 travel_speed
+parameter_calibration run_78 9
+parameter_support run_78 simplex
+example run_78 46.0 ../BVH/78_29.bvh start_frame 60 end_frame 164
+example run_78 66.0 ../BVH/78_10.bvh start_frame 15 end_frame 104
+
+expect walk_78 spanned_axes 1
+expect run_78 spanned_axes 1
+
+edge walk_78 walk_78
+edge_phase_range walk_78 walk_78 0.70 0.95 0.05 0.30
+edge_config walk_78 walk_78 1600 3200 4 6 41
+
+edge run_78 run_78
+edge_phase_range run_78 run_78 0.70 0.95 0.05 0.30
+edge_config run_78 run_78 1500 3500 4 6 41
+
+edge walk_78 run_78
+edge_phase_range walk_78 run_78 0.60 0.95 0.05 0.40
+edge_config walk_78 run_78 2200 4500 4 6 41
+
+edge run_78 walk_78
+edge_phase_range run_78 walk_78 0.60 0.95 0.05 0.40
+edge_config run_78 walk_78 2800 4800 4 6 41
