@@ -384,6 +384,94 @@ void CheckDim1RoundTrip() {
     assert(loaded.graph.Edge(0).samples[0].target_phase_samples.size() == 2);
 }
 
+// Every spec and every other test tops out at 2 nodes, so the >2-node case --
+// which the general adjacency (std::vector<PmgNode/Edge>, OutgoingEdgeIndices)
+// is supposed to support with no code change -- was unproven. This builds a
+// 3-node walk/jog/run chain and asserts it survives the text round-trip with
+// per-node adjacency intact, and that the runtime config layer sizes to N=3.
+// Full multi-hop runtime *stepping* stays covered by the N<=2 controller tests;
+// the gap here was whether the graph/IO/config layer silently assumed 2.
+pmg::BuiltPmgArtifact MakeArtifact3Node() {
+    auto make_space = [](const char* name, float lo, float hi) {
+        pmg::ParametricMotionSpace space(name, 1);
+        space.AddExample({lo}, MakeClip(0.0f), {"lo.bvh", 0, 2, "", "", ""});
+        space.AddExample({hi}, MakeClip(10.0f), {"hi.bvh", 0, 2, "", "", ""});
+        space.SetParameterSupport(pmg::ParameterSupport({{lo}, {hi}}));
+        return space;
+    };
+
+    pmg::ParametricMotionGraph graph;
+    const int walk = graph.AddNode("walk", make_space("walk", 17.0f, 30.0f));
+    const int jog = graph.AddNode("jog", make_space("jog", 45.0f, 60.0f));
+    const int run = graph.AddNode("run", make_space("run", 75.0f, 95.0f));
+
+    auto add_edge = [&](int source, int target, float src_param,
+                        float tgt_lo, float tgt_hi, float distance) {
+        pmg::ParameterAabb box;
+        box.min_corner = {tgt_lo};
+        box.max_corner = {tgt_hi};
+        pmg::PmgEdge edge;
+        edge.source_node = source;
+        edge.target_node = target;
+        edge.samples.push_back({{src_param}, box, 0.8f, 0.1f});
+        edge.samples.back().transition_distance = distance;
+        edge.samples.back().target_phase_samples = {{{tgt_lo}, 0.8f, 0.1f}};
+        graph.AddEdge(edge);
+    };
+
+    // 3 self-edges + a bidirectional walk<->jog<->run chain (jog is the hub:
+    // 3 outgoing; walk and run have 2 each).
+    add_edge(walk, walk, 17.0f, 17.0f, 30.0f, 0.4f);
+    add_edge(jog, jog, 45.0f, 45.0f, 60.0f, 0.5f);
+    add_edge(run, run, 75.0f, 75.0f, 95.0f, 0.6f);
+    add_edge(walk, jog, 30.0f, 45.0f, 60.0f, 1400.0f);
+    add_edge(jog, walk, 45.0f, 17.0f, 30.0f, 1400.0f);
+    add_edge(jog, run, 60.0f, 75.0f, 95.0f, 1600.0f);
+    add_edge(run, jog, 75.0f, 45.0f, 60.0f, 1600.0f);
+
+    pmg::BuiltPmgArtifact artifact;
+    artifact.skeleton = MakeSkeleton();
+    artifact.graph = std::move(graph);
+    artifact.metadata.units = "BVH native units";
+    artifact.metadata.generated_frame_count = 3;
+    artifact.metadata.frames_per_second = 30.0f;
+    return artifact;
+}
+
+void CheckMultiNodeRoundTrip() {
+    const auto path =
+        std::filesystem::temp_directory_path() / "pmg_graph_3node.txt";
+    const pmg::BuiltPmgArtifact original = MakeArtifact3Node();
+    pmg::SavePmgArtifactText(original, path.string());
+    const pmg::BuiltPmgArtifact loaded =
+        pmg::LoadPmgArtifactText(path.string());
+
+    assert(loaded.graph.NumNodes() == 3);
+    assert(loaded.graph.NumEdges() == 7);
+    assert(loaded.graph.Node(0).name == "walk");
+    assert(loaded.graph.Node(1).name == "jog");
+    assert(loaded.graph.Node(2).name == "run");
+
+    // Adjacency is the primitive the runtime traverses by; it must survive the
+    // round-trip per source node, not just as a flat edge count.
+    assert(loaded.graph.OutgoingEdgeIndices(0).size() == 2);  // walk: self, ->jog
+    assert(loaded.graph.OutgoingEdgeIndices(1).size() == 3);  // jog hub: self, ->walk, ->run
+    assert(loaded.graph.OutgoingEdgeIndices(2).size() == 2);  // run: self, ->jog
+    for (int source = 0; source < loaded.graph.NumNodes(); ++source) {
+        for (int edge_index : loaded.graph.OutgoingEdgeIndices(source)) {
+            assert(loaded.graph.Edge(edge_index).source_node == source);
+        }
+    }
+
+    // Runtime config layer must scale to N=3, not assume a 2-node graph.
+    const pmg::RuntimeControllerConfig config =
+        pmg::RuntimeControllerConfigFromArtifact(loaded);
+    assert(static_cast<int>(config.cyclic_nodes.size()) ==
+           loaded.graph.NumNodes());
+
+    std::filesystem::remove(path);
+}
+
 pmg::MotionClip MakeLoopClip16(float root_x) {
     pmg::MotionClip clip;
     clip.frames_per_second = 30.0f;
@@ -470,6 +558,7 @@ void CheckBuilderOutputRoundTrip() {
 
 int main() {
     CheckDim1RoundTrip();
+    CheckMultiNodeRoundTrip();
     CheckBuilderOutputRoundTrip();
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() / "pmg_graph_io_test.pmg";
