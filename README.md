@@ -11,6 +11,19 @@ PMG pipeline on a single-family, single-node walking motion space: sampled
 transition-region construction, a Kovar-style transition metric, runtime
 lookup, cyclic-window cleanup, and target-directed steering.
 
+## Concept overview
+
+![PMG concept scenes: pipeline, a node as a parameterized motion space, and edge
+sampling](docs/figures/concept_scenes.gif)
+
+Three explanatory scenes (intuition only — quantitative evidence lives on the
+full-project branches): the PMG **pipeline** (motion examples → motion-space
+node → quality-gated transition graph → generated stream), a **node** as a
+parameterized motion space with a limited convex support region (`turn_rate`
+primary, `travel_speed` a single-example secondary axis), and **edge sampling**
+(a source × target candidate matrix scored by a Kovar-style distance, accepted
+on enough good samples).
+
 ## Build and run
 
 ```powershell

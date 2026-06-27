@@ -65,3 +65,8 @@ BVH/recut/
 
 # CMU experiment outputs (regenerable)
 experiments/cmu/out/
+
+# Manim build artifacts (concept GIF is tracked; intermediates regenerable)
+__pycache__/
+media/
+docs/figures/concept/

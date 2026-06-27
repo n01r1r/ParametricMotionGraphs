@@ -1,8 +1,11 @@
 # Supported PMG specs
 
-This directory intentionally lists only specs that are currently usable with the available BVH corpus.
+This directory lists the specs shipped with the viewer-only distribution. Each
+is usable with the BVH clips tracked under `BVH/`. Regression fixtures, audit
+specs, and the full corpus live on the full-project branches (`main` /
+`dev/core`).
 
-## Presentation / viewer demos
+## Primary demo
 
 ### `demo_walk_2d.pmg_spec`
 
@@ -30,38 +33,15 @@ blends stay logically similar -- the parametric-synthesis precondition the paper
 assumes. The travel-speed axis tops out at the authored `walkStraightTwiceAsFast`
 anchor (~0.75); the old `[0, 1]` jog corner is intentionally excluded. Per the
 paper, jog belongs in a separate node connected by a transition edge, not blended
-into the walk space. See `docs/audits/jolt-cross-family-diagnosis-20260623.md`.
+into the walk space.
 
-### `demo_walk_2d_triangle.pmg_spec`
+## CMU mocap demos
 
-Legacy simplex fixture/demo.
+Curated single-subject demos over CMU Graphics Lab MoCap clips tracked under
+`BVH/` (`NN_MM.bvh` = subject_trial). They exercise multi-node walk/run graphs
+on a real corpus.
 
-Use only for three-anchor simplex regression. It is not the canonical
-presentation or CTest demo.
-
-## Regression / audit specs
-
-## Unit fixtures
-
-Fixtures live under `specs/fixtures/`.
-
-- `fixtures/fixture_edge_selective_good_bad.pmg_spec`
-- `fixtures/fixture_transition_box_shrink.pmg_spec`
-- `fixtures/fixture_walk_2d_jog_crossfamily.pmg_spec`
-
-These are not viewer demos. The first two intentionally stress edge
-classification and conservative transition-domain shrink behavior. The third is
-the old jog-in-walk-hull spec, retained to exercise the cross-family within-hull
-jolt and edge-box acceptance overreach that motivated the single-family
-canonical demo.
-
-## Removed / deprecated specs
-
-The old split walk/jog topology specs are not part of the supported set:
-
-- `demo_walk_jog_topology.pmg_spec`
-- `demo_walk_jog_topology_recut.pmg_spec`
-- `demo_walk_jog_topology_recut_loose.pmg_spec`
-- `demo_walk_jog_topology_recut_dynamics.pmg_spec`
-
-They require direct cross-node gait transitions with insufficient jog coverage and no authored gait-change transition clip. The builder is expected to drop or reject some of those edges.
+- `cmu_walk_1d.pmg_spec` -- 1-D walking-speed blend (single node).
+- `cmu_walkrun_1d.pmg_spec` -- 1-D walk/run speed blend.
+- `cmu_gait_graph.pmg_spec` -- subject 16 walk/run, two nodes + transition edge.
+- `cmu78_gait_graph.pmg_spec` -- subject 78 walk/run, two nodes + transition edge.
