@@ -1,103 +1,57 @@
-# ParametricMotionGraphs
+# ParametricMotionGraphs — Viewer-only distribution
 
-BVH-based Parametric Motion Graph offline builder, runtime, CLI, and optional
-OpenGL viewer.
+Minimal viewer-only build of the BVH-based Parametric Motion Graph (PMG)
+system: the `pmg_core` library plus the real-time OpenGL viewer. The CLI,
+test suite, experiments, audit docs, and paper source are removed on this
+branch to keep the tree small — they live on the full-project branches
+(`main` / `dev/core`).
 
-This project implements the core PMG transition pipeline on a single-family,
-single-node, sparse walking motion space. It includes sampled transition-region
-construction, a Kovar-style transition metric, runtime lookup, cyclic-window
-cleanup, and target-directed steering (V13 artifact persistence, phase-gated
-lookup, conservative reachable-box intersection).
+This is a PMG-core **demo**, not a paper reproduction. It implements the core
+PMG pipeline on a single-family, single-node walking motion space: sampled
+transition-region construction, a Kovar-style transition metric, runtime
+lookup, cyclic-window cleanup, and target-directed steering.
 
-It does **not** reproduce KG04 automatic motion-space construction, multi-node
-PMG examples, boxing graphs, or the full Section 5 paper results. It is a
-PMG-core demo, not a paper reproduction.
+## Build and run
 
-## Current demo
+```powershell
+cmake -S . -B build              # PMG_BUILD_VIEWER defaults ON here
+cmake --build build --config Release --target pmg_viewer
+.\build\Release\pmg_viewer.exe specs\demo_walk_2d.pmg_spec
+```
 
-`specs/demo_walk_2d.pmg_spec` defines one 2-D locomotion space, four
-authored single-family (walking-only) anchors, triangulated support, and one
-self-edge. The cross-family jog corner is intentionally excluded (kept as a
-stress fixture); missing domain corners are unsupported; runtime requests are
-projected into authored support and the selected transition's reachable target
-box.
+First configure fetches GLFW / GLEW / GLM / ImGui via CMake `FetchContent`
+(network required once; cached in `build/_deps` afterwards).
 
-## Module map
+In the viewer: set `Mode = Parametric blend` and `Foot-lock (IK) = ON`, then
+drive the curvature / speed sliders. `Param-sweep paths = ON` with a top-down
+camera shows the parameter→trajectory fan.
+
+## What's included
 
 | Area | Modules | Role |
 | --- | --- | --- |
-| Domain data | `ParametricMotionSpace`, `ParametricMotionGraph`, `TransitionTypes` | motion spaces, nodes, edges, samples |
-| Offline algorithm | `MotionSpacePreparation`, `PmgBuilder`, `PmgOfflinePipeline` | registration, transition search, artifact construction |
+| Domain data | `ParametricMotionSpace`, `ParametricMotionGraph` | motion spaces, nodes, edges, samples |
+| Offline algorithm | `MotionSpacePreparation`, `PmgBuilder`, `PmgOfflinePipeline` | registration, transition search, artifact build |
 | Runtime algorithm | `RuntimeController`, `GoalDirectedLocomotion`, `AlignmentStrategy` | phase-gated transitions, alignment, pose stream |
-| Input/persistence | `GraphSpec`, `GraphIo` | spec adapter; V2-V13 artifact compatibility |
-| CLI | `apps/Pmg*Commands.cpp` | validate, build, inspect, diagnose, run |
-| Viewer | `ViewerHost`, `PmgViewerWorkspace`, `ViewerRuntimeModule` | platform/render host, PMG UI, runtime adapter |
+| Input/persistence | `GraphSpec`, `GraphIo` | spec adapter; V2–V13 artifact compatibility |
+| Viewer | `ViewerHost`, `PmgViewerWorkspace`, `ViewerRuntimeModule` | render host, PMG UI, runtime adapter |
 
-Headers live in `include/pmg/`; implementations in `src/`; contract tests in
-`tests/`. Viewer-only tests also live in `apps/viewer/tests/`.
+Headers in `include/pmg/`, implementations in `src/`, viewer in `apps/viewer/`.
 
-## Paper concept -> implementation
+## Demo space
 
-`parametric motion space` -> `ParametricMotionSpace`; `sampled transition` ->
-`TransitionSample`; target bounding box lookup -> `PmgEdge::LookupInterpolated`;
-offline construction -> `BuildPmgOfflinePipeline`; runtime stream ->
-`RuntimeController::Update` / `CurrentPose`. Full map:
-[docs/paper-concept-to-code-symbol.md](docs/paper-concept-to-code-symbol.md).
-
-## Build and runtime flow
-
-```text
-.pmg_spec -> LoadGraphSpec -> BuildPmgOfflinePipeline -> BuiltPmgArtifact
-          -> GraphIo V13 file -> RuntimeController -> world-space Pose stream
-                                      ^
-                         CLI direct / ViewerRuntimeModule adapter
-```
-
-```powershell
-cmake -S . -B build -DPMG_BUILD_VIEWER=ON -DPMG_BUILD_TESTS=ON
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
-.\build\Debug\pmg_cli.exe --validate-graph-spec .\specs\demo_walk_2d.pmg_spec
-.\build\Debug\pmg_cli.exe --build-graph .\specs\demo_walk_2d.pmg_spec .\build\viewer_out\walk_2d.pmg
-.\build\Debug\pmg_viewer.exe .\build\viewer_out\walk_2d.pmg
-```
-
-## Paper-compatible vs extension path
-
-Paper-compatible defaults use directional Kovar point-cloud transition distance
-and the offline/runtime contracts above. Extensions are explicit config/spec
-choices; `dynamics_window` is currently opt-in. Do not treat an extension result
-as paper-equivalent without reporting its config.
+`specs/demo_walk_2d.pmg_spec` defines one 2-D locomotion space (axis 0 =
+turn_rate, axis 1 = travel_speed) over four authored walking anchors
+(`walkMoreCurve`, `walkCurve`, `walkTightCurve`, `walkStraightTwiceAsFast`),
+triangulated support, one self-edge. Cross-family jog is intentionally
+excluded. Missing domain corners are projected into authored support, not
+synthesized.
 
 ## Known limitations
 
 - Demo support is sparse; missing 2-D corners are projected, not synthesized.
-- Current transition montage reports visible pops, and contact audit reports
-  common contact mismatch. The reachable-box intersection gate prevents the
-  measured accepted-BAD overreach case; visual/contact diagnostics remain
-  report-only.
-- Five-frame blending remains the demo default. Eight frames increased latency,
-  rejected more requests, and did not improve worst transition artifacts.
-- Builder may reject declared edges; all rejected edges make build fail.
-- Offline preparation still opens BVH filesystem paths.
-- Reader compatibility covers V2-V13; writer emits V13 only.
-- Viewer requires optional OpenGL dependencies enabled by `PMG_BUILD_VIEWER`.
-
-## Completion path
-
-Core paper mechanisms, direct steering, and single-node waypoint path following
-are implemented. A reproducible corpus audit found only one clear cyclic run
-candidate, so the required compatible second node and therefore inter-node
-edges and graph-walk demo remain blocked by source data. A 2026-06-22 recut
-follow-up kept that gate closed: `jogCurve_recut_000_024.bvh` is only a single
-barely viable cyclic run sample, while `walkToJog_recut_005_034.bvh` still
-shows seam contact mismatch and remains transitional. `PHASE.md` records the
-evidence and deferrals. Exact paper corpus, timing, graph-size, and visual-result
-reproduction is not claimed.
-
-Start code exploration with [CONTEXT.md](CONTEXT.md). Supported specs:
-[specs/README.md](specs/README.md). Audit order and current decisions:
-[PHASE.md](PHASE.md).
-
-External CMU BVH gate: `pmg_cli audit-corpus --corpus-root /path/to/cmubvh --out outputs/cmu_audit`.
-See [docs/cmu_bvh_gap_closure.md](docs/cmu_bvh_gap_closure.md).
+- Runtime traversal renders a raw pose stream; foot-lock is applied to the
+  parametric-blend preview clip, not the live graph-traversal stream.
+- Five-frame blending is the demo default.
+- Reader compatibility covers V2–V13; writer emits V13 only.
+- Viewer requires the OpenGL dependencies pulled by `PMG_BUILD_VIEWER`.
