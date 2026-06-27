@@ -220,6 +220,15 @@ void PmgViewerWorkspace::ResetPlayback() {
     current_phase_ = 0.0f;
     playback_speed_ = 1.0f;
     playing_ = true;
+    recenter_offset_x_ = 0.0f;
+    recenter_offset_z_ = 0.0f;
+    recenter_pending_ = false;
+}
+
+void PmgViewerWorkspace::RecenterToOrigin() {
+    // Captured on the next RebuildScene, where the live rendered root is known
+    // for whichever mode (clip / blend / runtime) is active.
+    recenter_pending_ = true;
 }
 
 const pmg::Skeleton& PmgViewerWorkspace::ActiveSkeleton() const {
@@ -287,11 +296,22 @@ pmg::Pose PmgViewerWorkspace::DisplayPose() const {
     return rest_pose;
 }
 
-void PmgViewerWorkspace::RebuildScene(const pmg::Pose& pose) {
+void PmgViewerWorkspace::RebuildScene(const pmg::Pose& input_pose) {
     const pmg::Skeleton& skeleton = ActiveSkeleton();
-    if (pose.NumJoints() != skeleton.NumJoints() || skeleton.NumJoints() == 0) {
+    if (input_pose.NumJoints() != skeleton.NumJoints() || skeleton.NumJoints() == 0) {
         return;
     }
+    // Recenter (display-only): capture the live root the first frame after the
+    // Recenter button, then translate every frame by that fixed offset so the
+    // skeleton renders at the world origin. Motion data is untouched.
+    pmg::Pose pose = input_pose;
+    if (recenter_pending_) {
+        recenter_offset_x_ = pose.root_position.x;
+        recenter_offset_z_ = pose.root_position.z;
+        recenter_pending_ = false;
+    }
+    pose.root_position.x -= recenter_offset_x_;
+    pose.root_position.z -= recenter_offset_z_;
 
     const float ground_offset =
         (ParametricBlendActive() || GraphRuntimeActive()) ? pmg_ground_offset_ : ground_offset_;
@@ -1351,9 +1371,14 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
     case ViewerUiCommandType::SetPlaybackMode:
         if (command.index < 0 || command.index > 2)
             throw std::invalid_argument("playback mode index must be in [0, 2]");
-        mode_ = static_cast<ViewerPlaybackMode>(command.index); break;
+        mode_ = static_cast<ViewerPlaybackMode>(command.index);
+        recenter_offset_x_ = 0.0f;
+        recenter_offset_z_ = 0.0f;
+        recenter_pending_ = false;
+        break;
     case ViewerUiCommandType::TogglePlayback: playing_ = !playing_; break;
     case ViewerUiCommandType::ResetPlayback: ResetPlayback(); break;
+    case ViewerUiCommandType::RecenterToOrigin: RecenterToOrigin(); break;
     case ViewerUiCommandType::StepFrame: StepFrame(command.index); break;
     case ViewerUiCommandType::SetPlaybackSpeed:
         playback_speed_ = std::clamp(command.x, 0.1f, 3.0f); break;
