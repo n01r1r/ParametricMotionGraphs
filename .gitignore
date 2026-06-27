@@ -68,6 +68,7 @@ experiments/cmu/out/
 
 # Manim build artifacts (final MP4s are tracked; intermediates regenerable)
 __pycache__/
+media/
 docs/figures/concept/videos/
 docs/figures/concept/texts/
 docs/figures/concept/images/

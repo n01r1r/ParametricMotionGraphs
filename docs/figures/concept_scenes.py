@@ -1,12 +1,17 @@
 """Manim concept scenes for the PMG report (explanatory support only).
 
-Three short scenes, wording matched to docs/final_report.md framing:
-  1. PmgPipeline   - clips -> parametric motion space -> graph node/edge -> stream
+Three short scenes, wording and encodings matched to docs/final_report.md:
+  1. PmgPipeline    - motion examples -> motion-space node -> transition graph
+                      of motion-space nodes -> generated stream
   2. ParametricNode - a node is a 2D motion space (turn_rate x travel_speed)
-  3. EdgeSampling  - sample source/target windows, Kovar distance, accept/reject
+                      with a *limited* convex support region (real anchors)
+  3. EdgeSampling   - sample a source/target candidate matrix, score each pair
+                      with a Kovar-style distance, accept the edge on enough
+                      GOOD samples
 
-Concept only: no quantitative values are shown (the numbers live in the
-report figures). These illustrate intuition, not evidence.
+Concept only: no quantitative values are shown (the numbers live in the report
+figures). These illustrate intuition, not evidence. Layout uses fixed
+coordinates (move_to) rather than chained next_to() to avoid overlaps.
 
 Render (1080p, 30fps, white background):
     manim render -qh --fps 30 docs/figures/concept_scenes.py PmgPipeline
@@ -19,190 +24,277 @@ from manim import *
 # Light scheme: dark ink on white background.
 INK = "#1a1a2e"
 MUTED = "#6b7280"
-ACCENT = "#1d4ed8"      # blue  - walk node / primary
-ACCENT2 = "#ea580c"     # orange - run node / target
+ACCENT = "#1d4ed8"      # blue   - source / primary
+ACCENT2 = "#ea580c"     # orange - target / secondary
 GOOD = "#15803d"        # green  - accepted
+NEUTRAL = "#a16207"     # amber  - borderline
 BAD = "#b91c1c"         # red    - rejected
+QUERY = "#7c3aed"       # purple - query point (neutral, not "bad")
+SHADE = "#bfdbfe"       # light blue - supported region fill
 
 
 def _white_bg(scene):
     scene.camera.background_color = WHITE
 
 
-def _label(text, size=28, color=INK, weight=NORMAL):
-    return Text(text, font_size=size, color=color, weight=weight)
+# Explicit font: the Manim default renders with uneven word/letter spacing
+# (collapsed spaces, loose kerning). A plain sans face spaces consistently.
+FONT = "Arial"
+
+
+def _label(text, size=24, color=INK, weight=NORMAL):
+    return Text(text, font_size=size, color=color, weight=weight, font=FONT)
+
+
+def _param_box(side=0.9, color=ACCENT, n_dots=4, seed=0):
+    """A small parameter-space tile: a square with a few example dots inside.
+
+    Used as the visual unit for "a node is a parameterized motion space".
+    """
+    box = Square(side_length=side, color=color, stroke_width=3)
+    offs = [
+        LEFT * 0.25 + UP * 0.2, RIGHT * 0.28 + UP * 0.15,
+        LEFT * 0.22 + DOWN * 0.24, RIGHT * 0.24 + DOWN * 0.2,
+    ]
+    dots = VGroup(*[
+        Dot(box.get_center() + o * (side / 0.9), radius=0.045, color=color)
+        for o in offs[:n_dots]
+    ])
+    return VGroup(box, dots)
 
 
 class PmgPipeline(Scene):
-    """clips -> parametric motion space -> graph node/edge -> generated stream."""
+    """examples -> motion-space node -> transition graph -> generated stream."""
 
     def construct(self):
         _white_bg(self)
 
         title = _label("Parametric Motion Graphs pipeline", 34, INK, BOLD)
-        title.to_edge(UP, buff=0.5)
+        title.move_to([0, 3.4, 0])
         self.play(FadeIn(title, shift=DOWN * 0.2), run_time=0.6)
 
-        # Stage 1: a few BVH clips.
+        row_y = 0.3          # vertical centre of the diagram row
+        cap_y = -2.6         # fixed caption baseline
+        xs = [-5.0, -1.9, 1.5, 4.9]
+
+        # Stage 1: a few motion examples (raw clips).
         clips = VGroup(*[
-            RoundedRectangle(width=0.9, height=0.5, corner_radius=0.08,
+            RoundedRectangle(width=0.95, height=0.42, corner_radius=0.07,
                              color=INK, stroke_width=2)
             for _ in range(3)
-        ]).arrange(DOWN, buff=0.18)
-        clips_lbl = _label("BVH clips", 24, MUTED).next_to(clips, DOWN, buff=0.25)
-        stage1 = VGroup(clips, clips_lbl).to_edge(LEFT, buff=0.6).shift(DOWN * 0.3)
+        ]).arrange(DOWN, buff=0.2).move_to([xs[0], row_y, 0])
+        cap1 = _label("motion examples", 22, MUTED).move_to([xs[0], cap_y, 0])
 
-        # Stage 2: parametric motion space (the node).
-        space = Square(side_length=1.6, color=ACCENT, stroke_width=3)
-        space_dots = VGroup(*[
-            Dot(space.get_center() + p, radius=0.05, color=ACCENT)
-            for p in [LEFT * 0.5 + UP * 0.4, RIGHT * 0.5 + UP * 0.3,
-                      LEFT * 0.4 + DOWN * 0.5, RIGHT * 0.45 + DOWN * 0.4]
-        ])
-        space_lbl = _label("parametric\nmotion space", 22, ACCENT)
-        space_lbl.next_to(space, DOWN, buff=0.25)
-        stage2 = VGroup(space, space_dots, space_lbl).shift(LEFT * 2.3 + DOWN * 0.3)
+        # Stage 2: one motion-space node (the parameterized family).
+        node = _param_box(side=1.5, color=ACCENT).move_to([xs[1], row_y, 0])
+        cap2 = _label("motion-space node", 22, ACCENT).move_to([xs[1], cap_y, 0])
+        cap2b = _label("node = parameterized family", 18, MUTED)
+        cap2b.move_to([xs[1], cap_y - 0.42, 0])
 
-        # Stage 3: graph - two nodes, a directed edge.
-        n1 = Circle(radius=0.45, color=ACCENT, stroke_width=3)
-        n2 = Circle(radius=0.45, color=ACCENT2, stroke_width=3).shift(RIGHT * 1.6)
-        edge = Arrow(n1.get_right(), n2.get_left(), buff=0.08,
-                     color=INK, stroke_width=4, max_tip_length_to_length_ratio=0.25)
-        graph_lbl = _label("graph:\nnodes + edges", 22, INK)
-        nodes = VGroup(n1, n2, edge)
-        stage3 = VGroup(nodes, graph_lbl.next_to(nodes, DOWN, buff=0.25))
-        stage3.shift(RIGHT * 1.1 + DOWN * 0.3)
+        # Stage 3: transition graph - two *motion-space* nodes + gated edge.
+        g_src = _param_box(side=0.95, color=ACCENT).move_to([xs[2] - 0.85, row_y, 0])
+        g_tgt = _param_box(side=0.95, color=ACCENT2).move_to([xs[2] + 0.85, row_y, 0])
+        g_edge = Arrow(g_src.get_right(), g_tgt.get_left(), buff=0.05,
+                       color=INK, stroke_width=4,
+                       max_tip_length_to_length_ratio=0.3)
+        edge_lbl = _label("quality-gated edge", 16, INK)
+        edge_lbl.move_to([xs[2], row_y + 0.95, 0])
+        cap3 = _label("transition graph", 22, INK).move_to([xs[2], cap_y, 0])
+        cap3b = _label("edges link motion spaces", 18, MUTED)
+        cap3b.move_to([xs[2], cap_y - 0.42, 0])
+        stage3 = VGroup(g_src, g_tgt, g_edge, edge_lbl)
 
         # Stage 4: generated motion stream (a continuous path).
-        stream = VMobject(color=INK, stroke_width=3)
+        stream = VMobject(color=INK, stroke_width=4)
         stream.set_points_smoothly([
-            LEFT * 0.9 + DOWN * 0.1, LEFT * 0.3 + UP * 0.25,
-            RIGHT * 0.3 + DOWN * 0.2, RIGHT * 0.9 + UP * 0.15,
+            [xs[3] - 0.85, row_y - 0.15, 0], [xs[3] - 0.3, row_y + 0.3, 0],
+            [xs[3] + 0.3, row_y - 0.25, 0], [xs[3] + 0.85, row_y + 0.2, 0],
         ])
-        stream_lbl = _label("generated\nmotion stream", 22, INK)
-        stage4 = VGroup(stream, stream_lbl.next_to(stream, DOWN, buff=0.35))
-        stage4.to_edge(RIGHT, buff=0.6).shift(DOWN * 0.3)
+        cap4 = _label("generated stream", 22, INK).move_to([xs[3], cap_y, 0])
 
-        a12 = Arrow(stage1.get_right(), stage2.get_left(), buff=0.2,
-                    color=MUTED, stroke_width=4)
-        a23 = Arrow(stage2.get_right(), stage3.get_left(), buff=0.2,
-                    color=MUTED, stroke_width=4)
-        a34 = Arrow(stage3.get_right(), stage4.get_left(), buff=0.2,
-                    color=MUTED, stroke_width=4)
+        # Connector arrows on a fixed baseline.
+        def connect(a, b):
+            return Arrow([a, row_y, 0], [b, row_y, 0], buff=0.25,
+                         color=MUTED, stroke_width=4,
+                         max_tip_length_to_length_ratio=0.35)
+        a12 = connect(xs[0] + 0.55, xs[1] - 0.85)
+        a23 = connect(xs[1] + 0.85, xs[2] - 1.4)
+        a34 = connect(xs[2] + 1.4, xs[3] - 0.95)
 
-        self.play(FadeIn(stage1, shift=RIGHT * 0.2), run_time=0.7)
-        self.play(GrowArrow(a12), run_time=0.4)
-        self.play(FadeIn(stage2, shift=RIGHT * 0.2), run_time=0.7)
-        self.play(GrowArrow(a23), run_time=0.4)
-        self.play(FadeIn(stage3, shift=RIGHT * 0.2), run_time=0.7)
-        self.play(GrowArrow(a34), run_time=0.4)
-        self.play(Create(stream), FadeIn(stage4[1]), run_time=0.9)
+        self.play(FadeIn(clips, shift=RIGHT * 0.2), FadeIn(cap1), run_time=0.7)
+        self.play(GrowArrow(a12), run_time=0.35)
+        self.play(FadeIn(node, shift=RIGHT * 0.2),
+                  FadeIn(cap2), FadeIn(cap2b), run_time=0.7)
+        self.play(GrowArrow(a23), run_time=0.35)
+        self.play(FadeIn(stage3, shift=RIGHT * 0.2),
+                  FadeIn(cap3), FadeIn(cap3b), run_time=0.7)
+        self.play(GrowArrow(a34), run_time=0.35)
+        self.play(Create(stream), FadeIn(cap4), run_time=0.9)
         self.wait(1.6)
 
 
 class ParametricNode(Scene):
-    """A node is a 2D parameterized motion space: turn_rate x travel_speed."""
+    """A node is a 2D motion space with a limited convex support region.
+
+    Anchors are the real demo_walk_2d examples: three on the travel_speed=0
+    turn_rate axis, one faster example reaching ~0.75. The supported region is
+    their convex hull (a triangle) - not a full rectangle.
+    """
 
     def construct(self):
         _white_bg(self)
 
         title = _label("A node is a parameterized motion space", 32, INK, BOLD)
-        title.to_edge(UP, buff=0.5)
+        title.move_to([0, 3.4, 0])
         self.play(FadeIn(title, shift=DOWN * 0.2), run_time=0.6)
 
         axes = Axes(
-            x_range=[0, 4, 1], y_range=[0, 4, 1],
-            x_length=5.2, y_length=5.2,
+            x_range=[-0.6, 1.3, 0.5], y_range=[0, 1.0, 0.5],
+            x_length=6.4, y_length=4.4,
             axis_config={"color": INK, "stroke_width": 2,
                          "include_ticks": False, "include_tip": True},
-        ).shift(DOWN * 0.35)
-        x_lbl = _label("turn_rate", 24, INK).next_to(axes.x_axis, DOWN, buff=0.2)
-        y_lbl = _label("travel_speed", 24, INK).rotate(PI / 2)
-        y_lbl.next_to(axes.y_axis, LEFT, buff=0.2)
-
+        ).move_to([0, -0.5, 0])
+        # Axis labels at the tips (centre is occupied by the sweep arrow / hull).
+        x_lbl = _label("turn_rate", 22, INK).next_to(axes.x_axis.get_end(),
+                                                     UR, buff=0.12)
+        y_lbl = _label("travel_speed", 22, INK).next_to(axes.y_axis.get_end(),
+                                                        RIGHT, buff=0.15)
         self.play(Create(axes), FadeIn(x_lbl), FadeIn(y_lbl), run_time=0.9)
 
-        # Four anchor examples (positions are illustrative only).
-        anchor_pts = [(0.8, 0.9), (1.4, 3.1), (3.2, 1.1), (3.0, 3.3)]
+        # Real anchors (turn_rate, travel_speed) from specs/demo_walk_2d.pmg_spec.
+        bottom = [(-0.3, 0.0), (0.0, 0.0), (1.0, 0.0)]
+        fast = (0.15, 0.75)
         anchors = VGroup(*[
-            Dot(axes.c2p(x, y), radius=0.09, color=ACCENT) for x, y in anchor_pts
+            Dot(axes.c2p(x, y), radius=0.085, color=ACCENT)
+            for x, y in bottom
         ])
-        anchors_lbl = _label("4 example clips (anchors)", 22, ACCENT)
-        anchors_lbl.to_corner(UR, buff=0.5).shift(DOWN * 1.1)
+        fast_dot = Dot(axes.c2p(*fast), radius=0.085, color=ACCENT2)
+
+        # Supported region = convex hull of the four anchors (a triangle).
+        hull = Polygon(
+            axes.c2p(-0.3, 0.0), axes.c2p(1.0, 0.0), axes.c2p(*fast),
+            color=ACCENT, stroke_width=2, fill_color=SHADE, fill_opacity=0.5,
+        )
+        region_lbl = _label("supported region", 20, ACCENT)
+        region_lbl.move_to(axes.c2p(0.4, 0.42))
+
+        self.play(Create(hull), FadeIn(region_lbl), run_time=0.8)
         self.play(LaggedStart(*[GrowFromCenter(a) for a in anchors],
-                              lag_ratio=0.2), FadeIn(anchors_lbl), run_time=1.0)
+                              lag_ratio=0.2), run_time=0.7)
+        self.play(GrowFromCenter(fast_dot), run_time=0.4)
 
-        # One query point inside the space.
-        qx, qy = 2.1, 2.0
-        query = Dot(axes.c2p(qx, qy), radius=0.11, color=BAD)
-        query_lbl = _label("query parameter", 22, BAD).next_to(query, UP, buff=0.15)
-        self.play(GrowFromCenter(query), FadeIn(query_lbl), run_time=0.6)
+        # Primary axis: three anchors span a wide turn-rate sweep at speed 0.
+        sweep = DoubleArrow(axes.c2p(-0.3, -0.0), axes.c2p(1.0, -0.0),
+                            buff=0.0, color=ACCENT, stroke_width=3,
+                            tip_length=0.18).shift(DOWN * 0.28)
+        sweep_lbl = _label("primary turn-rate sweep (3 examples)", 18, ACCENT)
+        sweep_lbl.next_to(sweep, DOWN, buff=0.12)
 
-        # Weight lines: nearer anchor -> thicker line (interpolation intuition).
-        lines = VGroup()
-        for (x, y) in anchor_pts:
-            d = ((x - qx) ** 2 + (y - qy) ** 2) ** 0.5
-            w = max(1.5, 7.0 / (d + 0.4))
-            lines.add(Line(axes.c2p(x, y), axes.c2p(qx, qy),
-                           color=MUTED, stroke_width=w, stroke_opacity=0.7))
-        weight_lbl = _label("blend nearby anchors\n(weights ~ closeness)", 22, INK)
-        weight_lbl.to_corner(DR, buff=0.5)
-        self.play(Create(lines), FadeIn(weight_lbl), run_time=1.0)
+        # Secondary axis: a single faster example -> limited support.
+        limit_lbl = _label("limited speed support\n(1 example)", 18, ACCENT2)
+        limit_lbl.move_to(axes.c2p(0.15, 0.75) + RIGHT * 2.0)
+        limit_arrow = Arrow(limit_lbl.get_left(), fast_dot.get_right(),
+                            buff=0.12, color=ACCENT2, stroke_width=2.5,
+                            max_tip_length_to_length_ratio=0.3)
+
+        self.play(GrowFromCenter(sweep), FadeIn(sweep_lbl), run_time=0.7)
+        self.play(FadeIn(limit_lbl), GrowArrow(limit_arrow), run_time=0.7)
+
+        # Query is a point inside the supported region (purple = neutral).
+        query = Dot(axes.c2p(0.3, 0.22), radius=0.1, color=QUERY)
+        query_lbl = _label("query parameter\n(stays inside region)", 18, QUERY)
+        query_lbl.move_to(axes.c2p(0.3, 0.22) + LEFT * 2.1 + DOWN * 0.05)
+        q_arrow = Arrow(query_lbl.get_right(), query.get_left(), buff=0.12,
+                        color=QUERY, stroke_width=2.5,
+                        max_tip_length_to_length_ratio=0.3)
+        self.play(GrowFromCenter(query), FadeIn(query_lbl),
+                  GrowArrow(q_arrow), run_time=0.7)
         self.wait(1.8)
 
 
 class EdgeSampling(Scene):
-    """Edge construction: sample windows, Kovar distance, accept/reject."""
+    """Edge construction: candidate matrix, Kovar-style scoring, accept on count."""
 
     def construct(self):
         _white_bg(self)
 
         title = _label("Building an edge: sample candidate transitions", 30, INK, BOLD)
-        title.to_edge(UP, buff=0.5)
+        title.move_to([0, 3.4, 0])
         self.play(FadeIn(title, shift=DOWN * 0.2), run_time=0.6)
 
-        # Source end-window (left) and target start-window (right) as pose strips.
-        def window(color, n=4):
-            frames = VGroup(*[
-                Line(UP * 0.35, DOWN * 0.35, color=color, stroke_width=3)
-                for _ in range(n)
-            ]).arrange(RIGHT, buff=0.35)
-            box = SurroundingRectangle(frames, color=color, buff=0.25,
-                                       corner_radius=0.08, stroke_width=2)
-            return VGroup(box, frames)
+        n = 4  # source end-frames (rows) x target start-frames (cols)
+        cell = 0.62
+        grid_origin = [-3.4, 0.6, 0]  # top-left cell centre
 
-        src = window(ACCENT).shift(LEFT * 3.4 + UP * 0.4)
-        tgt = window(ACCENT2).shift(RIGHT * 3.4 + UP * 0.4)
-        src_lbl = _label("source end-window", 22, ACCENT).next_to(src, UP, buff=0.3)
-        tgt_lbl = _label("target start-window", 22, ACCENT2).next_to(tgt, UP, buff=0.3)
+        def cell_pos(i, j):  # i = source row (down), j = target col (right)
+            return [grid_origin[0] + j * cell,
+                    grid_origin[1] - i * cell, 0]
 
-        self.play(FadeIn(src, src_lbl, shift=RIGHT * 0.2),
-                  FadeIn(tgt, tgt_lbl, shift=LEFT * 0.2), run_time=0.8)
+        # Quality class per (source_frame, target_frame) candidate pair.
+        # Aligned frames (near-diagonal) score well; far pairs score poorly.
+        G, N, B = GOOD, NEUTRAL, BAD
+        classes = [
+            [G, G, N, B],
+            [G, G, G, N],
+            [N, G, G, G],
+            [B, N, G, G],
+        ]
+        cells = VGroup()
+        for i in range(n):
+            for j in range(n):
+                c = classes[i][j]
+                sq = Square(side_length=cell * 0.86, color=c, stroke_width=2,
+                            fill_color=c, fill_opacity=0.85)
+                sq.move_to(cell_pos(i, j))
+                cells.add(sq)
 
-        # Sample candidate transitions: source frame -> target frame.
-        src_frames = src[1]
-        tgt_frames = tgt[1]
-        pairs = [(0, 0), (1, 0), (2, 1), (3, 2), (3, 3)]
-        cands = VGroup(*[
-            Line(src_frames[i].get_center(), tgt_frames[j].get_center(),
-                 color=MUTED, stroke_width=2, stroke_opacity=0.6)
-            for i, j in pairs
-        ])
-        kovar_lbl = _label("score each candidate by Kovar-style\ntransition distance",
-                           22, INK).shift(DOWN * 1.4)
-        self.play(LaggedStart(*[Create(c) for c in cands], lag_ratio=0.15),
-                  run_time=1.0)
-        self.play(FadeIn(kovar_lbl), run_time=0.5)
-        self.wait(0.4)
+        # Axis labels for the matrix.
+        src_lbl = _label("source\nend-window", 20, ACCENT)
+        src_lbl.move_to([grid_origin[0] - 1.6, grid_origin[1] - cell * 1.5, 0])
+        tgt_lbl = _label("target start-window", 20, ACCENT2)
+        tgt_lbl.move_to([grid_origin[0] + cell * 1.5, grid_origin[1] + 0.85, 0])
+        src_tick = Arrow([grid_origin[0] - 0.55, grid_origin[1] + 0.1, 0],
+                         [grid_origin[0] - 0.55, grid_origin[1] - cell * 3, 0],
+                         buff=0.0, color=ACCENT, stroke_width=2.5,
+                         max_tip_length_to_length_ratio=0.08)
+        tgt_tick = Arrow([grid_origin[0] - 0.1, grid_origin[1] + 0.5, 0],
+                         [grid_origin[0] + cell * 3, grid_origin[1] + 0.5, 0],
+                         buff=0.0, color=ACCENT2, stroke_width=2.5,
+                         max_tip_length_to_length_ratio=0.08)
 
-        # Accept (low distance -> green) / reject (high distance -> red).
-        verdicts = [GOOD, GOOD, BAD, GOOD, BAD]
-        anims = []
-        for c, v in zip(cands, verdicts):
-            anims.append(c.animate.set_stroke(color=v, width=4, opacity=1.0))
-        self.play(*anims, run_time=0.8)
+        self.play(FadeIn(src_lbl), FadeIn(tgt_lbl),
+                  GrowArrow(src_tick), GrowArrow(tgt_tick), run_time=0.7)
+        self.play(LaggedStart(*[GrowFromCenter(s) for s in cells],
+                              lag_ratio=0.04), run_time=1.2)
 
-        accept_lbl = _label("accept the edge when enough\ngood samples exist",
-                            24, GOOD, BOLD).shift(DOWN * 2.6)
-        self.play(FadeIn(accept_lbl, shift=UP * 0.2), run_time=0.6)
+        # Right-side legend: Kovar-style distance -> quality class.
+        leg_x = 3.0
+        leg_top = 1.7
+        legend_title = _label("Kovar-style distance", 20, INK, BOLD)
+        legend_title.move_to([leg_x + 0.9, leg_top, 0])
+        rows = [("low  -> accept", GOOD),
+                ("mid  -> borderline", NEUTRAL),
+                ("high -> reject", BAD)]
+        legend = VGroup()
+        for k, (txt, col) in enumerate(rows):
+            y = leg_top - 0.55 - k * 0.55
+            swatch = Square(side_length=0.34, color=col, stroke_width=2,
+                            fill_color=col, fill_opacity=0.85)
+            swatch.move_to([leg_x, y, 0])
+            t = _label(txt, 18, INK).next_to(swatch, RIGHT, buff=0.2)
+            legend.add(VGroup(swatch, t))
+        self.play(FadeIn(legend_title), LaggedStart(
+            *[FadeIn(g, shift=LEFT * 0.15) for g in legend], lag_ratio=0.15),
+            run_time=0.9)
+        self.wait(0.3)
+
+        # Bottom decision box: enough GOOD samples -> edge enabled.
+        n_good = sum(row.count(GOOD) for row in classes)
+        box = RoundedRectangle(width=8.6, height=0.9, corner_radius=0.12,
+                               color=GOOD, stroke_width=3)
+        box.move_to([0, -2.9, 0])
+        decision = _label(
+            f"{n_good} GOOD samples >= threshold   ->   edge enabled", 22,
+            GOOD, BOLD).move_to(box.get_center())
+        self.play(Create(box), FadeIn(decision, shift=UP * 0.15), run_time=0.8)
         self.wait(1.6)
