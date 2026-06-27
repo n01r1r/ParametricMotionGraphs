@@ -1,13 +1,19 @@
-"""Publication figure #4: graph-build edge acceptance by edge type.
+"""Publication figure: graph-build edge acceptance by gait pair.
 
-Stacked good/neutral/bad transition-sample counts per edge category, with
-rejected edges annotated. Honest evidence: within-gait (walk->walk, run->run)
-is clean; cross-gait (esp. run->walk) degrades and some edges are rejected.
-Data = CMU subject 16 graph build.
+Reproducible from tracked data: regenerates tables/edge_samples.csv by running
+pmg_cli --build-graph on specs/cmu_gait_graph.pmg_spec (CMU subject 16, clips
+tracked in BVH/), then plots stacked good/neutral/bad transition-sample counts
+per edge category with rejected edges annotated. Honest evidence: within-gait
+(walk->walk, run->run) is clean; cross-gait (esp. run->walk) degrades and some
+edges are rejected ("no GOOD target samples").
 
 Run: python docs/figures/make_edge_acceptance_figure.py
+Requires: pmg_cli built (cmake --build build --target pmg_cli).
 """
 import csv
+import subprocess
+import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -16,22 +22,39 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = "experiments/cmu/out/tables/edge_samples.csv"
+SPEC = "specs/cmu_gait_graph.pmg_spec"
 ORDER = ["walk_cmu->walk_cmu", "run_cmu->run_cmu", "walk_cmu->run_cmu", "run_cmu->walk_cmu"]
-PRETTY = {"walk_cmu->walk_cmu": "walk→walk", "run_cmu->run_cmu": "run→run",
-          "walk_cmu->run_cmu": "walk→run", "run_cmu->walk_cmu": "run→walk"}
+PRETTY = {"walk_cmu->walk_cmu": "walk->walk", "run_cmu->run_cmu": "run->run",
+          "walk_cmu->run_cmu": "walk->run", "run_cmu->walk_cmu": "run->walk"}
+
+
+def find_cli():
+    for p in ("build/Release/pmg_cli.exe", "build/Debug/pmg_cli.exe",
+              "build/pmg_cli", "build/Release/pmg_cli", "build/Debug/pmg_cli"):
+        if (ROOT / p).exists():
+            return str(ROOT / p)
+    sys.exit("pmg_cli not found - build it: cmake --build build --target pmg_cli")
+
+
+def regenerate_edge_samples(out_dir):
+    subprocess.run([find_cli(), "--build-graph", str(ROOT / SPEC),
+                    str(Path(out_dir) / "graph.pmg")],
+                   cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
+    return Path(out_dir) / "tables" / "edge_samples.csv"
 
 
 def main():
     agg = defaultdict(lambda: {"good": 0, "neutral": 0, "bad": 0, "rejected": 0})
-    with open(ROOT / SRC, newline="") as fh:
-        for row in csv.DictReader(fh):
-            e = agg[row["edge"]]
-            e["good"] += int(row["good"])
-            e["neutral"] += int(row["neutral"])
-            e["bad"] += int(row["bad"])
-            if row["accepted"] == "0":
-                e["rejected"] += 1
+    with tempfile.TemporaryDirectory() as tmp:
+        edge_csv = regenerate_edge_samples(tmp)
+        with open(edge_csv, newline="") as fh:
+            for row in csv.DictReader(fh):
+                e = agg[row["edge"]]
+                e["good"] += int(row["good"])
+                e["neutral"] += int(row["neutral"])
+                e["bad"] += int(row["bad"])
+                if row["accepted"] == "0":
+                    e["rejected"] += 1
 
     edges = [e for e in ORDER if e in agg]
     good = [agg[e]["good"] for e in edges]
