@@ -1,0 +1,79 @@
+# EXPLORATORY: faithful same-skeleton N=3 multi-node gait-STYLE graph.
+# Rig 4343a921 (the "A" mocap set) -- one skeleton holding many families. The
+# cyclic locomotion styles walk/strut/sneak are all on this rig, so a 3-node
+# style graph builds with NO retargeting and NO subj86 fetch.
+#
+# Why this instead of stand->walk->jog (credo_*): the Center corpus splits stand
+# and jog across skeletons (see credo_stand_walk_jog.pmg_spec). This "A" set keeps
+# multiple gait STYLES on ONE rig -> the first faithful N>2 same-skeleton graph.
+#
+# Cross-style raw min Kovar D (--dump-distance-grid), all << CMU wall (2709):
+#   walk<->strut 31-93 (~self-edge, near-free), walk<->sneak 231-364,
+#   strut<->sneak 344-382.
+#
+# Cyclic windows (cycle_joint LeftAnkle):
+#   walk : WalkLoopA  0-30  loop-seam 0.214 (ok)
+#   strut: StrutLoopA 0-41  loop-seam 0.048 (clean)
+#   sneak: SneakLoopA 33-52 loop-seam 0.856 (WEAK -- marginal node)
+# Single-clip nodes; 2 same-clip windows satisfy the >=2-example simplex rule.
+# spanned_axes 0: this tests EDGE feasibility, not within-node span.
+
+node walk 1
+registration walk LeftAnkle - 3 0
+parameter_metrics walk travel_speed
+parameter_calibration walk 9
+parameter_support walk simplex
+example walk 11.2 ../BVH/WalkLoopA.bvh start_frame 0 end_frame 30
+example walk 11.0 ../BVH/WalkLoopA.bvh start_frame 1 end_frame 30
+
+node strut 1
+registration strut LeftAnkle - 3 0
+parameter_metrics strut travel_speed
+parameter_calibration strut 9
+parameter_support strut simplex
+example strut 5.0 ../BVH/StrutLoopA.bvh start_frame 0 end_frame 41
+example strut 4.9 ../BVH/StrutLoopA.bvh start_frame 0 end_frame 40
+
+node sneak 1
+registration sneak LeftAnkle - 3 0
+parameter_metrics sneak travel_speed
+parameter_calibration sneak 9
+parameter_support sneak simplex
+example sneak 2.8 ../BVH/SneakLoopA.bvh start_frame 33 end_frame 52
+example sneak 2.9 ../BVH/SneakLoopA.bvh start_frame 32 end_frame 51
+
+edge walk walk
+edge_phase_range walk walk 0.70 0.95 0.05 0.30
+edge_config walk walk 120 234 3 6 41
+
+edge strut strut
+edge_phase_range strut strut 0.70 0.95 0.05 0.30
+edge_config strut strut 120 234 3 6 41
+
+edge sneak sneak
+edge_phase_range sneak sneak 0.70 0.95 0.05 0.30
+edge_config sneak sneak 200 400 3 6 41
+
+edge walk strut
+edge_phase_range walk strut 0.60 0.95 0.05 0.40
+edge_config walk strut 120 220 4 6 41
+
+edge strut walk
+edge_phase_range strut walk 0.60 0.95 0.05 0.40
+edge_config strut walk 80 160 4 6 41
+
+edge walk sneak
+edge_phase_range walk sneak 0.60 0.95 0.05 0.40
+edge_config walk sneak 400 650 4 6 41
+
+edge sneak walk
+edge_phase_range sneak walk 0.60 0.95 0.05 0.40
+edge_config sneak walk 280 500 4 6 41
+
+edge strut sneak
+edge_phase_range strut sneak 0.60 0.95 0.05 0.40
+edge_config strut sneak 420 650 4 6 41
+
+edge sneak strut
+edge_phase_range sneak strut 0.60 0.95 0.05 0.40
+edge_config sneak strut 380 600 4 6 41

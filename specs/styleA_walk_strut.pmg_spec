@@ -1,0 +1,49 @@
+# Faithful same-skeleton N=2 multi-node STYLE graph: walk_A <-> strut_A.
+# Rig 4343a921 (the "A" mocap set) -- one skeleton, two cyclic locomotion styles,
+# NO retargeting, NO subj86 fetch. This is the clean multi-node demo: a real
+# PMG-style transition between two distinct cyclic motion spaces on one rig.
+#
+# Why this over Center stand->walk->jog (credo_*): the Center corpus splits stand
+# and jog across skeletons (credo_stand_walk_jog.pmg_spec, joint[4] offset gate).
+# Here both styles share rig 4343a921 and the cross-style transition is near-free.
+#
+# Cross-style raw min Kovar D (--dump-distance-grid), << CMU wall (2709):
+#   walk_A->strut_A 93, strut_A->walk_A 31  (~ the walk self-edge ~39).
+#
+# Cyclic windows (cycle_joint LeftAnkle):
+#   walk_A : WalkLoopA  0-30  loop-seam 0.214 (ok)
+#   strut_A: StrutLoopA 0-41  loop-seam 0.048 (clean)
+# Single-clip nodes; 2 same-clip windows satisfy the >=2-example simplex rule.
+# spanned_axes 0: this is an edge/topology demo, not a within-node parametric span.
+
+node walk_A 1
+registration walk_A LeftAnkle - 3 0
+parameter_metrics walk_A travel_speed
+parameter_calibration walk_A 9
+parameter_support walk_A simplex
+example walk_A 11.2 ../BVH/WalkLoopA.bvh start_frame 0 end_frame 30
+example walk_A 11.0 ../BVH/WalkLoopA.bvh start_frame 1 end_frame 30
+
+node strut_A 1
+registration strut_A LeftAnkle - 3 0
+parameter_metrics strut_A travel_speed
+parameter_calibration strut_A 9
+parameter_support strut_A simplex
+example strut_A 5.0 ../BVH/StrutLoopA.bvh start_frame 0 end_frame 41
+example strut_A 4.9 ../BVH/StrutLoopA.bvh start_frame 0 end_frame 40
+
+edge walk_A walk_A
+edge_phase_range walk_A walk_A 0.70 0.95 0.05 0.30
+edge_config walk_A walk_A 120 234 3 6 41
+
+edge strut_A strut_A
+edge_phase_range strut_A strut_A 0.70 0.95 0.05 0.30
+edge_config strut_A strut_A 120 234 3 6 41
+
+edge walk_A strut_A
+edge_phase_range walk_A strut_A 0.60 0.95 0.05 0.40
+edge_config walk_A strut_A 120 220 4 6 41
+
+edge strut_A walk_A
+edge_phase_range strut_A walk_A 0.60 0.95 0.05 0.40
+edge_config strut_A walk_A 80 160 4 6 41
