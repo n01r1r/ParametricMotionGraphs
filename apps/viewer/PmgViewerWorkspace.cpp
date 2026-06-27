@@ -108,7 +108,14 @@ void PmgViewerWorkspace::Initialize(const std::string& artifact_path) {
         LoadClip(0);
     }
     if (!artifact_path.empty()) {
-        LoadGraphArtifact(artifact_path);
+        // First arg may be a built .pmg artifact or a .pmg_spec recipe; the spec
+        // path builds in-process (same as the in-GUI picker / CLI --build-graph)
+        // so the documented `pmg_viewer specs/foo.pmg_spec` launch works.
+        if (std::filesystem::path(artifact_path).extension() == ".pmg_spec") {
+            BuildArtifactFromSpec(artifact_path);
+        } else {
+            LoadGraphArtifact(artifact_path);
+        }
     }
 }
 
@@ -130,19 +137,40 @@ void PmgViewerWorkspace::DiscoverBvhFiles() {
 
 void PmgViewerWorkspace::DiscoverSpecFiles() {
     spec_files_.clear();
-    const std::filesystem::path directory(PMG_SPEC_DIRECTORY);
-    std::error_code error;
-    if (!std::filesystem::exists(directory, error)) {
-        return;
-    }
-    for (const auto& entry :
-         std::filesystem::directory_iterator(directory, error)) {
-        if (entry.is_regular_file() &&
-            entry.path().extension() == ".pmg_spec") {
-            spec_files_.push_back(entry.path());
+    // Scan the curated specs/ dir plus the CMU experiment specs so the multi-node
+    // cmubvh graphs are verifiable from the in-GUI spec picker. experiments/cmu
+    // sits next to specs/ under the repo root, so derive it from the existing
+    // PMG_SPEC_DIRECTORY macro rather than adding a second build define. Example
+    // BVH paths resolve relative to each spec's own directory (GraphSpec.cpp), so
+    // the CMU corpus loads correctly even though it lives outside PMG_BVH_DIRECTORY.
+    // ponytail: two explicit dirs, not a recursive walk -- recursion would also
+    // surface specs/fixtures/ stress specs that are intentionally off the picker.
+    const std::filesystem::path repo_root =
+        std::filesystem::path(PMG_SPEC_DIRECTORY).parent_path();
+    const std::filesystem::path directories[] = {
+        std::filesystem::path(PMG_SPEC_DIRECTORY),
+        repo_root / "experiments" / "cmu",
+    };
+    for (const std::filesystem::path& directory : directories) {
+        std::error_code error;
+        if (!std::filesystem::exists(directory, error)) {
+            continue;
         }
+        // Sort each directory's contribution independently so the curated specs/
+        // group stays first (preserving the default picker selection) with the
+        // CMU specs appended after it.
+        const std::size_t group_begin = spec_files_.size();
+        for (const auto& entry :
+             std::filesystem::directory_iterator(directory, error)) {
+            if (entry.is_regular_file() &&
+                entry.path().extension() == ".pmg_spec") {
+                spec_files_.push_back(entry.path());
+            }
+        }
+        std::sort(spec_files_.begin() +
+                      static_cast<std::ptrdiff_t>(group_begin),
+                  spec_files_.end());
     }
-    std::sort(spec_files_.begin(), spec_files_.end());
 }
 
 float PmgViewerWorkspace::ComputeGroundOffset(
