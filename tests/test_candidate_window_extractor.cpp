@@ -30,6 +30,19 @@ int main() {
     short_clip.frames.resize(3);
     assert(pmg::ExtractCandidateMotionWindows(data.skeleton, short_clip, config).empty());
 
+    // Opt-in locomotion filter: every surviving window must clear the speed floor,
+    // and an impossibly high floor must drop everything (faithful, not just looser).
+    pmg::CandidateWindowExtractionConfig travel = config;
+    travel.min_window_speed = 1.0f;  // BVH native units/sec
+    const auto filtered = pmg::ExtractCandidateMotionWindows(data.skeleton, data.clip, travel);
+    for (const auto& window : filtered) {
+        const float duration =
+            static_cast<float>(window.end_frame - window.start_frame + 1) / data.clip.frames_per_second;
+        assert(duration > 0.0f && window.root_displacement / duration >= travel.min_window_speed);
+    }
+    travel.min_window_speed = 1.0e9f;
+    assert(pmg::ExtractCandidateMotionWindows(data.skeleton, data.clip, travel).empty());
+
     std::ostringstream exported;
     pmg::WriteCandidateWindowsJson(exported, "clips/Walk\\\"A.bvh", config, first);
     const std::string json = exported.str();

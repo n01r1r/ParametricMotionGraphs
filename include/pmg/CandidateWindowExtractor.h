@@ -28,6 +28,11 @@ struct CandidateWindowExtractionConfig {
     float max_normalized_pose_distance = 25.0f;
     float max_heading_delta_radians = 0.8f;
     float heading_score_weight = 1.0f;
+    // Opt-in locomotion filter: drop windows whose travel speed
+    // (root_displacement / duration) is below this, in BVH native units/sec.
+    // 0 disables it -> pure loop-seam ranking (the legacy default), which favors
+    // near-standing low-seam windows. Set >0 to surface real locomotion windows.
+    float min_window_speed = 0.0f;
 };
 
 // Offline proposal only. Scans inclusive frame windows and ranks endpoint

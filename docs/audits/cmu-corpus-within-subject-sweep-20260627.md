@@ -97,12 +97,37 @@ pick by *displacement/duration* (window speed), accepting a higher seam. Several
 "walk" clips returned 0.1–3 cm/s windows. A "best-travel window" extractor mode would
 remove the manual step.
 
+## Session 2 (2026-06-27 cont.): subj-127 calibrated, extractor fix, subj-78 promoted
+
+1. **Subject 127 CALIBRATED (walk node stays loose by data limit).** Edge thresholds
+   replaced placeholders → derived from `--diagnose-graph-edge` (build point-cloud kovar
+   D): walk self 1900/3800, run self 1600/3200, walk→run 2700/4500, run→walk 2900/4500.
+   Build/inspect/random-walk PASS (26 transitions, pop_ratio 2.53). The weak 127_31@12
+   window was **not replaceable**: it is the *cleanest* slow-walk window in the subject
+   (seam 0.81); the looseness is the node's 3× speed span (12→38), and (a) no clean
+   intermediate-speed walk window exists in subject 127 (travel-rank: mid-band only at
+   seam ~10 vs 0.8/5.6 at the endpoints), (b) a 1-D `simplex` node is capped at 2 examples
+   so the axis can't be densified without a 2-D reparameterization. Subject 127 walk node
+   remains **experimental**, not reference-quality. Not promoted to a separate cmu127 doc
+   (subj16 stays the lone reference PASS).
+2. **Extractor travel filter shipped.** `--extract-candidate-windows --min-window-speed S`
+   drops near-standing windows (the real bottleneck this audit named) before seam ranking;
+   `S=0` keeps legacy behavior. Tested. See `cmu-promoted-subjects-20260627.md`.
+3. **Subject 78 promoted (PASS).** 2-node walk/run, calibrated, random-walk PASS (24
+   transitions, pop_ratio 1.51 — cleaner runtime than subj127). Details in
+   `cmu-promoted-subjects-20260627.md`.
+
 ## What remains / what to do more
 
-1. Calibrate subj-127 edge thresholds (`--calibrate-thresholds` gives per-subject
-   TGOOD/TBAD) and replace the weak 127_31@12 window → tighten the walk node.
-2. Promote 78 / 35 / 102 (each ~30 loco clips) the same way for more demos.
-3. Add 3–4 examples per node (subjects have 14–23 walk clips) for a denser speed axis.
+1. ~~Calibrate subj-127~~ DONE (session 2). Walk node loose by data limit, documented.
+2. Promote 35 / 102 (recipe now fast via `--min-window-speed`; see promoted-subjects doc).
+   78 done.
+3. Denser speed axis (3–4 examples/node) is **blocked**: 1-D `simplex` support = exactly
+   2 vertices. Would need a new multi-vertex 1-D support or a 2-D reparameterization
+   (out of scope; not worth a new support type for this).
 4. Non-locomotion multi-action graphs (subject-86 style) need external CMU action labels
    — BVH paths are numeric, so no in-corpus labeling.
 5. Cross-subject blending stays out of scope (needs retargeting).
+6. A2 bridge stays closed NO-GO. High build-time Kovar D = topology/coverage warning;
+   runtime quality audited separately (subj78 build-warns yet runtime pop_ratio is the
+   best of the three graphs).

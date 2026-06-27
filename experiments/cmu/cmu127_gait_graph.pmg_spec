@@ -5,7 +5,21 @@
 # so walk windows here trade some loop quality for real forward travel.
 #   walk_127: 127_31 win254-343 ~12cm/s, 127_22 win70-197 ~38cm/s
 #   run_127 : 127_27 win56-164 ~42cm/s, 127_07 win64-144 ~79cm/s
-# Thresholds are placeholders pending --diagnose-graph-edge (127's native kovar D unknown).
+#
+# Thresholds CALIBRATED 2026-06-27 from --diagnose-graph-edge (build's point-cloud
+# kovar D, native squared-sum units). Per-edge interior min-D / accepted-source counts:
+#   walk self  min-D ~850-1476 -> 1900/3800 (6/6 sources accepted)
+#   run  self  min-D ~854-1172 -> 1600/3200 (6/6)
+#   walk->run  min-D ~1489     -> 2700/4500 (4/6: fast-walk end only; slow 12.1/15.5
+#              reject = faithful paper-sec.6 source-range restriction, same as subj16)
+#   run->walk  min-D ~1397-2064-> 2900/4500 (6/6)
+# WALK NODE STAYS LOOSE at the slow end: 127_31@12 is the cleanest slow-walk window in
+# the subject (seam 0.81) but the node spans 12->38 cm/s (3x), so the slow anchor is an
+# outlier (build flags weak_pose_seam ratio 6.8 -- ratio inflated by tiny per-frame
+# motion of a slow clip). No clean intermediate-speed walk window exists in subject 127
+# (extractor travel-rank: mid-band windows only at seam ~10 vs 0.8/5.6 at the endpoints),
+# and a 1-D simplex node is capped at 2 examples, so the axis cannot be densified without
+# a 2-D reparameterization. Subject 127 walk node remains EXPERIMENTAL by data limit.
 
 node walk_127 1
 registration walk_127 LeftFoot - 3 0
@@ -28,16 +42,16 @@ expect run_127 spanned_axes 1
 
 edge walk_127 walk_127
 edge_phase_range walk_127 walk_127 0.70 0.95 0.05 0.30
-edge_config walk_127 walk_127 2000 4000 4 6 41
+edge_config walk_127 walk_127 1900 3800 4 6 41
 
 edge run_127 run_127
 edge_phase_range run_127 run_127 0.70 0.95 0.05 0.30
-edge_config run_127 run_127 2000 4000 4 6 41
+edge_config run_127 run_127 1600 3200 4 6 41
 
 edge walk_127 run_127
 edge_phase_range walk_127 run_127 0.60 0.95 0.05 0.40
-edge_config walk_127 run_127 4000 6000 4 6 41
+edge_config walk_127 run_127 2700 4500 4 6 41
 
 edge run_127 walk_127
 edge_phase_range run_127 walk_127 0.60 0.95 0.05 0.40
-edge_config run_127 walk_127 4000 6000 4 6 41
+edge_config run_127 walk_127 2900 4500 4 6 41

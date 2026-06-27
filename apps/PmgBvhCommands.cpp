@@ -64,9 +64,18 @@ int ParsePositiveInt(const std::string& text, const char* name) {
     return value;
 }
 
+float ParseNonNegativeFloat(const std::string& text, const char* name) {
+    std::size_t consumed = 0;
+    const float value = std::stof(text, &consumed);
+    if (consumed != text.size() || value < 0.0f) {
+        throw std::runtime_error(std::string(name) + " must be a non-negative number");
+    }
+    return value;
+}
+
 int ExtractCandidateWindows(int argc, char** argv) {
     if (argc < 4) {
-        throw std::runtime_error("usage: pmg_cli --extract-candidate-windows file.bvh --min-frames N --max-frames N --stride N --top-k K --output-md path --output-csv path [--output-candidates path]");
+        throw std::runtime_error("usage: pmg_cli --extract-candidate-windows file.bvh --min-frames N --max-frames N --stride N --top-k K --output-md path --output-csv path [--output-candidates path] [--min-window-speed S]");
     }
     const std::string source_path = argv[2];
     pmg::CandidateWindowExtractionConfig config;
@@ -81,6 +90,7 @@ int ExtractCandidateWindows(int argc, char** argv) {
         else if (option == "--max-frames") config.max_length_frames = ParsePositiveInt(value, "max-frames");
         else if (option == "--stride") config.stride_frames = ParsePositiveInt(value, "stride");
         else if (option == "--top-k") config.top_k = ParsePositiveInt(value, "top-k");
+        else if (option == "--min-window-speed") config.min_window_speed = ParseNonNegativeFloat(value, "min-window-speed");
         else if (option == "--output-md") markdown_path = value;
         else if (option == "--output-csv") csv_path = value;
         else if (option == "--output-candidates") candidates_path = value;

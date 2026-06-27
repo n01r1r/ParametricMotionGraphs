@@ -97,6 +97,38 @@ was only on a runtime command) into `--build-graph`. The default was then flippe
 ON (faithful to paper §6's method), with `--no-restrict-source-range` exposing the
 legacy all-or-nothing ablation.
 
+---
+
+# Within-subject promotion graphs (corpus sweep follow-on)
+
+The full-corpus sweep (`docs/audits/cmu-corpus-within-subject-sweep-20260627.md`) ranks
+subjects by locomotion-band clip count. Promoted 2-node walk/run specs built from it:
+
+- `cmu_gait_graph.pmg_spec` — subject 16 (reference PASS).
+- `cmu127_gait_graph.pmg_spec` — subject 127, calibrated; walk node experimental/loose
+  (12→38 cm/s span, no clean intermediate; 1-D simplex caps at 2 examples).
+- `cmu78_gait_graph.pmg_spec` — subject 78, calibrated PASS (run-heavy; cleanest runtime
+  pop_ratio of the three). Clips in gitignored `bvh78/`.
+
+Details + the 35/102 promotion recipe: `docs/audits/cmu-promoted-subjects-20260627.md`.
+
+## Window curation: `--min-window-speed`
+
+`--extract-candidate-windows` ranks by loop seam, which favors near-standing segments.
+For locomotion windows add `--min-window-speed S` (BVH native units/sec): it drops
+windows below that travel speed, then ranks survivors by seam as before. `S=0` (default)
+keeps the legacy loop-seam-only ranking.
+
+## Faithfulness note (read before "fixing" a high cross-gait D)
+
+A high build-time Kovar D on a walk↔run edge is a **topology/coverage warning** (the
+corpus has no walk↔run transition clip), **not** automatically a runtime teleport.
+Runtime quality is audited **separately** with `--random-walk` (pop_ratio / max_step) —
+subject 78 build-warns on a cyclic seam yet has the lowest runtime pop_ratio of the three
+graphs. The lever for cross-gait quality is corpus density/coverage, not threshold tuning.
+**A2 (a stored transition-clip bridge edge) is closed NO-GO** — it did not beat the
+runtime cross-fade; do not reintroduce it.
+
 ## FIXED: dim=1 round-trip
 Earlier a **dim=1** graph built (V13) but `LoadPmgArtifactText` failed on reload
 ("failed to read parameter vector"), so `--inspect-graph`/viewer/runtime could not

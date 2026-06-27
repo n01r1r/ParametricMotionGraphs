@@ -90,13 +90,20 @@ std::vector<CandidateMotionWindow> ExtractCandidateMotionWindows(
 
             const Vec3 root_delta = clip.frames[static_cast<std::size_t>(end)].root_position -
                                     clip.frames[static_cast<std::size_t>(start)].root_position;
+            const float root_displacement =
+                std::sqrt(root_delta.x * root_delta.x + root_delta.z * root_delta.z);
+            if (config.min_window_speed > 0.0f && clip.frames_per_second > 0.0f) {
+                const float duration = static_cast<float>(length) / clip.frames_per_second;
+                if (duration <= 0.0f || root_displacement / duration < config.min_window_speed) {
+                    continue;
+                }
+            }
             CandidateMotionWindow candidate;
             candidate.start_frame = start;
             candidate.end_frame = end;
             candidate.score = pose_distance +
                               config.heading_score_weight * heading_delta * heading_delta;
-            candidate.root_displacement =
-                std::sqrt(root_delta.x * root_delta.x + root_delta.z * root_delta.z);
+            candidate.root_displacement = root_displacement;
             candidate.heading_delta = heading_delta;
             std::ostringstream reason;
             reason << "aligned endpoint pose=" << pose_distance
@@ -134,7 +141,8 @@ void WriteCandidateWindowsJson(
            << "    \"endpoint_window_frames\": " << config.endpoint_window_frames << ",\n"
            << "    \"max_normalized_pose_distance\": " << config.max_normalized_pose_distance << ",\n"
            << "    \"max_heading_delta_radians\": " << config.max_heading_delta_radians << ",\n"
-           << "    \"heading_score_weight\": " << config.heading_score_weight << "\n  },\n"
+           << "    \"heading_score_weight\": " << config.heading_score_weight << ",\n"
+           << "    \"min_window_speed\": " << config.min_window_speed << "\n  },\n"
            << "  \"candidates\": [";
     for (std::size_t index = 0; index < candidates.size(); ++index) {
         const auto& candidate = candidates[index];
