@@ -219,9 +219,32 @@ int main(int argc, char** argv) {
     ImGui_ImplGlfw_InitForOpenGL(window, false);  // we install + chain callbacks ourselves
     ImGui_ImplOpenGL3_Init("#version 330");
 
+    // Args: first non-flag = spec/artifact path; --demo-goto x z places a
+    // scripted goto target right after load (recorded demos, no right-click).
+    std::string bootstrap_path;
+    bool has_demo_goto = false;
+    float demo_goto_x = 0.0f;
+    float demo_goto_z = 0.0f;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--demo-goto" && i + 2 < argc) {
+            demo_goto_x = std::stof(argv[i + 1]);
+            demo_goto_z = std::stof(argv[i + 2]);
+            has_demo_goto = true;
+            i += 2;
+        } else if (bootstrap_path.empty() && arg.rfind("--", 0) != 0) {
+            bootstrap_path = arg;
+        }
+    }
+
     try {
-        pmgviewer::ViewerHost app(std::make_unique<pmgviewer::PmgViewerWorkspace>());
-        app.Initialize(argc >= 2 ? argv[1] : "");
+        auto workspace = std::make_unique<pmgviewer::PmgViewerWorkspace>();
+        pmgviewer::PmgViewerWorkspace* pmg_workspace = workspace.get();
+        pmgviewer::ViewerHost app(std::move(workspace));
+        app.Initialize(bootstrap_path);
+        if (has_demo_goto) {
+            pmg_workspace->StartGotoDemo(demo_goto_x, demo_goto_z);
+        }
 
         InputState input;
         input.camera = &app.Camera();

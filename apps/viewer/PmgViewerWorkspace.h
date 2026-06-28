@@ -66,6 +66,12 @@ public:
         const glm::vec3& ray_origin, const glm::vec3& ray_direction) override;
     void SetDirectSteeringInput(float turn, float speed) override;
 
+    // Headless demo entry: place a goto target at native-unit (x, z) right after
+    // Initialize, bypassing the right-click pick, for scripted/recorded
+    // target-directed demos (pmg_viewer foo.pmg_spec --demo-goto 12 8). No-op
+    // with a status message if no graph runtime is loaded.
+    void StartGotoDemo(float x, float z);
+
     const RenderScene& Scene() const override { return scene_; }
 
 private:

@@ -754,6 +754,14 @@ void PmgViewerWorkspace::PlaceGotoTarget(const glm::vec2& target) {
     goto_status_ = "Walking to target.";
 }
 
+void PmgViewerWorkspace::StartGotoDemo(float x, float z) {
+    if (!GraphRuntimeActive()) {
+        goto_status_ = "Demo goto needs a graph runtime (load a .pmg_spec).";
+        return;
+    }
+    PlaceGotoTarget(glm::vec2{x, z});
+}
+
 // Achieved world turn rate when streaming the graph at one held parameter.
 // Differs from the example clips' own turn rates: each self-transition plays
 // only the target-phase -> source-gate slice per cycle, so the net heading
