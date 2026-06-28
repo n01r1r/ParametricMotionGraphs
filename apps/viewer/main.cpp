@@ -193,7 +193,7 @@ int main(int argc, char** argv) {
     imgui_io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     // Multi-viewport: panels (e.g. the Distance Grid heatmap) can be dragged out
     // of the main window into their own OS-level windows / second monitor.
-    imgui_io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    // imgui_io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     ImGui::StyleColorsDark();
     // Readability pass: the default 13px font + tight spacing reads as cramped on
     // high-DPI displays. Enlarge text, loosen spacing, and lift text contrast so
