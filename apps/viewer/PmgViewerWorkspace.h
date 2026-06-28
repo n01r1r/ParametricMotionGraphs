@@ -401,7 +401,7 @@ private:
     std::optional<pmg::GoalDirectedLocomotion> steering_;
     bool goto_active_ = false;
     glm::vec2 goto_target_{0.0f, 0.0f};  // native units, ground plane (x, z)
-    // ponytail: arrival radius must exceed the corpus floor turning radius
+    // arrival radius must exceed the corpus floor turning radius
     // r_min = v_min/omega_max (~5.5 on demo_walk_2d), else capture is physically
     // impossible and the character orbits forever. See
     // docs/audits/goto-capture-feasibility-wall-20260628.md. Lower r_min (slower

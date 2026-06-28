@@ -136,7 +136,7 @@ std::optional<InterpolatedTransition> AverageSamples(
         }
     }
 
-    // ponytail: intersect existing sampled boxes; add a target-region hull only
+    // intersect existing sampled boxes; add a target-region hull only
     // if measured coverage loss makes this conservative policy inadequate.
     if (!has_target_box || result.target_parameter_box.IsEmpty()) {
         return std::nullopt;

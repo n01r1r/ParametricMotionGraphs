@@ -143,7 +143,7 @@ void PmgViewerWorkspace::DiscoverSpecFiles() {
     // PMG_SPEC_DIRECTORY macro rather than adding a second build define. Example
     // BVH paths resolve relative to each spec's own directory (GraphSpec.cpp), so
     // the CMU corpus loads correctly even though it lives outside PMG_BVH_DIRECTORY.
-    // ponytail: two explicit dirs, not a recursive walk -- recursion would also
+    // two explicit dirs, not a recursive walk -- recursion would also
     // surface specs/fixtures/ stress specs that are intentionally off the picker.
     const std::filesystem::path repo_root =
         std::filesystem::path(PMG_SPEC_DIRECTORY).parent_path();
@@ -1188,7 +1188,7 @@ void PmgViewerWorkspace::RecomputeParamSweepPaths() {
                           : std::max(pmg_examples_.front().clip.frames_per_second, 1.0f);
     const float span =
         std::max(pmg_parameter_max_[axis] - pmg_parameter_min_[axis], kEpsilon);
-    // ponytail: holds the other axes at the current blend, so for an N-D space the
+    // holds the other axes at the current blend, so for an N-D space the
     // overlay only refreshes on rebuild, not when a sibling axis is dragged. Fine
     // for the 1-D spaces this targets; revisit if N-D cross-axis preview is wanted.
     pmg::ParameterVector query = pmg_parameter_;

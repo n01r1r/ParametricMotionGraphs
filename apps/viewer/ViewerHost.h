@@ -38,7 +38,7 @@ public:
     }
 
 private:
-    // ponytail: temporary Dear ImGui leakage for camera-only host controls.
+    // temporary Dear ImGui leakage for camera-only host controls.
     // Migrate into a small host state/command adapter if this window grows.
     void BuildViewUi();
 

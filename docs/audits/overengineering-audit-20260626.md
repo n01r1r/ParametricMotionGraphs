@@ -1,4 +1,4 @@
-# Ponytail audit + roadmap — 2026-06-26
+# Over-engineering audit + roadmap — 2026-06-26
 
 Durable reference. Work order, top to bottom: **(1) audit cuts**, then
 **(2) improvements now**, then **(3) final goal / what's left** (discussion).

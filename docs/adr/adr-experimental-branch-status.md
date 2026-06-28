@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted for current code. `experimental` remains `KEEP_AS_REFERENCE` and
-`DO_NOT_MERGE`.
+Accepted for current code. (The `experimental` sketch branch was removed during
+the 2026-06-28 publish cleanup; the paper-first module boundaries below still
+hold.)
 
 ## Context
 

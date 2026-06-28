@@ -62,7 +62,7 @@ struct RuntimeControllerConfig {
     // preserving phase -- a continuous re-blend with no splice and no
     // transition pop. 0 = use the gated self-edge (original behavior). Typical
     // 0.1-0.3; higher tracks faster but steps the pose harder per frame.
-    // ponytail: regenerates the clip per Update while tracking; fine for the
+    // regenerates the clip per Update while tracking; fine for the
     // single-node goto demo, revisit if a hot path tracks large blends.
     float same_node_tracking_rate = 0.0f;
 };
