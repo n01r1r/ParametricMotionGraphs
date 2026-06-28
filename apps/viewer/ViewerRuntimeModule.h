@@ -68,6 +68,15 @@ public:
 
     bool Ready() const { return controller_.has_value(); }
     const pmg::RuntimeControllerConfig& Config() const { return config_; }
+
+    // Live, scoped override so goto steering can enable continuous in-node
+    // tracking (vs the gated self-edge that orbits) without reinstalling.
+    void SetSameNodeTrackingRate(float rate) {
+        config_.same_node_tracking_rate = rate;
+        if (controller_.has_value()) {
+            controller_->SetSameNodeTrackingRate(rate);
+        }
+    }
     const pmg::ParametricMotionGraph& Graph() const { return graph_; }
     ViewerRuntimeSnapshot Snapshot() const;
 

@@ -708,6 +708,9 @@ void PmgViewerWorkspace::ResetGotoState(const std::string& status) {
     goto_active_ = false;
     goto_desired_parameter_.clear();
     goto_status_ = status;
+    // Restore gated self-edge behavior so slider-drag transition UX is unchanged
+    // when goto is not driving. Tracking is goto-scoped (see PlaceGotoTarget).
+    runtime_.SetSameNodeTrackingRate(0.0f);
 }
 
 void PmgViewerWorkspace::ResetSteeringState(const std::string& status) {
@@ -743,6 +746,11 @@ void PmgViewerWorkspace::PlaceGotoTarget(const glm::vec2& target) {
     goto_desired_parameter_.clear();
     goto_active_ = true;
     playing_ = true;
+    // Enable continuous in-node tracking for the duration of goto: a same-node
+    // steering correction lands every Update instead of once per gait cycle at
+    // the gated self-edge, which is what made the character orbit/lock instead
+    // of converging. 0.1 = audit-measured clean (goto-cycle-latency-20260628.md).
+    runtime_.SetSameNodeTrackingRate(0.1f);
     goto_status_ = "Walking to target.";
 }
 

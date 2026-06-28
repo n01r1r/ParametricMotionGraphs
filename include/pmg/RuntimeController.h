@@ -135,6 +135,14 @@ public:
     std::optional<RuntimeTransitionDiagnostics>
     ActiveTransitionDiagnostics() const;
 
+    // Live override of config_.same_node_tracking_rate. Lets goto steering turn
+    // continuous in-node tracking on/off without reinstalling the controller
+    // (which would reset playback). See
+    // RuntimeControllerConfig::same_node_tracking_rate.
+    void SetSameNodeTrackingRate(float rate) {
+        config_.same_node_tracking_rate = rate;
+    }
+
 private:
     float ClipPhase(const MotionClip& clip, float time_seconds) const;
     Pose SampleWorld(const MotionClip& clip, float time_seconds,
