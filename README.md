@@ -22,6 +22,16 @@ stress fixture); missing domain corners are unsupported; runtime requests are
 projected into authored support and the selected transition's reachable target
 box.
 
+## Bundled data
+
+Only the CMU clips under `BVH/` are redistributed: CMU Graphics Lab Motion
+Capture Database (`mocap.cs.cmu.edu`), subjects 16 and 78, `NN_MM.bvh` =
+subject_trial, free to use for any purpose. The non-CMU clips (the `demo_walk_2d`
+"Center"-skeleton walk anchors plus the rest of the locomotion/action corpus)
+have unconfirmed source/license, so they are git-ignored and **not distributed**.
+Supply them locally to build the specs that reference them (`demo_walk_2d`, the
+jog fixtures, the deprecated topology specs).
+
 ## Module map
 
 | Area | Modules | Role |

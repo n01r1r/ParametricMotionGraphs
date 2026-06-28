@@ -2,6 +2,12 @@
 
 This directory intentionally lists only specs that are currently usable with the available BVH corpus.
 
+**Data note:** only the CMU clips under `BVH/` are bundled. The non-CMU clips
+(the `demo_walk_2d` "Center" anchors, the jog/`*A` action corpus) have
+unconfirmed source/license and are git-ignored — not redistributed. Specs that
+reference them (`demo_walk_2d`, the jog fixtures, the deprecated topology specs)
+need those BVH supplied locally. See Provenance below.
+
 ## Presentation / viewer demos
 
 ### `demo_walk_2d.pmg_spec`
@@ -53,7 +59,9 @@ no fetch step). Same method as `demo_walk_2d`, applied to standard mocap:
 
 Provenance: CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu), subjects
 16 and 78; clip filename `NN_MM.bvh` = subject_trial. Subjects 127/86 were
-evaluated but excluded (127 calibration-loose, 86 data-blocked).
+evaluated but excluded (127 calibration-loose, 86 data-blocked). These eight CMU
+clips are the only BVH redistributed with the repo; the non-CMU corpus is
+git-ignored (unconfirmed provenance) and must be supplied locally.
 
 ## Regression / audit specs
 
