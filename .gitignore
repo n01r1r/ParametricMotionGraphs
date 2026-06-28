@@ -42,6 +42,9 @@ Testing/
 imgui.ini
 distance_grid.csv
 /outputs/
+/out/
+# Manim render output (figures are reproduced from the .py scripts)
+media/
 
 # Backups / scratch
 *.bak
