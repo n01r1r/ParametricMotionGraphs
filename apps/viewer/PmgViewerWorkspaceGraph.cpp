@@ -25,9 +25,9 @@ namespace {
 
 constexpr float kEpsilon = 1.0e-6f;
 constexpr float kGraphCanvasHeight = 300.0f;
-constexpr float kGraphNodeRadius = 40.0f;
+constexpr float kGraphNodeRadius = 26.0f;
 constexpr float kAuthoringCanvasHeight = 240.0f;
-constexpr float kAuthoringNodeRadius = 32.0f;
+constexpr float kAuthoringNodeRadius = 22.0f;
 constexpr float kAuthoringConnectorRadius = 7.0f;
 
 // Ring layout for >2 nodes. The old fixed radius was clamped by canvas height, so
@@ -47,15 +47,16 @@ RingLayout ComputeRingLayout(int node_count, float node_radius,
     if (node_count <= 2) {
         return layout;  // 2-node uses a fixed horizontal layout; no ring.
     }
-    // Center-to-center gap that leaves ~0.7*radius of clear space between disks
-    // for the edge labels that sit between them.
-    const float min_center_distance = 2.7f * node_radius;
+    // Center-to-center gap big enough that neighbouring node disks, their
+    // self-loop arcs (which bulge ~1.8*radius outward) and the bidirectional
+    // edge arrows + labels between them all stay clear. ~5.5*node_radius.
+    const float min_center_distance = 5.5f * node_radius;
     const float chord =
         2.0f * std::sin(pmg::kPi / static_cast<float>(node_count));
     layout.radius =
         std::max(0.22f * base_height, min_center_distance / chord);
     layout.height =
-        std::max(base_height, 2.0f * layout.radius + 3.0f * node_radius);
+        std::max(base_height, 2.0f * layout.radius + 3.5f * node_radius);
     return layout;
 }
 
@@ -706,7 +707,8 @@ void PmgViewerWorkspace::DrawAuthoredGraphCanvas() {
         node_positions[1] =
             ImVec2(origin.x + 0.72f * width, canvas_center.y);
     } else if (node_count > 2) {
-        const float radius = std::min(0.42f * width, layout.radius);
+        const float radius =
+            std::min(0.5f * width - kAuthoringNodeRadius, layout.radius);
         for (int node_index = 0; node_index < node_count; ++node_index) {
             const float angle =
                 -0.5f * pmg::kPi +
@@ -911,7 +913,8 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
         node_positions[1] = ImVec2(
             origin.x + 0.72f * width, canvas_center.y);
     } else if (runtime_.Graph().NumNodes() > 2) {
-        const float radius = std::min(0.42f * width, layout.radius);
+        const float radius =
+            std::min(0.5f * width - kGraphNodeRadius, layout.radius);
         for (int node_index = 0; node_index < runtime_.Graph().NumNodes(); ++node_index) {
             const float angle =
                 -0.5f * pmg::kPi +
