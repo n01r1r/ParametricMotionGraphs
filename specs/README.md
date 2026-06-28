@@ -2,8 +2,9 @@
 
 This directory lists the specs shipped with the viewer-only distribution. Each
 is usable with the BVH clips tracked under `BVH/`. Regression fixtures, audit
-specs, and the full corpus live on the full-project branches (`main` /
-`dev/core`).
+specs, and the full corpus live on the development branches (`dev/core` and
+the other `dev/*` branches). Clip sources are documented under "Data
+provenance" in the top-level `README.md`.
 
 ## Primary demo
 
@@ -34,6 +35,10 @@ assumes. The travel-speed axis tops out at the authored `walkStraightTwiceAsFast
 anchor (~0.75); the old `[0, 1]` jog corner is intentionally excluded. Per the
 paper, jog belongs in a separate node connected by a transition edge, not blended
 into the walk space.
+
+Source: the four anchors (`walkCurve`, `walkMoreCurve`, `walkTightCurve`,
+`walkStraightTwiceAsFast`) are the bundled "Center"-skeleton locomotion clips
+(BVH `ROOT Center`) shipped with the project. See `README.md` > Data provenance.
 
 ## CMU mocap demos
 

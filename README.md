@@ -3,8 +3,8 @@
 Minimal viewer-only build of the BVH-based Parametric Motion Graph (PMG)
 system: the `pmg_core` library plus the real-time OpenGL viewer. The CLI,
 test suite, experiments, audit docs, and paper source are removed on this
-branch to keep the tree small — they live on the full-project branches
-(`main` / `dev/core`).
+branch to keep the tree small — they live on the development branches
+(`dev/core` and the other `dev/*` branches).
 
 This is a PMG-core **demo**, not a paper reproduction. It implements the core
 PMG pipeline on a single-family, single-node walking motion space: sampled
@@ -64,6 +64,21 @@ Curated CMU mocap demos use clips tracked directly under `BVH/` (subjects 16 and
 78, `NN_MM.bvh` = subject_trial; CMU Graphics Lab MoCap Database):
 `specs/cmu_walk_1d.pmg_spec` (1-D walking-speed blend), `cmu_walkrun_1d`,
 `cmu_gait_graph` (subj16 walk/run), `cmu78_gait_graph` (subj78 walk/run).
+
+## Data provenance
+
+Every BVH clip shipped on this branch comes from one of two sources:
+
+**CMU Graphics Lab Motion Capture Database** (`mocap.cs.cmu.edu`) — the eight
+`NN_MM.bvh` clips, where `NN` = subject and `MM` = trial. Subject 16: `16_21`,
+`16_31`, `16_36`, `16_45`. Subject 78: `78_10`, `78_27`, `78_29`, `78_30`. The
+CMU database is free to use for any purpose.
+
+**"Center" locomotion corpus** — the four `walk_2d` anchors `walkCurve`,
+`walkMoreCurve`, `walkTightCurve`, `walkStraightTwiceAsFast`. They share the
+`Center`-rooted skeleton (BVH `ROOT Center`) and ship as the project's bundled
+demonstration clips (present since the initial commit). These drive the
+single-family `demo_walk_2d` parametric walk space.
 
 ## Known limitations
 
