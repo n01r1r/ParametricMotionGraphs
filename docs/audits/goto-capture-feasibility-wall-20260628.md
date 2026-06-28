@@ -114,6 +114,32 @@ algorithm improvement** — it is matching the success predicate to the dynamics
 (`tolerance ≳ r_min`), not paper-faithfulness. Documented here so a later tolerance
 bump is not mistaken for a steering fix.
 
+### Wired for recording (2026-06-28)
+
+Viewer `goto_tolerance_` was `2.0` — *below* `r_min`, so viewer goto could never
+fire "Target reached" and orbited forever on camera. Bumped to `6.0`
+(`PmgViewerWorkspace.h`, comment points back here). CLI default
+`arrival_speed_distance = 18` is inherited by the viewer, so capture matches the
+CLI sweep below.
+
+CLI verification at `--tolerance 6 --arrival-distance 16` (all PASS, `min_distance`
+clusters 5.6–5.95 = the `r_min` floor):
+
+| target    | result | min_distance | reached_at |
+| --------- | :----: | -----------: | ---------: |
+| (12, 8)   |  PASS  |         5.83 |     4.9 s  |
+| (14, 10)  |  PASS  |         5.62 |     5.2 s  |
+| (14, -10) |  PASS  |         5.93 |     5.3 s  |
+| (20, -14) |  PASS  |         5.84 |     5.7 s  |
+| (16, 12)  |  PASS  |         5.91 |    14.5 s  |
+| (18, 0)   |  PASS  |         5.83 |    28.4 s  |
+| (22, -8)  |  PASS  |         5.83 |    61.1 s  |
+
+For video use the fast forward/side set — `(12,8)`, `(14,10)`, `(14,-10)`,
+`(20,-14)` (all ≤ 5.7 s, direct approach). Skip `(18,0)` / `(22,-8)`: they capture
+but orbit 25–60 s first, which reads as failure on camera. `(-14,11)` still fails
+(swing-around, §"Separate, larger failure") — do not target it.
+
 ## Separate, larger failure: swing-around targets
 
 `target(-14, 11)` misses at `min_distance = 10.43` — far above the `r_min` wall, so
