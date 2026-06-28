@@ -42,6 +42,15 @@ runtime and the viewer](docs/figures/slide11_architecture_centered.png)
 Headers live in `include/pmg/`, implementations in `src/`, the viewer in
 `apps/viewer/`.
 
+## Prerequisites
+
+- **CMake ≥ 3.20** and a **C++20** compiler. Verified with **MSVC 2022** on
+  Windows 10/11 (the commands below are PowerShell). Other C++20 toolchains are
+  untested; the MinGW GCC bundled with some setups is too old to build.
+- A GPU and driver with **OpenGL 3.3 core profile** support (the viewer context).
+- **Network access on the first configure** — CMake `FetchContent` downloads the
+  windowing / GL / UI libraries, then caches them under `build/_deps`.
+
 ## Quick start
 
 ```powershell
@@ -61,6 +70,19 @@ Once the window is open:
   parameter → trajectory fan.
 - **Right-click the floor** to drop a goto target; the character steers toward it.
 - **WASD** flies the camera, **left-drag** orbits, **scroll** zooms.
+
+## Dependencies
+
+The viewer's third-party libraries are pulled automatically by CMake
+`FetchContent` at configure time — nothing to install by hand. The `pmg_core`
+library itself has no external dependencies; only the viewer pulls these:
+
+| Library | Version | Purpose | License |
+| --- | --- | --- | --- |
+| [GLFW](https://github.com/glfw/glfw) | 3.4 | window, input, GL context | zlib/libpng |
+| [GLEW](https://github.com/Perlmint/glew-cmake) | 2.3.1 | OpenGL extension loader | BSD / MIT |
+| [GLM](https://github.com/g-truc/glm) | 1.0.1 | vector / matrix math | MIT |
+| [Dear ImGui](https://github.com/ocornut/imgui) | 1.92.8-docking | immediate-mode UI (docking) | MIT |
 
 ## What the system produces
 
@@ -126,3 +148,10 @@ single-family `demo_walk_2d` parametric walk space.
 - Five-frame blending is the demo default.
 - Reader compatibility covers V2–V13; writer emits V13 only.
 - Viewer requires the OpenGL dependencies pulled by `PMG_BUILD_VIEWER`.
+
+## License
+
+Released under the **MIT License** — see [LICENSE](LICENSE) (© 2026 Dongyeob
+Han). The bundled dependencies listed above keep their own (permissive)
+licenses, and the CMU Graphics Lab Motion Capture Database clips remain under the
+CMU terms (free to use for any purpose).
