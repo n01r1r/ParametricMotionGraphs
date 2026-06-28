@@ -1,3 +1,7 @@
+# NOTE: the four ../BVH/walk*.bvh "Center" clips below are NOT bundled with the
+# public repo -- unconfirmed provenance/license, so they are git-ignored. Supply
+# them locally to build this spec, or use the CMU specs in this directory.
+#
 # Canonical walk_2d viewer/CTest demo: single-family sparse 2-D locomotion space.
 # Four logically-similar walking anchors (no cross-family jog), so every
 # within-hull blend interpolates similar poses -- the parametric-synthesis
