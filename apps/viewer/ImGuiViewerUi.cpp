@@ -584,7 +584,7 @@ std::vector<ViewerUiCommand> ImGuiViewerUi::Build(
             BuildMotionSpace(state, commands);
             ImGui::EndTabItem();
         }
-        build_legacy_tabs();  // ponytail: migrate remaining tabs incrementally.
+        build_legacy_tabs();  // migrate remaining tabs incrementally.
         ImGui::EndTabBar();
     }
     ImGui::SeparatorText("Display");
