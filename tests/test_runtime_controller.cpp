@@ -5,6 +5,7 @@
 #include "pmg/RuntimeController.h"
 #include "pmg/Skeleton.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <vector>
@@ -647,6 +648,50 @@ int main() {
             }
             assert(transitioned);
         }
+    }
+
+    // Continuous in-node parameter tracking (goto steering P1): with a positive
+    // tracking rate a same-node parameter request moves current_parameter_ every
+    // Update -- not once per cycle via the gated self-edge -- so the parameter
+    // converges well inside one cycle, no transition completes, and the pose
+    // still advances smoothly (no splice teleport).
+    {
+        pmg::RuntimeControllerConfig track_config = walk_config;
+        track_config.same_node_tracking_rate = 0.3f;
+        pmg::RuntimeController track_controller(graph, alignment, track_config);
+        track_controller.Start(node, {0.0f}, kFramesPerSecond);
+
+        pmg::RuntimeControlRequest track_request;
+        track_request.desired_node = node;
+        track_request.desired_parameter = {1.0f};
+
+        const float start_param = track_controller.CurrentParameter()[0];
+        // Fewer Updates than one cycle: the once-per-cycle gated self-edge could
+        // not have applied a correction yet, but tracking has.
+        for (int step = 0; step < kRuntimeFrameCount / 2; ++step) {
+            track_controller.Update(delta_seconds, track_request);
+        }
+        const float tracked_param = track_controller.CurrentParameter()[0];
+        assert(track_controller.CompletedTransitions() == 0);  // no gated self-edge
+        assert(!track_controller.IsTransitioning());
+        assert(tracked_param > start_param + 0.3f);  // moved well toward 1.0
+        assert(tracked_param <= 1.0f + 1.0e-4f);      // never overshoots the request
+
+        pmg::Vec3 prev = track_controller.CurrentPose().root_position;
+        float max_step = 0.0f;
+        float mean_step = 0.0f;
+        for (int step = 0; step < kRuntimeFrameCount; ++step) {
+            track_controller.Update(delta_seconds, track_request);
+            const pmg::Vec3 pos = track_controller.CurrentPose().root_position;
+            const float dx = pos.x - prev.x;
+            const float dz = pos.z - prev.z;
+            max_step = std::max(max_step, std::sqrt(dx * dx + dz * dz));
+            mean_step += std::sqrt(dx * dx + dz * dz);
+            prev = pos;
+        }
+        mean_step /= static_cast<float>(kRuntimeFrameCount);
+        assert(mean_step > 1.0e-4f);          // actually moving
+        assert(max_step < 6.0f * mean_step);  // no transition-pop teleport
     }
 
     return 0;

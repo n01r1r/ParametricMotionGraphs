@@ -52,6 +52,19 @@ struct RuntimeControllerConfig {
     // RuntimeControllerConfigFromArtifact. Empty or out-of-range = not cyclic, so
     // kWrapCyclicSelfEdges only wraps nodes explicitly known to be cyclic.
     std::vector<bool> cyclic_nodes;
+
+    // Continuous in-node parameter tracking for goto steering. When > 0, a
+    // same-node parameter request is NOT routed through the phase-gated
+    // self-edge transition (which re-aligns only ~once per cycle, so a steering
+    // correction lands a full cycle late and the character orbits the target).
+    // Instead current_parameter_ lerps toward the request by this fraction each
+    // Update and the current clip is regenerated at the new parameter,
+    // preserving phase -- a continuous re-blend with no splice and no
+    // transition pop. 0 = use the gated self-edge (original behavior). Typical
+    // 0.1-0.3; higher tracks faster but steps the pose harder per frame.
+    // ponytail: regenerates the clip per Update while tracking; fine for the
+    // single-node goto demo, revisit if a hot path tracks large blends.
+    float same_node_tracking_rate = 0.0f;
 };
 
 // Read-only snapshot of the transition currently being blended.
@@ -130,6 +143,12 @@ private:
     void TryScheduleTransition(const RuntimeControlRequest& request,
                                float previous_phase,
                                float phase_advance);
+
+    // Continuous in-node parameter tracking. Lerps current_parameter_ toward
+    // target_parameter by config_.same_node_tracking_rate and regenerates the
+    // current clip at the new parameter, preserving phase. No transition, no
+    // blend. See RuntimeControllerConfig::same_node_tracking_rate.
+    void TrackSameNodeParameter(const ParameterVector& target_parameter);
 
     bool ShouldWrapTargetPreRoll(const PmgEdge& edge) const;
 

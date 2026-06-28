@@ -78,3 +78,46 @@ only — **no `turn_rate` axis** (`spanned_axes 0`). With no heading axis the
 steering has nothing to command; every request projects to a single point, so
 goto cannot steer there at all. Style-A is a straight-line style-switch demo;
 goto demos need a `turn_rate` node like `demo_walk_2d`.
+
+## Resolution (2026-06-28, implemented + measured)
+
+Both candidate levers for cause 2 were built behind opt-in config (default 0 =
+original behavior, all 50 tests still green) and measured on `demo_walk_2d` via
+`pmg_cli --goto`:
+
+- **Tried first — widen the gate (option 3):** new same-node gate phase
+  tolerance. Reach improved a lot on behind targets (min_dist 22.3 → ~6) but
+  `pop_ratio` ~tripled (1.5 → 3–5, 100–320 transitions of off-gate blend churn)
+  and the behind targets still missed `tol 4`. Off-gate firing pops because the
+  blend starts away from the stored source reference frame. **Reverted** — bad
+  tradeoff, not faithful.
+- **Kept — continuous in-node tracking (option 1, the fix):**
+  `RuntimeControllerConfig::same_node_tracking_rate` (CLI `--same-node-track R`).
+  A same-node request lerps `current_parameter_` toward the projected target by
+  `R` each `Update` and regenerates the clip preserving phase
+  (`RuntimeController::TrackSameNodeParameter`), bypassing the gated self-edge
+  entirely. No splice, no alignment seam → no transition pop.
+
+Measured (rate 0.1, `--tolerance 4`):
+
+| target | baseline | tracking 0.1 |
+| --- | --- | --- |
+| (0,-40) | reach @80s, pop 1.87 | reach, pop 2.31, **0 transitions** |
+| (-30,-30) | **FAIL** (min 11.7) | **reach** 3.95, **pop 1.33** |
+| (-35,-10) | FAIL (min 11.7) | min 5.8 — still missed |
+| (0,40) | reach, pop 1.79 | reach, **pop 1.49** |
+| (30,0) | reach, pop 1.81 | reach, pop 2.04 |
+
+Tracking reaches behind targets baseline misses, with `transitions=0` (no
+self-edge churn) and pop comparable-or-better. The `(-35,-10)` residual is the
+min-radius geometry near the target (cause 1 / the Dubins floor), not latency —
+that one needs the **lookahead** lever, not tracking. Test:
+`tests/test_runtime_controller.cpp` asserts a same-node request converges inside
+one cycle with zero completed transitions and no pose teleport.
+
+**Remaining (viewer wiring, needs GUI verify):** the viewer still installs the
+runtime with `same_node_tracking_rate = 0`, so the goto demo there still orbits.
+Wire it scoped to goto only — add a setter so tracking turns on when
+`goto_active_` flips (lines ~708/744, `PmgViewerWorkspace.cpp`) and off
+otherwise — rather than baking it into `StartGraphRuntimeController` for all
+graph playback (that would change the verified slider-drag transition UX).

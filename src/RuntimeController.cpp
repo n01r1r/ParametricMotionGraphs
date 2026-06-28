@@ -322,6 +322,25 @@ bool RuntimeController::ShouldWrapTargetPreRoll(const PmgEdge& edge) const {
     return false;
 }
 
+void RuntimeController::TrackSameNodeParameter(
+    const ParameterVector& target_parameter) {
+    const float rate = std::clamp(config_.same_node_tracking_rate, 0.0f, 1.0f);
+    // The parametric space is continuous in the parameter, so lerping toward
+    // the request and regenerating the clip is a continuous re-blend: the pose
+    // steps by ~rate * parameter_gap, with no splice and no alignment seam (a
+    // gated self-edge can only re-align once per cycle, hence the orbit).
+    const float phase = CurrentPhase();
+    for (std::size_t axis = 0; axis < current_parameter_.size(); ++axis) {
+        current_parameter_[axis] +=
+            rate * (target_parameter[axis] - current_parameter_[axis]);
+    }
+    current_clip_ = graph_.Node(current_node_).motion_space.GenerateClip(
+        current_parameter_, frames_per_second_);
+    // Preserve phase across the parameter-dependent duration change so the gait
+    // does not jump in time when the cycle length shifts with the parameter.
+    current_time_seconds_ = phase * current_clip_.DurationSeconds();
+}
+
 void RuntimeController::TryScheduleTransition(
     const RuntimeControlRequest& request,
     float previous_phase,
@@ -345,6 +364,10 @@ void RuntimeController::TryScheduleTransition(
                       request.desired_parameter);
         if (SquaredDistance(effective_target_parameter, current_parameter_) <
             kSmallEpsilon * kSmallEpsilon) {
+            return;
+        }
+        if (config_.same_node_tracking_rate > 0.0f) {
+            TrackSameNodeParameter(effective_target_parameter);
             return;
         }
     }

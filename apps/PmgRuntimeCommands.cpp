@@ -843,6 +843,9 @@ struct GotoOptions {
     float max_pop_ratio = -1.0f;
     // Override the steering arrival-ease distance; negative = use config default.
     float arrival_distance = -1.0f;
+    // Continuous in-node parameter tracking rate (lerp fraction per Update);
+    // bypasses the gated self-edge entirely. negative = default 0 (gated).
+    float same_node_tracking_rate = -1.0f;
     // Report stance foot-slide of the streamed path, before/after a post-process
     // foot lock. Evidence only; nothing is rendered or saved.
     bool report_foot_skate = false;
@@ -867,8 +870,12 @@ int GotoCommand(const GotoOptions& options) {
         start_parameter[axis] =
             0.5f * (parameter_min[axis] + parameter_max[axis]);
     }
-    const pmg::RuntimeControllerConfig runtime_config =
+    pmg::RuntimeControllerConfig runtime_config =
         pmg::RuntimeControllerConfigFromArtifact(artifact);
+    if (options.same_node_tracking_rate >= 0.0f) {
+        runtime_config.same_node_tracking_rate =
+            options.same_node_tracking_rate;
+    }
     pmg::GoalDirectedLocomotionConfig steering_config;
     steering_config.runtime = runtime_config;
     if (options.arrival_distance >= 0.0f) {
@@ -1160,6 +1167,9 @@ GotoOptions ParseGotoOptions(int argc, char** argv) {
             options.max_pop_ratio = std::stof(require_value("--max-pop-ratio"));
         } else if (option == "--arrival-distance") {
             options.arrival_distance = std::stof(require_value("--arrival-distance"));
+        } else if (option == "--same-node-track") {
+            options.same_node_tracking_rate =
+                std::stof(require_value("--same-node-track"));
         } else if (option == "--facing-degrees") {
             options.final_facing_degrees =
                 std::stof(require_value("--facing-degrees"));
