@@ -115,9 +115,10 @@ that one needs the **lookahead** lever, not tracking. Test:
 `tests/test_runtime_controller.cpp` asserts a same-node request converges inside
 one cycle with zero completed transitions and no pose teleport.
 
-**Remaining (viewer wiring, needs GUI verify):** the viewer still installs the
-runtime with `same_node_tracking_rate = 0`, so the goto demo there still orbits.
-Wire it scoped to goto only — add a setter so tracking turns on when
-`goto_active_` flips (lines ~708/744, `PmgViewerWorkspace.cpp`) and off
-otherwise — rather than baking it into `StartGraphRuntimeController` for all
-graph playback (that would change the verified slider-drag transition UX).
+**Viewer wiring — DONE (`4c2520c`, needs GUI verify):** added live
+`RuntimeController::SetSameNodeTrackingRate` (no reinstall → no playback reset)
++ `ViewerRuntimeModule` passthrough; `PmgViewerWorkspace` turns tracking on
+(rate 0.1) in `PlaceGotoTarget` and off in `ResetGotoState`, scoped to
+`goto_active_` so non-goto slider-drag UX is unchanged. Not baked into
+`StartGraphRuntimeController`. 50/50 green. Pre-fix the viewer ran
+`same_node_tracking_rate = 0` and orbited/locked on every goto target.
