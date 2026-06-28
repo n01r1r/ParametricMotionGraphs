@@ -22,7 +22,7 @@ parameter_metrics walk_A travel_speed
 parameter_calibration walk_A 9
 parameter_support walk_A simplex
 example walk_A 11.2 ../BVH/WalkLoopA.bvh start_frame 0 end_frame 30
-example walk_A 11.0 ../BVH/WalkLoopA.bvh start_frame 1 end_frame 30
+example walk_A 11.0 ../BVH/WalkLoopA.bvh start_frame 0 end_frame 30
 
 node strut_A 1
 registration strut_A LeftAnkle - 3 0

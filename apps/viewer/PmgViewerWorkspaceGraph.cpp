@@ -30,6 +30,35 @@ constexpr float kAuthoringCanvasHeight = 240.0f;
 constexpr float kAuthoringNodeRadius = 32.0f;
 constexpr float kAuthoringConnectorRadius = 7.0f;
 
+// Ring layout for >2 nodes. The old fixed radius was clamped by canvas height, so
+// 3+ nodes (plus their self-loop arcs and labels) overlapped. Instead derive the
+// radius from the node count so adjacent node disks always keep a readable gap,
+// and grow the canvas height to fit that radius. Width is assumed ample (full
+// content region), so only the height needs to grow.
+struct RingLayout {
+    float radius = 0.0f;
+    float height = 0.0f;
+};
+
+RingLayout ComputeRingLayout(int node_count, float node_radius,
+                             float base_height) {
+    RingLayout layout;
+    layout.height = base_height;
+    if (node_count <= 2) {
+        return layout;  // 2-node uses a fixed horizontal layout; no ring.
+    }
+    // Center-to-center gap that leaves ~0.7*radius of clear space between disks
+    // for the edge labels that sit between them.
+    const float min_center_distance = 2.7f * node_radius;
+    const float chord =
+        2.0f * std::sin(pmg::kPi / static_cast<float>(node_count));
+    layout.radius =
+        std::max(0.22f * base_height, min_center_distance / chord);
+    layout.height =
+        std::max(base_height, 2.0f * layout.radius + 3.0f * node_radius);
+    return layout;
+}
+
 void DrawPhaseMarker(ImDrawList* draw_list, float phase, float left, float top,
                      float width, float height, ImU32 color) {
     const float x = left + std::clamp(phase, 0.0f, 1.0f) * width;
@@ -657,9 +686,11 @@ void PmgViewerWorkspace::DrawAuthoredGraphCanvas() {
 
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float width = std::max(260.0f, ImGui::GetContentRegionAvail().x);
-    const ImVec2 canvas_size(width, kAuthoringCanvasHeight);
+    const RingLayout layout = ComputeRingLayout(
+        node_count, kAuthoringNodeRadius, kAuthoringCanvasHeight);
+    const ImVec2 canvas_size(width, layout.height);
     const ImVec2 canvas_center(
-        origin.x + 0.5f * width, origin.y + 0.5f * kAuthoringCanvasHeight);
+        origin.x + 0.5f * width, origin.y + 0.5f * layout.height);
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
     draw_list->AddRectFilled(
@@ -675,8 +706,7 @@ void PmgViewerWorkspace::DrawAuthoredGraphCanvas() {
         node_positions[1] =
             ImVec2(origin.x + 0.72f * width, canvas_center.y);
     } else if (node_count > 2) {
-        const float radius = std::min(
-            0.34f * width, 0.26f * kAuthoringCanvasHeight);
+        const float radius = std::min(0.42f * width, layout.radius);
         for (int node_index = 0; node_index < node_count; ++node_index) {
             const float angle =
                 -0.5f * pmg::kPi +
@@ -860,10 +890,12 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
 
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float width = std::max(260.0f, ImGui::GetContentRegionAvail().x);
-    const ImVec2 canvas_size(width, kGraphCanvasHeight);
+    const RingLayout layout = ComputeRingLayout(
+        runtime_.Graph().NumNodes(), kGraphNodeRadius, kGraphCanvasHeight);
+    const ImVec2 canvas_size(width, layout.height);
     const ImVec2 canvas_center(
         origin.x + 0.5f * width,
-        origin.y + 0.47f * kGraphCanvasHeight);
+        origin.y + 0.47f * layout.height);
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
     draw_list->AddRectFilled(
@@ -879,8 +911,7 @@ void PmgViewerWorkspace::DrawGraphCanvas() {
         node_positions[1] = ImVec2(
             origin.x + 0.72f * width, canvas_center.y);
     } else if (runtime_.Graph().NumNodes() > 2) {
-        const float radius = std::min(
-            0.34f * width, 0.24f * kGraphCanvasHeight);
+        const float radius = std::min(0.42f * width, layout.radius);
         for (int node_index = 0; node_index < runtime_.Graph().NumNodes(); ++node_index) {
             const float angle =
                 -0.5f * pmg::kPi +
