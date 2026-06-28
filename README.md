@@ -3,8 +3,8 @@
 Minimal viewer-only build of the BVH-based Parametric Motion Graph (PMG)
 system: the `pmg_core` library plus the real-time OpenGL viewer. The CLI,
 test suite, experiments, audit docs, and paper source are removed on this
-branch to keep the tree small — they live on the development branches
-(`dev/core` and the other `dev/*` branches).
+branch to keep the tree small — they live on the `dev/core` development
+branch.
 
 This is a PMG-core **demo**, not a paper reproduction. It implements the core
 PMG pipeline on a single-family, single-node walking motion space: sampled
