@@ -1,45 +1,35 @@
-# ParametricMotionGraphs — Viewer-only distribution
+# Parametric Motion Graphs — Viewer Demo
 
-Minimal viewer-only build of the BVH-based Parametric Motion Graph (PMG)
-system: the `pmg_core` library plus the real-time OpenGL viewer. The CLI,
-test suite, experiments, audit docs, and paper source are removed on this
-branch to keep the tree small — they live on the `dev/core` development
-branch.
+Welcome. This is a small, **runnable** demo of a BVH-based **Parametric Motion
+Graph (PMG)** system: a real-time OpenGL viewer built on the `pmg_core` library.
+Load a motion spec, then drive a character with sliders and a click-to-go target
+while the graph blends and stitches motion clips together live.
 
-This is a PMG-core **demo**, not a paper reproduction. It implements the core
-PMG pipeline on a single-family, single-node walking motion space: sampled
-transition-region construction, a Kovar-style transition metric, runtime
-lookup, cyclic-window cleanup, and target-directed steering.
+This branch is the **viewer-only distribution** — the `pmg_core` library plus the
+viewer. The CLI, test suite, audit docs, and paper source are kept off this
+branch to keep the tree small; they live on the `dev/core` development branch.
 
-## Concept overview
+> It is a faithful **PMG-core demo**, not a full paper reproduction. It
+> implements the core pipeline on single-family and small multi-node locomotion
+> spaces: sampled transition-region construction, a Kovar-style transition
+> metric, runtime lookup, cyclic-window cleanup, and target-directed steering.
+
+## See the idea in ten seconds
 
 ![PMG concept scenes: pipeline, a node as a parameterized motion space, and edge
 sampling](docs/figures/concept_scenes.gif)
 
-Three explanatory scenes (intuition only — quantitative evidence lives on the
-full-project branches): the PMG **pipeline** (motion examples → motion-space
-node → quality-gated transition graph → generated stream), a **node** as a
-parameterized motion space with a limited convex support region (`turn_rate`
-primary, `travel_speed` a single-example secondary axis), and **edge sampling**
-(a source × target candidate matrix scored by a Kovar-style distance, accepted
-on enough good samples).
+Three explanatory scenes (intuition only): the PMG **pipeline** (motion examples
+→ motion-space node → quality-gated transition graph → generated stream), a
+**node** as a parameterized motion space with a limited convex support region
+(`turn_rate` primary, `travel_speed` a single-example secondary axis), and
+**edge sampling** (a source × target candidate matrix scored by a Kovar-style
+distance, accepted on enough good samples).
 
-## Build and run
+## How it fits together
 
-```powershell
-cmake -S . -B build              # PMG_BUILD_VIEWER defaults ON here
-cmake --build build --config Release --target pmg_viewer
-.\build\Release\pmg_viewer.exe specs\demo_walk_2d.pmg_spec
-```
-
-First configure fetches GLFW / GLEW / GLM / ImGui via CMake `FetchContent`
-(network required once; cached in `build/_deps` afterwards).
-
-In the viewer: set `Mode = Parametric blend` and `Foot-lock (IK) = ON`, then
-drive the curvature / speed sliders. `Param-sweep paths = ON` with a top-down
-camera shows the parameter→trajectory fan.
-
-## What's included
+![Implementation structure: BVH data flows through the offline build into the
+runtime and the viewer](docs/figures/slide11_architecture_centered.png)
 
 | Area | Modules | Role |
 | --- | --- | --- |
@@ -49,16 +39,64 @@ camera shows the parameter→trajectory fan.
 | Input/persistence | `GraphSpec`, `GraphIo` | spec adapter; V2–V13 artifact compatibility |
 | Viewer | `ViewerHost`, `PmgViewerWorkspace`, `ViewerRuntimeModule` | render host, PMG UI, runtime adapter |
 
-Headers in `include/pmg/`, implementations in `src/`, viewer in `apps/viewer/`.
+Headers live in `include/pmg/`, implementations in `src/`, the viewer in
+`apps/viewer/`.
 
-## Demo space
+## Quick start
+
+```powershell
+cmake -S . -B build              # PMG_BUILD_VIEWER defaults ON here
+cmake --build build --config Release --target pmg_viewer
+.\build\Release\pmg_viewer.exe specs\demo_walk_2d.pmg_spec
+```
+
+The first configure fetches GLFW / GLEW / GLM / ImGui via CMake `FetchContent`
+(network required once; cached in `build/_deps` afterwards).
+
+Once the window is open:
+
+- Set **Mode = Parametric blend** and **Foot-lock (IK) = ON**, then drag the
+  **curvature / speed** sliders to steer the character.
+- Turn on **Param-sweep paths** and tilt to a top-down camera to see the
+  parameter → trajectory fan.
+- **Right-click the floor** to drop a goto target; the character steers toward it.
+- **WASD** flies the camera, **left-drag** orbits, **scroll** zooms.
+
+## What the system produces
+
+The bundled CMU gait-graph specs (`cmu_gait_graph`, `cmu78_gait_graph`) build a
+small walk/run graph and let the runtime traverse it. The figures below are the
+kind of evidence those builds produce (the regeneration scripts live on the
+`dev/core` branch, where the CLI ships).
+
+**The transition metric separates good cuts from bad ones.** Same-gait
+transitions (walk↔walk, run↔run) cost far less than cross-gait (walk↔run) — note
+the log scale and the ~5× gap in medians:
+
+![Transition cost within-gait vs cross-gait for subject 16: median 378 vs 1935
+on a log scale](docs/figures/transition_distance_within_vs_cross.png)
+
+**The build gate accepts good edges and rejects bad ones.** Within-gait and
+walk→run pairs pass with mostly "good" samples; the awkward run→walk pair has
+4 edges rejected:
+
+![Edge acceptance by gait pair for subject 16: walk→walk, run→run and walk→run
+pass; run→walk has 4 edges rejected](docs/figures/edge_acceptance_subj16.png)
+
+**The runtime emits one continuous stream.** A random walk over the walk/run
+graph produces a single connected root trajectory, switching between nodes
+through short transition windows:
+
+![Synthesized root trajectory for subject 78: walk (blue) and run (orange)
+segments joined by 104 transition frames](docs/figures/root_trajectory_subj78.png)
+
+## Demo spaces
 
 `specs/demo_walk_2d.pmg_spec` defines one 2-D locomotion space (axis 0 =
 turn_rate, axis 1 = travel_speed) over four authored walking anchors
 (`walkMoreCurve`, `walkCurve`, `walkTightCurve`, `walkStraightTwiceAsFast`),
-triangulated support, one self-edge. Cross-family jog is intentionally
-excluded. Missing domain corners are projected into authored support, not
-synthesized.
+triangulated support, one self-edge. Cross-family jog is intentionally excluded.
+Missing domain corners are projected into authored support, not synthesized.
 
 Curated CMU mocap demos use clips tracked directly under `BVH/` (subjects 16 and
 78, `NN_MM.bvh` = subject_trial; CMU Graphics Lab MoCap Database):
