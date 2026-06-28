@@ -56,20 +56,23 @@ Headers live in `include/pmg/`, implementations in `src/`, the viewer in
 ```powershell
 cmake -S . -B build              # PMG_BUILD_VIEWER defaults ON here
 cmake --build build --config Release --target pmg_viewer
-.\build\Release\pmg_viewer.exe specs\demo_walk_2d.pmg_spec
+.\build\Release\pmg_viewer.exe specs\cmu_gait_graph.pmg_spec
 ```
 
 The first configure fetches GLFW / GLEW / GLM / ImGui via CMake `FetchContent`
 (network required once; cached in `build/_deps` afterwards).
 
-Once the window is open:
+Once the window is open (the bundled `cmu_gait_graph` walk/run space):
 
-- Set **Mode = Parametric blend** and **Foot-lock (IK) = ON**, then drag the
-  **curvature / speed** sliders to steer the character.
-- Turn on **Param-sweep paths** and tilt to a top-down camera to see the
-  parameter → trajectory fan.
+- Keep **Mode = Parametric blend** and **Foot-lock (IK) = ON**.
+- Drag the **travel-speed** slider to move along the speed axis; raising it past
+  the walk node crosses the walk→run transition edge.
 - **Right-click the floor** to drop a goto target; the character steers toward it.
 - **WASD** flies the camera, **left-drag** orbits, **scroll** zooms.
+
+The 2-D steerable space (`demo_walk_2d`, with **curvature** + **speed** sliders
+and **Param-sweep paths**) uses four "Center" walk clips that are **not bundled**
+— see [Data provenance](#data-provenance) to supply them locally.
 
 ## Dependencies
 
@@ -114,31 +117,35 @@ segments joined by 104 transition frames](docs/figures/root_trajectory_subj78.pn
 
 ## Demo spaces
 
-`specs/demo_walk_2d.pmg_spec` defines one 2-D locomotion space (axis 0 =
-turn_rate, axis 1 = travel_speed) over four authored walking anchors
-(`walkMoreCurve`, `walkCurve`, `walkTightCurve`, `walkStraightTwiceAsFast`),
-triangulated support, one self-edge. Cross-family jog is intentionally excluded.
-Missing domain corners are projected into authored support, not synthesized.
+**Bundled (run out of the box).** Curated CMU mocap demos use clips tracked
+directly under `BVH/` (subjects 16 and 78, `NN_MM.bvh` = subject_trial; CMU
+Graphics Lab MoCap Database): `specs/cmu_walk_1d.pmg_spec` (1-D walking-speed
+blend), `cmu_walkrun_1d`, `cmu_gait_graph` (subj16 walk/run), `cmu78_gait_graph`
+(subj78 walk/run).
 
-Curated CMU mocap demos use clips tracked directly under `BVH/` (subjects 16 and
-78, `NN_MM.bvh` = subject_trial; CMU Graphics Lab MoCap Database):
-`specs/cmu_walk_1d.pmg_spec` (1-D walking-speed blend), `cmu_walkrun_1d`,
-`cmu_gait_graph` (subj16 walk/run), `cmu78_gait_graph` (subj78 walk/run).
+**Clips supplied separately.** `specs/demo_walk_2d.pmg_spec` defines one 2-D
+locomotion space (axis 0 = turn_rate, axis 1 = travel_speed) over four authored
+walking anchors (`walkMoreCurve`, `walkCurve`, `walkTightCurve`,
+`walkStraightTwiceAsFast`), triangulated support, one self-edge. Those four
+"Center"-skeleton clips are **not redistributed** (provenance unconfirmed — see
+below), so the spec ships but its BVH must be supplied locally. Cross-family jog
+is intentionally excluded; missing domain corners are projected, not synthesized.
 
 ## Data provenance
 
-Every BVH clip shipped on this branch comes from one of two sources:
+The BVH clips shipped on this branch all come from the **CMU Graphics Lab Motion
+Capture Database** (`mocap.cs.cmu.edu`) — the eight `NN_MM.bvh` clips, where `NN`
+= subject and `MM` = trial. Subject 16: `16_21`, `16_31`, `16_36`, `16_45`.
+Subject 78: `78_10`, `78_27`, `78_29`, `78_30`. The CMU database is free to use
+for any purpose.
 
-**CMU Graphics Lab Motion Capture Database** (`mocap.cs.cmu.edu`) — the eight
-`NN_MM.bvh` clips, where `NN` = subject and `MM` = trial. Subject 16: `16_21`,
-`16_31`, `16_36`, `16_45`. Subject 78: `78_10`, `78_27`, `78_29`, `78_30`. The
-CMU database is free to use for any purpose.
-
-**"Center" locomotion corpus** — the four `walk_2d` anchors `walkCurve`,
-`walkMoreCurve`, `walkTightCurve`, `walkStraightTwiceAsFast`. They share the
-`Center`-rooted skeleton (BVH `ROOT Center`) and ship as the project's bundled
-demonstration clips (present since the initial commit). These drive the
-single-family `demo_walk_2d` parametric walk space.
+**Not redistributed — "Center" locomotion corpus.** The four `demo_walk_2d`
+anchors (`walkCurve`, `walkMoreCurve`, `walkTightCurve`, `walkStraightTwiceAsFast`)
+share a separate `Center`-rooted skeleton (BVH `ROOT Center`). Their original
+source and license could not be confirmed, so they are **git-ignored and not
+distributed** with this repository. `demo_walk_2d.pmg_spec` still ships as a
+reference, but you must supply these four clips locally to build it. They are not
+required for the CMU demos above.
 
 ## Known limitations
 

@@ -63,6 +63,13 @@ desktop.ini
 
 BVH/recut/
 
+# "Center"/Credo locomotion clips: unconfirmed source/license -> not redistributed.
+# CMU clips (BVH/NN_MM.bvh, free for any use) stay tracked; these do not.
+BVH/walkCurve.bvh
+BVH/walkMoreCurve.bvh
+BVH/walkTightCurve.bvh
+BVH/walkStraightTwiceAsFast.bvh
+
 # CMU experiment outputs (regenerable)
 experiments/cmu/out/
 

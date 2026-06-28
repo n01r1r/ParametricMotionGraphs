@@ -1,16 +1,20 @@
 # Supported PMG specs
 
-This directory lists the specs shipped with the viewer-only distribution. Each
-is usable with the BVH clips tracked under `BVH/`. Regression fixtures, audit
+This directory lists the specs shipped with the viewer-only distribution. The
+CMU specs run out of the box against the BVH clips tracked under `BVH/`;
+`demo_walk_2d` references four "Center" clips that are not redistributed (see
+below). Regression fixtures, audit
 specs, and the full corpus live on the development branches (`dev/core` and
 the other `dev/*` branches). Clip sources are documented under "Data
 provenance" in the top-level `README.md`.
 
-## Primary demo
+## 2-D steerable demo (clips supplied separately)
 
 ### `demo_walk_2d.pmg_spec`
 
-Primary canonical demo (single-family, paper-faithful `walk_2d`).
+Single-family, paper-faithful `walk_2d`. **Its four "Center"-skeleton clips are
+not redistributed** (provenance unconfirmed); the spec ships but you must supply
+the BVH locally. Not required for the CMU demos below.
 
 Use this for the smooth sparse parametric locomotion viewer demo. It places four
 logically-similar walking anchors (wide walk, walk, tight walk, fast walk)
@@ -37,8 +41,9 @@ paper, jog belongs in a separate node connected by a transition edge, not blende
 into the walk space.
 
 Source: the four anchors (`walkCurve`, `walkMoreCurve`, `walkTightCurve`,
-`walkStraightTwiceAsFast`) are the bundled "Center"-skeleton locomotion clips
-(BVH `ROOT Center`) shipped with the project. See `README.md` > Data provenance.
+`walkStraightTwiceAsFast`) are "Center"-skeleton locomotion clips (BVH `ROOT
+Center`) of unconfirmed origin -- git-ignored and not distributed. See
+`README.md` > Data provenance.
 
 ## CMU mocap demos
 
