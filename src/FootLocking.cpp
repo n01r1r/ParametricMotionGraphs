@@ -55,11 +55,13 @@ void SolveTwoBoneIk(
     if (mid_joint < 0) {
         throw std::runtime_error("SolveTwoBoneIk: end joint has no parent to bend");
     }
+    skeleton.RequireValidJointIndex(mid_joint, "SolveTwoBoneIk parent");
     const int base_joint = skeleton.joints[mid_joint].parent_index;
     if (base_joint < 0) {
         throw std::runtime_error("SolveTwoBoneIk: chain needs a grandparent joint");
     }
 
+    skeleton.RequireValidJointIndex(base_joint, "SolveTwoBoneIk grandparent");
     std::vector<JointWorldState> world = ComputeForwardKinematics(skeleton, pose);
     const Vec3 base = world[base_joint].position;
     const Vec3 mid = world[mid_joint].position;
@@ -75,8 +77,9 @@ void SolveTwoBoneIk(
     // Clamp the target into the chain's annulus of reach.
     Vec3 to_target = target - base;
     float reach = to_target.Norm();
-    const float max_reach = upper_length + lower_length - 1.0e-4f;
-    const float min_reach = std::abs(upper_length - lower_length) + 1.0e-4f;
+    const float margin = std::min(upper_length, lower_length) * 1.0e-5f;
+    const float max_reach = upper_length + lower_length - margin;
+    const float min_reach = std::abs(upper_length - lower_length) + margin;
     if (reach < kEpsilon) {
         return;  // target on top of the base; direction undefined
     }
@@ -139,9 +142,9 @@ void LockFootContacts(
         DetectContacts(skeleton, clip, contact_joints, settings.contacts);
 
     for (const ContactInterval& interval : intervals) {
-        const Vec3 anchor =
-            ComputeJointWorldPositions(skeleton, clip.frames[interval.first_frame])
-                [interval.joint_index];
+        const auto planted = ComputeForwardKinematics(skeleton, clip.frames[interval.first_frame])
+                                 [interval.joint_index];
+        const Vec3 anchor = planted.position;
 
         const int blend = std::max(settings.blend_frames, 0);
         const int first = std::max(interval.first_frame - blend, 0);
@@ -160,7 +163,12 @@ void LockFootContacts(
             const Vec3 current =
                 ComputeJointWorldPositions(skeleton, pose)[interval.joint_index];
             const Vec3 target = current + (anchor - current) * weight;
+            const auto before = ComputeForwardKinematics(skeleton, pose)[interval.joint_index].rotation;
             SolveTwoBoneIk(skeleton, pose, interval.joint_index, target);
+            const auto world = ComputeForwardKinematics(skeleton, pose);
+            const int parent = skeleton.joints[interval.joint_index].parent_index;
+            pose.local_rotations[interval.joint_index] =
+                (world[parent].rotation.Conjugate() * Slerp(before, planted.rotation, weight)).Normalized();
         }
     }
 }

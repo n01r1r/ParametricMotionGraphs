@@ -1,5 +1,7 @@
 #include "pmg/BvhLoader.h"
 
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -39,6 +41,8 @@ public:
     explicit TokenCursor(std::vector<std::string> tokens)
         : tokens_(std::move(tokens)) {}
 
+    std::size_t Remaining() const { return tokens_.size() - index_; }
+
     bool HasNext() const {
         return index_ < tokens_.size();
     }
@@ -65,11 +69,21 @@ public:
     }
 
     int NextInt() {
-        return std::stoi(Next());
+        const std::string token = Next();
+        std::size_t consumed = 0;
+        const int value = std::stoi(token, &consumed);
+        if (consumed != token.size()) throw std::runtime_error("BvhLoader: invalid integer: " + token);
+        return value;
     }
 
     float NextFloat() {
-        return std::stof(Next());
+        const std::string token = Next();
+        std::size_t consumed = 0;
+        const float value = std::stof(token, &consumed);
+        if (consumed != token.size() || !std::isfinite(value)) {
+            throw std::runtime_error("BvhLoader: invalid finite number: " + token);
+        }
+        return value;
     }
 
 private:
@@ -118,12 +132,21 @@ void ParseJointBlock(
 
         if (token == "CHANNELS") {
             const int channel_count = cursor.NextInt();
-            if (channel_count <= 0) {
-                throw std::runtime_error("BvhLoader: CHANNELS count must be positive");
+            if (channel_count < 0 || channel_count > 6) {
+                throw std::runtime_error("BvhLoader: CHANNELS count must be between 0 and 6");
             }
             skeleton.joints[joint_index].channels.reserve(channel_count);
             for (int channel_index = 0; channel_index < channel_count; ++channel_index) {
-                skeleton.joints[joint_index].channels.push_back(ParseChannelType(cursor.Next()));
+                const auto channel = ParseChannelType(cursor.Next());
+                if (parent_index >= 0 && (channel == BvhChannelType::XPosition ||
+                    channel == BvhChannelType::YPosition || channel == BvhChannelType::ZPosition)) {
+                    throw std::runtime_error("BvhLoader: non-root translation channels are not supported");
+                }
+                auto& channels = skeleton.joints[joint_index].channels;
+                if (std::find(channels.begin(), channels.end(), channel) != channels.end()) {
+                    throw std::runtime_error("BvhLoader: duplicate channel");
+                }
+                channels.push_back(channel);
             }
             continue;
         }
@@ -260,14 +283,25 @@ BvhData BvhLoader::Load(const std::string& path) {
         throw std::runtime_error("BvhLoader: skeleton has no channels");
     }
 
+    if (cursor.Remaining() / static_cast<std::size_t>(expected_channel_count) !=
+            static_cast<std::size_t>(frame_count) ||
+        cursor.Remaining() % static_cast<std::size_t>(expected_channel_count) != 0) {
+        throw std::runtime_error("BvhLoader: motion value count does not match frames and channels");
+    }
     data.clip.name = path;
     data.clip.frames_per_second = 1.0f / frame_time;
+    if (!std::isfinite(data.clip.frames_per_second)) {
+        throw std::runtime_error("BvhLoader: frame rate is not representable");
+    }
     data.clip.frames.reserve(static_cast<std::size_t>(frame_count));
 
     for (int frame_index = 0; frame_index < frame_count; ++frame_index) {
         data.clip.frames.push_back(ParsePoseFrame(cursor, data.skeleton));
     }
 
+    if (cursor.HasNext()) {
+        throw std::runtime_error("BvhLoader: unexpected data after declared motion frames");
+    }
     return data;
 }
 

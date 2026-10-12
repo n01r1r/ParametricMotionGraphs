@@ -263,6 +263,7 @@ void PmgViewerWorkspace::StartGraphRuntimeController(
             graph_desired_parameter_vector_);
     runtime_.Install(
         std::move(graph), pmg_skeleton_, config, graph_fps_, initial_parameter);
+    runtime_.SetFootLocking(pmg_foot_lock_enabled_, ResolveContactJointIndices());
     graph_origin_ = origin;
     graph_open_runtime_tab_ = true;
     mode_ = ViewerPlaybackMode::GraphRuntime;
@@ -2011,6 +2012,9 @@ void PmgViewerWorkspace::DrawTransitionPipeline() {
     ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kSchedulingLabel);
     ImGui::SameLine(value_column_x);
     ImGui::TextDisabled("%s", ViewerRuntimeStatusLabel(runtime.status));
+    ImGui::Text("Planted feet: %d | anchor error: %.5f | pelvis correction: %.5f",
+        runtime.foot_plants.planted_feet, runtime.foot_plants.max_anchor_error,
+        runtime.foot_plants.root_correction);
 
     ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), kCompletedTransitionsLabel);
     ImGui::SameLine(value_column_x);

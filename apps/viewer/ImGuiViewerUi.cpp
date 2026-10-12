@@ -457,7 +457,7 @@ void BuildMotionSpace(const ViewerUiState& state,
         }
         ImGui::SameLine();
         ImGui::TextDisabled(foot_lock
-                                ? "(stance feet pinned: skate removed)"
+                                ? "(contact constraints: preview + runtime)"
                                 : "(raw blend: feet may slide)");
 
         DrawSteeringPlots(state);

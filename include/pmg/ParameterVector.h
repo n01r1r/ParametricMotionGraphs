@@ -2,11 +2,20 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace pmg {
 
 using ParameterVector = std::vector<float>;
+
+inline void RequireFiniteParameter(const ParameterVector& parameter, const char* context) {
+    for (float value : parameter) {
+        if (!std::isfinite(value)) {
+            throw std::runtime_error(std::string(context) + ": parameters must be finite");
+        }
+    }
+}
 
 inline void RequireSameParameterDimension(
     const ParameterVector& left,

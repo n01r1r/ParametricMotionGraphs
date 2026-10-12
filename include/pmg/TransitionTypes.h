@@ -18,7 +18,8 @@ struct ParameterAabb {
         }
 
         for (std::size_t index = 0; index < min_corner.size(); ++index) {
-            if (min_corner[index] > max_corner[index]) {
+            if (!std::isfinite(min_corner[index]) || !std::isfinite(max_corner[index]) ||
+                min_corner[index] > max_corner[index]) {
                 return false;
             }
         }
@@ -34,7 +35,8 @@ struct ParameterAabb {
             return true;
         }
         for (std::size_t index = 0; index < min_corner.size(); ++index) {
-            if (min_corner[index] > max_corner[index]) {
+            if (!std::isfinite(min_corner[index]) || !std::isfinite(max_corner[index]) ||
+                min_corner[index] > max_corner[index]) {
                 return true;
             }
         }
@@ -42,11 +44,12 @@ struct ParameterAabb {
     }
 
     bool Contains(const ParameterVector& parameter) const {
+        if (IsEmpty()) return false;
         RequireSameParameterDimension(min_corner, parameter, "ParameterAabb::Contains");
         RequireSameParameterDimension(max_corner, parameter, "ParameterAabb::Contains");
 
         for (std::size_t index = 0; index < parameter.size(); ++index) {
-            if (parameter[index] < min_corner[index] || parameter[index] > max_corner[index]) {
+            if (!std::isfinite(parameter[index]) || parameter[index] < min_corner[index] || parameter[index] > max_corner[index]) {
                 return false;
             }
         }
@@ -54,6 +57,8 @@ struct ParameterAabb {
     }
 
     ParameterVector Clamp(const ParameterVector& parameter) const {
+        if (IsEmpty()) throw std::runtime_error("ParameterAabb::Clamp: empty or invalid box");
+        RequireFiniteParameter(parameter, "ParameterAabb::Clamp");
         RequireSameParameterDimension(min_corner, parameter, "ParameterAabb::Clamp");
         RequireSameParameterDimension(max_corner, parameter, "ParameterAabb::Clamp");
 
@@ -65,6 +70,7 @@ struct ParameterAabb {
     }
 
     static ParameterAabb Empty(int dimension) {
+        if (dimension <= 0) throw std::runtime_error("ParameterAabb::Empty: dimension must be positive");
         ParameterAabb box;
         box.min_corner.assign(dimension, std::numeric_limits<float>::infinity());
         box.max_corner.assign(dimension, -std::numeric_limits<float>::infinity());
@@ -72,6 +78,7 @@ struct ParameterAabb {
     }
 
     void ExpandToInclude(const ParameterVector& parameter) {
+        RequireFiniteParameter(parameter, "ParameterAabb::ExpandToInclude");
         if (min_corner.empty()) {
             min_corner = parameter;
             max_corner = parameter;
@@ -94,6 +101,9 @@ struct ParameterAabb {
     // chosen face is allowed to cross the opposite face; the caller must handle
     // the resulting empty box.
     void ShrinkToExclude(const ParameterVector& point, float epsilon) {
+        if (!std::isfinite(epsilon) || epsilon <= 0.0f) {
+            throw std::runtime_error("ParameterAabb::ShrinkToExclude: epsilon must be finite and positive");
+        }
         if (!Contains(point)) {
             return;
         }

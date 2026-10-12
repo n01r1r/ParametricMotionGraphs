@@ -24,6 +24,7 @@ struct Joint {
     std::vector<BvhChannelType> channels;
 };
 
+// Joint 0 is the sole root (parent -1); every other parent precedes its child.
 struct Skeleton {
     std::vector<Joint> joints;
 

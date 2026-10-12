@@ -15,16 +15,20 @@ std::vector<JointWorldState> ComputeForwardKinematics(
         const Joint& joint = skeleton.joints[joint_index];
         const Quaternion local_rotation = pose.local_rotations[joint_index];
 
-        if (joint.parent_index < 0) {
+        // The pose representation has one root (index 0), and evaluation is
+        // a forward pass. Reject malformed topology instead of reading a
+        // parent's default-initialized state or accepting a second root.
+        if ((joint_index == 0 && joint.parent_index != -1) ||
+            (joint_index > 0 && (joint.parent_index < 0 || joint.parent_index >= joint_index))) {
+            throw std::runtime_error("ComputeForwardKinematics: expected one root and parent-before-child order");
+        }
+        if (joint_index == 0) {
             world_states[joint_index].position = pose.root_position + joint.offset;
             world_states[joint_index].rotation = local_rotation;
             world_states[joint_index].rotation.Normalize();
             continue;
         }
 
-        if (joint.parent_index < 0 || joint.parent_index >= skeleton.NumJoints()) {
-            throw std::runtime_error("ComputeForwardKinematics: invalid parent joint index");
-        }
         const JointWorldState& parent = world_states[joint.parent_index];
         world_states[joint_index].position = parent.position + Rotate(parent.rotation, joint.offset);
         world_states[joint_index].rotation = parent.rotation * local_rotation;

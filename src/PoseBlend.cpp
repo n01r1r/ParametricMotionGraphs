@@ -1,7 +1,7 @@
 #include "pmg/PoseBlend.h"
+#include "Validation.h"
 
 #include <algorithm>
-#include <numeric>
 #include <stdexcept>
 
 namespace pmg {
@@ -69,6 +69,7 @@ Pose BlendPose(
         throw std::runtime_error("BlendPose: pose joint count mismatch");
     }
 
+    detail::RequireFinite(second_pose_weight, "BlendPose");
     second_pose_weight =
         std::clamp(second_pose_weight, 0.0f, 1.0f);
     const float first_pose_weight = 1.0f - second_pose_weight;
@@ -106,21 +107,8 @@ Pose BlendPoseN(
         pose.RequireJointCount(joint_count, "BlendPoseN");
     }
 
-    const float weight_sum =
-        std::accumulate(weights.begin(), weights.end(), 0.0f);
-    if (weight_sum <= kSmallEpsilon) {
-        throw std::runtime_error(
-            "BlendPoseN: weight sum must be positive");
-    }
-
-    std::vector<float> normalized_weights(weights.size());
-    for (std::size_t index = 0; index < weights.size(); ++index) {
-        if (weights[index] < 0.0f) {
-            throw std::runtime_error(
-                "BlendPoseN: weights must be non-negative");
-        }
-        normalized_weights[index] = weights[index] / weight_sum;
-    }
+    const auto normalized_weights =
+        detail::NormalizeWeights(weights, poses.size(), "BlendPoseN");
 
     Pose output;
     output.root_position = {};
