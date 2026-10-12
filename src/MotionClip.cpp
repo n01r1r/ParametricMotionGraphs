@@ -1,5 +1,6 @@
 #include "pmg/MotionClip.h"
 #include "pmg/PoseBlend.h"
+#include "Validation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,9 +21,7 @@ int MotionClip::NumJoints() const {
 
 float MotionClip::DurationSeconds() const {
     RequireNotEmpty("MotionClip::DurationSeconds");
-    if (frames_per_second <= 0.0f) {
-        throw std::runtime_error("MotionClip::DurationSeconds: frames_per_second must be positive");
-    }
+    detail::RequirePositive(frames_per_second, "MotionClip::DurationSeconds fps");
     return static_cast<float>(NumFrames() - 1) / frames_per_second;
 }
 
@@ -34,6 +33,8 @@ void MotionClip::RequireNotEmpty(const char* context) const {
 
 Pose MotionClip::SampleByFrame(float frame_index) const {
     RequireNotEmpty("MotionClip::SampleByFrame");
+
+    detail::RequireFinite(frame_index, "MotionClip::SampleByFrame");
 
     if (frames.size() == 1) {
         return frames.front();
@@ -53,6 +54,7 @@ Pose MotionClip::SampleByFrame(float frame_index) const {
 
 Pose MotionClip::SampleNormalizedPhase(float phase) const {
     RequireNotEmpty("MotionClip::SampleNormalizedPhase");
+    detail::RequireFinite(phase, "MotionClip::SampleNormalizedPhase");
     phase = std::clamp(phase, 0.0f, 1.0f);
     const float frame_index = phase * static_cast<float>(NumFrames() - 1);
     return SampleByFrame(frame_index);

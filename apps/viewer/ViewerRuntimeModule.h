@@ -40,6 +40,7 @@ struct ViewerRuntimeSnapshot {
     float current_phase = 0.0f;
     int completed_transitions = 0;
 
+    pmg::FootPlantDiagnostics foot_plants;
     ViewerRuntimeStatus status = ViewerRuntimeStatus::kNotInstalled;
 
     std::optional<pmg::Pose> current_pose;
@@ -61,6 +62,13 @@ public:
         const pmg::RuntimeControllerConfig& config,
         float frames_per_second,
         const pmg::ParameterVector& initial_parameter);
+    // References inside RuntimeController bind to this object's members.
+    ViewerRuntimeModule() = default;
+    ViewerRuntimeModule(const ViewerRuntimeModule&) = delete;
+    ViewerRuntimeModule& operator=(const ViewerRuntimeModule&) = delete;
+    ViewerRuntimeModule(ViewerRuntimeModule&&) = delete;
+    ViewerRuntimeModule& operator=(ViewerRuntimeModule&&) = delete;
+    void SetFootLocking(bool enabled, const std::vector<int>& joints);
     void Clear();
     void Reset();
     void Update(float delta_seconds, const ViewerRuntimeRequest& request);
@@ -75,6 +83,7 @@ private:
     void RecordTracePoint(const pmg::Pose& pose);
     void RefreshRequestPreview(const ViewerRuntimeRequest& request);
 
+    pmg::Skeleton skeleton_;
     pmg::ParametricMotionGraph graph_;
     pmg::RuntimeControllerConfig config_;
     float frames_per_second_ = 30.0f;

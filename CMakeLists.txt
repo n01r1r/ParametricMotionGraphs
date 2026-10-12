@@ -34,6 +34,8 @@ add_library(pmg_core
     src/PoseBlend.cpp
     src/RootCanonicalization.cpp
     src/RuntimeController.cpp
+    src/RuntimeFootLock.cpp
+    src/StreamingFootLock.cpp
     src/SkeletonCompatibility.cpp
     src/TimeWarp.cpp
     src/TransitionDiagnostics.cpp
@@ -47,9 +49,6 @@ target_compile_options(pmg_core PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
-
-
-
 # ---------------------------------------------------------------------------
 # Viewer: real-time OpenGL skeleton renderer + ImGui control UI.
 # Third-party deps are confined to this target; pmg_core stays dependency-free.
@@ -132,15 +131,19 @@ if(PMG_BUILD_VIEWER)
     )
     target_compile_definitions(viewer_host PUBLIC GLEW_STATIC)
 
+    # Playback adapter has no OpenGL/UI dependency; keep it independently testable.
+    add_library(pmg_viewer_runtime STATIC apps/viewer/ViewerRuntimeModule.cpp)
+    target_include_directories(pmg_viewer_runtime PUBLIC apps/viewer)
+    target_link_libraries(pmg_viewer_runtime PUBLIC pmg_core glm::glm)
+
     add_library(pmg_viewer_workspace STATIC
         apps/viewer/ImGuiViewerUi.cpp
         apps/viewer/PmgViewerWorkspace.cpp
         apps/viewer/PmgViewerWorkspaceGraph.cpp
-        apps/viewer/ViewerRuntimeModule.cpp
     )
     target_include_directories(pmg_viewer_workspace PUBLIC apps/viewer)
     target_link_libraries(pmg_viewer_workspace
-        PUBLIC viewer_host
+        PUBLIC viewer_host pmg_viewer_runtime
         PRIVATE pmg_core
     )
 
@@ -158,4 +161,9 @@ if(PMG_BUILD_VIEWER)
         pmg_viewer_workspace
     )
 
+endif()
+
+if(PMG_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()

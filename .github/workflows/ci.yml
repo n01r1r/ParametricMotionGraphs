@@ -1,0 +1,31 @@
+name: Build and regression tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        mode: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DPMG_BUILD_VIEWER=OFF -DPMG_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=${{ matrix.mode }}
+      - run: cmake --build build --parallel 2
+      - run: ctest --test-dir build --output-on-failure --parallel 2
+  sanitized:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DPMG_BUILD_VIEWER=OFF -DPMG_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+      - run: cmake --build build --parallel 2
+      - run: ctest --test-dir build --output-on-failure --parallel 2
+  windows-viewer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DPMG_BUILD_VIEWER=ON -DPMG_BUILD_TESTS=ON
+      - run: cmake --build build --config Release --parallel 2
+      - run: ctest --test-dir build -C Release --output-on-failure --parallel 2

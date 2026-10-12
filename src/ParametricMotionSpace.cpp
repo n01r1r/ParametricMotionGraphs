@@ -1,6 +1,7 @@
 #include "pmg/ParametricMotionSpace.h"
 #include "pmg/PoseBlend.h"
 #include "pmg/RigidTransform2D.h"
+#include "Validation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -78,7 +79,12 @@ void ParametricMotionSpace::AddExample(
     if (static_cast<int>(parameter.size()) != parameter_dimension_) {
         throw std::runtime_error("ParametricMotionSpace::AddExample: parameter dimension mismatch");
     }
+    RequireFiniteParameter(parameter, "ParametricMotionSpace::AddExample");
     clip.RequireNotEmpty("ParametricMotionSpace::AddExample");
+    detail::RequirePositive(clip.frames_per_second, "ParametricMotionSpace::AddExample fps");
+    for (const Pose& pose : clip.frames) {
+        pose.RequireJointCount(clip.NumJoints(), "ParametricMotionSpace::AddExample");
+    }
 
     if (!examples_.empty() && clip.NumJoints() != examples_.front().clip.NumJoints()) {
         throw std::runtime_error("ParametricMotionSpace::AddExample: example joint count mismatch");
@@ -231,6 +237,7 @@ bool ParametricMotionSpace::HasExplicitParameterSupport() const {
 }
 
 ParameterVector ParametricMotionSpace::ProjectToSupport(const ParameterVector& parameter) const {
+    RequireFiniteParameter(parameter, "ParametricMotionSpace::ProjectToSupport");
     if (HasExplicitParameterSupport()) {
         return parameter_support_->Project(parameter);
     }
@@ -397,7 +404,7 @@ ParameterCalibration CalibrateParameterMetrics(
     if (space.NumExamples() == 0) {
         throw std::runtime_error("CalibrateParameterMetrics: space has no examples");
     }
-    if (frames_per_second <= 0.0f || samples_per_axis < 2) {
+    if (!std::isfinite(frames_per_second) || frames_per_second <= 0.0f || samples_per_axis < 2) {
         throw std::runtime_error(
             "CalibrateParameterMetrics: invalid sampling settings");
     }
@@ -423,8 +430,7 @@ ParameterCalibration CalibrateParameterMetrics(
                 weights[example_index] *
                 space.Examples()[example_index].clip.DurationSeconds();
         }
-        const int frame_count = std::max(
-            2, static_cast<int>(std::lround(duration * frames_per_second)) + 1);
+        const int frame_count = detail::SampleFrameCount(duration, frames_per_second);
         const MotionClip clip = space.GenerateClipFromWeights(
             weights, frame_count, frames_per_second);
         ParameterVector measured;
@@ -711,13 +717,12 @@ float ParametricMotionSpace::BlendedDurationSeconds(
 MotionClip ParametricMotionSpace::GenerateClip(
     const ParameterVector& parameter,
     float frames_per_second) const {
-    if (frames_per_second <= 0.0f) {
+    if (!std::isfinite(frames_per_second) || frames_per_second <= 0.0f) {
         throw std::runtime_error("ParametricMotionSpace::GenerateClip: frames_per_second must be positive");
     }
     const ParameterVector supported_parameter = ProjectToSupport(parameter);
     const float duration = BlendedDurationSeconds(supported_parameter);
-    const int frame_count = std::max(
-        2, static_cast<int>(std::lround(duration * frames_per_second)) + 1);
+    const int frame_count = detail::SampleFrameCount(duration, frames_per_second);
     return GenerateClipFromWeights(
         ComputeLocalBlendWeights(supported_parameter), frame_count, frames_per_second);
 }
@@ -726,6 +731,12 @@ MotionClip ParametricMotionSpace::GenerateClipFromWeights(
     const std::vector<float>& weights,
     int frame_count,
     float frames_per_second) const {
+    detail::RequirePositive(frames_per_second, "GenerateClipFromWeights fps");
+    if (frame_count < 1) {
+        throw std::runtime_error("GenerateClipFromWeights: frame count must be positive");
+    }
+    const auto normalized_weights =
+        detail::NormalizeWeights(weights, examples_.size(), "GenerateClipFromWeights");
     MotionClip generated_clip;
     generated_clip.name = name_ + "_generated";
     generated_clip.frames_per_second = frames_per_second;
@@ -739,7 +750,7 @@ MotionClip ParametricMotionSpace::GenerateClipFromWeights(
         return examples_[example_index].clip.SampleNormalizedPhase(example_phase);
     };
 
-    Pose first_frame = EvaluatePoseFromWeights(weights, 0.0f);
+    Pose first_frame = EvaluatePoseFromWeights(normalized_weights, 0.0f);
     float world_x = first_frame.root_position.x;
     float world_z = first_frame.root_position.z;
     float world_heading = RootHeading(first_frame);
@@ -756,7 +767,7 @@ MotionClip ParametricMotionSpace::GenerateClipFromWeights(
         float delta_z = 0.0f;
         float delta_heading = 0.0f;
         for (std::size_t example_index = 0; example_index < examples_.size(); ++example_index) {
-            if (weights[example_index] <= 0.0f) {
+            if (normalized_weights[example_index] <= 0.0f) {
                 continue;
             }
             const Pose previous_pose = sample_example(example_index, previous_phase);
@@ -771,9 +782,9 @@ MotionClip ParametricMotionSpace::GenerateClipFromWeights(
                 current_pose.root_position.z - previous_pose.root_position.z,
                 local_dx, local_dz);
 
-            delta_x += weights[example_index] * local_dx;
-            delta_z += weights[example_index] * local_dz;
-            delta_heading += weights[example_index] *
+            delta_x += normalized_weights[example_index] * local_dx;
+            delta_z += normalized_weights[example_index] * local_dz;
+            delta_heading += normalized_weights[example_index] *
                              WrapPi(RootHeading(current_pose) - previous_heading);
         }
 
@@ -787,7 +798,7 @@ MotionClip ParametricMotionSpace::GenerateClipFromWeights(
 
         // Joints and height come from the registered pose blend; only the
         // root's floor placement and heading are replaced by the integral.
-        Pose frame = EvaluatePoseFromWeights(weights, phase);
+        Pose frame = EvaluatePoseFromWeights(normalized_weights, phase);
         frame.root_position.x = world_x;
         frame.root_position.z = world_z;
         if (!frame.local_rotations.empty()) {

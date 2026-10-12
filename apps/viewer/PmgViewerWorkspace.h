@@ -23,6 +23,7 @@
 #include "ViewerRuntimeModule.h"
 #include "ViewerUiState.h"
 #include "ViewerWorkspace.h"
+#include "SceneCoordinates.h"
 
 namespace pmgviewer {
 
@@ -69,6 +70,14 @@ public:
     const RenderScene& Scene() const override { return scene_; }
 
 private:
+    SceneCoordinates Coordinates() const {
+        return {display_scale_ * skeleton_scale_, recenter_offset_x_, recenter_offset_z_};
+    }
+    float RenderScale() const { return Coordinates().scale; }
+    glm::vec3 DisplayFloorPoint(float x, float z, float display_height = 0.0f) const {
+        const auto p = Coordinates().ToDisplay({x, 0.0f, z});
+        return {p.x, display_height, p.z};
+    }
     enum class GraphOrigin {
         None,
         LoadedArtifact,

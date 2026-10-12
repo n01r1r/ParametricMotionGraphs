@@ -1,4 +1,5 @@
 #include "pmg/TimeWarp.h"
+#include "Validation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,7 +14,7 @@ void RequireStrictlyIncreasingInterior(
     const std::vector<float>& phases, const char* label) {
     float previous = 0.0f;
     for (const float phase : phases) {
-        if (phase <= previous || phase >= 1.0f) {
+        if (!std::isfinite(phase) || phase <= previous || phase >= 1.0f) {
             throw std::runtime_error(
                 std::string("TimeWarp::FromAnchors: ") + label +
                 " anchors must be strictly increasing within (0, 1)");
@@ -92,6 +93,7 @@ TimeWarp TimeWarp::FromAnchors(
 }
 
 float TimeWarp::Evaluate(float from_phase) const {
+    detail::RequireFinite(from_phase, "TimeWarp::Evaluate");
     from_phase = std::clamp(from_phase, 0.0f, 1.0f);
     if (from_knots_.empty()) {
         return from_phase;

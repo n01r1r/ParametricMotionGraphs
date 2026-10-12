@@ -1,6 +1,7 @@
 #include "pmg/GraphIo.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -60,23 +61,19 @@ void WriteParameter(std::ostream& output, const ParameterVector& parameter) {
 // a default/empty ParameterAabb on a rejected edge) fail to round-trip. Read
 // every serialized float through this helper to keep <<-then->> symmetric.
 float ReadSerializedFloat(std::istream& input) {
+    std::string token;
+    if (!(input >> token)) {
+        throw std::runtime_error("LoadPmgArtifactText: missing float");
+    }
+    // Read one whole token. Retrying operator>> after a partial numeric parse
+    // can discard bytes (or even consume the next record) on malformed input.
+    const char* first = token.data();
+    const char* last = first + token.size();
+    if (first != last && *first == '+') ++first;
     float value = 0.0f;
-    input >> value;
-    if (input.fail()) {
-        input.clear();
-        std::string token;
-        if (!(input >> token)) {
-            return value;
-        }
-        if (token == "inf" || token == "+inf") {
-            value = std::numeric_limits<float>::infinity();
-        } else if (token == "-inf") {
-            value = -std::numeric_limits<float>::infinity();
-        } else if (token == "nan" || token == "-nan" || token == "nan(ind)") {
-            value = std::numeric_limits<float>::quiet_NaN();
-        } else {
-            input.setstate(std::ios::failbit);
-        }
+    const auto result = std::from_chars(first, last, value);
+    if (result.ec != std::errc{} || result.ptr != last) {
+        throw std::runtime_error("LoadPmgArtifactText: invalid float: " + token);
     }
     return value;
 }
@@ -1037,6 +1034,8 @@ void SavePmgArtifactText(
     WriteMetadata(output, artifact.metadata);
     WriteSkeleton(output, artifact.skeleton);
     WriteGraphPayload(output, artifact.graph);
+    output.flush();
+    if (!output) throw std::runtime_error("SavePmgArtifactText: failed to write '" + path + "'");
 }
 
 BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
@@ -1060,6 +1059,8 @@ BuiltPmgArtifact LoadPmgArtifactText(const std::string& path) {
         artifact.skeleton = ReadSkeleton(input);
     }
     artifact.graph = ReadGraphPayload(input, *format);
+    input >> std::ws;
+    if (!input.eof()) throw std::runtime_error("LoadPmgArtifactText: unexpected trailing data");
     return artifact;
 }
 

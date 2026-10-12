@@ -252,6 +252,7 @@ float PmgViewerWorkspace::ActiveReferenceDuration() const {
 }
 
 pmg::Pose PmgViewerWorkspace::CurrentPose() const {
+    if (GraphRuntimeActive()) return runtime_.Snapshot().current_pose.value_or(pmg::Pose{});
     if (ParametricBlendActive()) {
         // Sample the cached GenerateClip output (kept fresh by Update) by phase,
         // instead of blending absolute root positions per frame.
@@ -310,8 +311,6 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& input_pose) {
         recenter_offset_z_ = pose.root_position.z;
         recenter_pending_ = false;
     }
-    pose.root_position.x -= recenter_offset_x_;
-    pose.root_position.z -= recenter_offset_z_;
 
     const float ground_offset =
         (ParametricBlendActive() || GraphRuntimeActive()) ? pmg_ground_offset_ : ground_offset_;
@@ -325,10 +324,10 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& input_pose) {
     scene_.bones.clear();
     scene_.joints.reserve(world_positions.size());
     const bool separate_end_sites = show_end_sites_separately_ && !hide_end_sites_;
-    const float axis_length = 0.35f * display_scale_ * skeleton_scale_;
-    const float point_radius = 0.06f * display_scale_ * skeleton_scale_;
-    const float end_site_radius = 0.045f * display_scale_ * skeleton_scale_;
-    const float line_radius = 0.018f * display_scale_ * skeleton_scale_;
+    const float axis_length = 0.35f * RenderScale();
+    const float point_radius = 0.06f * RenderScale();
+    const float end_site_radius = 0.045f * RenderScale();
+    const float line_radius = 0.018f * RenderScale();
     for (int joint_index = 0; joint_index < skeleton.NumJoints(); ++joint_index) {
         const pmg::Joint& joint = skeleton.joints[static_cast<std::size_t>(joint_index)];
         const bool is_end_site = joint.channels.empty() && joint.parent_index >= 0;
@@ -348,7 +347,7 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& input_pose) {
         const glm::vec3 position = world_positions[static_cast<std::size_t>(joint_index)];
         centroid += position;
         const float bone_girth =
-            MannequinBoneGirth(joint_name_lower, display_scale_ * skeleton_scale_);
+            MannequinBoneGirth(joint_name_lower, RenderScale());
 
         if (is_end_site) {
             if (!hide_end_sites_ && separate_end_sites) {
@@ -431,17 +430,15 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& input_pose) {
     if (GraphRuntimeActive() && show_graph_path_trail_ &&
         path_points.size() >= 2) {
         constexpr glm::vec3 kPathTrailColor(0.10f, 0.70f, 0.95f);
-        const float trail_height = 0.05f * display_scale_;
-        const float trail_radius = 0.035f * display_scale_;
+        const float trail_height = 0.05f * RenderScale();
+        const float trail_radius = 0.035f * RenderScale();
         for (std::size_t index = 1; index < path_points.size();
              ++index) {
             const glm::vec2& previous = path_points[index - 1];
             const glm::vec2& current = path_points[index];
             scene_.diagnostic_lines.push_back({
-                glm::vec3(previous.x * display_scale_, trail_height,
-                          previous.y * display_scale_),
-                glm::vec3(current.x * display_scale_, trail_height,
-                          current.y * display_scale_),
+                DisplayFloorPoint(previous.x, previous.y, trail_height),
+                DisplayFloorPoint(current.x, current.y, trail_height),
                 kPathTrailColor,
                 trail_radius,
             });
@@ -449,16 +446,14 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& input_pose) {
     }
 
     if (GraphRuntimeActive() && show_graph_transition_markers_) {
-        const float marker_height = 0.25f * display_scale_;
-        const float marker_radius = 0.065f * display_scale_;
-        const float line_radius = 0.022f * display_scale_;
+        const float marker_height = 0.25f * RenderScale();
+        const float marker_radius = 0.065f * RenderScale();
+        const float line_radius = 0.022f * RenderScale();
         for (const TransitionTraceMarker& marker : transition_markers) {
             const glm::vec3 color =
                 TransitionMarkerColor(marker.source_node, marker.target_node);
-            const glm::vec3 ground_position(
-                marker.root_position.x * display_scale_,
-                0.08f * display_scale_,
-                marker.root_position.y * display_scale_);
+            const glm::vec3 ground_position = DisplayFloorPoint(
+                marker.root_position.x, marker.root_position.y, 0.08f * RenderScale());
             scene_.diagnostic_points.push_back(
                 {ground_position, color, marker_radius});
             scene_.diagnostic_lines.push_back({
@@ -472,21 +467,20 @@ void PmgViewerWorkspace::RebuildScene(const pmg::Pose& input_pose) {
 
     if (path_following_active_ && GraphRuntimeActive()) {
         constexpr glm::vec3 kPathColor(0.95f, 0.55f, 0.15f);
-        const float y = 0.08f * display_scale_;
+        const float y = 0.08f * RenderScale();
         for (std::size_t index = 1; index < path_waypoints_.size(); ++index) {
             const glm::vec2& start = path_waypoints_[index - 1];
             const glm::vec2& end = path_waypoints_[index];
             scene_.diagnostic_lines.push_back({
-                {start.x * display_scale_, y, start.y * display_scale_},
-                {end.x * display_scale_, y, end.y * display_scale_},
-                kPathColor, 0.04f * display_scale_});
+                DisplayFloorPoint(start.x, start.y, y),
+                DisplayFloorPoint(end.x, end.y, y),
+                kPathColor, 0.04f * RenderScale()});
         }
     }
 
     if (goto_active_ && GraphRuntimeActive()) {
-        const glm::vec3 base(goto_target_.x * display_scale_, 0.0f,
-                             goto_target_.y * display_scale_);
-        const glm::vec3 top = base + glm::vec3(0.0f, 1.8f * display_scale_, 0.0f);
+        const glm::vec3 base = DisplayFloorPoint(goto_target_.x, goto_target_.y);
+        const glm::vec3 top = base + glm::vec3(0.0f, 1.8f * RenderScale(), 0.0f);
         scene_.marker_points.push_back(base);
         scene_.marker_lines.push_back({base, top});
     }
@@ -508,17 +502,16 @@ void PmgViewerWorkspace::AppendRootCanonicalizationMarkers(
     constexpr glm::vec3 kNormalizedColor(0.18f, 0.80f, 0.35f);
     constexpr glm::vec3 kTrajectoryColor(0.95f, 0.75f, 0.18f);
     constexpr glm::vec3 kRuntimeColor(0.20f, 0.65f, 1.00f);
-    const float y = 0.12f * display_scale_;
-    const float point_radius = 0.06f * display_scale_;
-    const float line_radius = 0.018f * display_scale_;
-    const glm::vec3 canonical_origin(0.0f, y, 0.0f);
+    const float y = 0.12f * RenderScale();
+    const float point_radius = 0.06f * RenderScale();
+    const float line_radius = 0.018f * RenderScale();
+    const glm::vec3 canonical_origin = DisplayFloorPoint(0.0f, 0.0f, y);
 
     scene_.diagnostic_points.push_back(
         {canonical_origin, kNormalizedColor, point_radius * 1.4f});
     for (const RootCanonicalizationMarker& marker :
          root_canonicalization_markers_) {
-        const glm::vec3 raw(marker.raw_start.x * display_scale_, y,
-                            marker.raw_start.z * display_scale_);
+        const glm::vec3 raw = DisplayFloorPoint(marker.raw_start.x, marker.raw_start.z, y);
         scene_.diagnostic_points.push_back({raw, kRawColor, point_radius});
         scene_.diagnostic_lines.push_back({
             raw + glm::vec3(-point_radius, 0.0f, 0.0f),
@@ -539,10 +532,8 @@ void PmgViewerWorkspace::AppendRootCanonicalizationMarkers(
             const pmg::Vec3& previous = marker.normalized_trajectory[i - 1];
             const pmg::Vec3& current = marker.normalized_trajectory[i];
             scene_.diagnostic_lines.push_back({
-                glm::vec3(previous.x * display_scale_, y,
-                          previous.z * display_scale_),
-                glm::vec3(current.x * display_scale_, y,
-                          current.z * display_scale_),
+                DisplayFloorPoint(previous.x, previous.z, y),
+                DisplayFloorPoint(current.x, current.z, y),
                 kTrajectoryColor,
                 line_radius,
             });
@@ -550,9 +541,7 @@ void PmgViewerWorkspace::AppendRootCanonicalizationMarkers(
     }
 
     scene_.diagnostic_points.push_back({
-        glm::vec3(current_pose.root_position.x * display_scale_,
-                  0.22f * display_scale_,
-                  current_pose.root_position.z * display_scale_),
+        DisplayFloorPoint(current_pose.root_position.x, current_pose.root_position.z, 0.22f * RenderScale()),
         kRuntimeColor,
         point_radius * 1.5f,
     });
@@ -564,36 +553,11 @@ std::vector<glm::vec3> PmgViewerWorkspace::PoseWorldPositions(
     const std::vector<pmg::Vec3> positions =
         pmg::ComputeJointWorldPositions(skeleton, pose);
 
-    // Pass 1: lift onto the ground plane and find the horizontal centroid that
-    // the skeleton scale pivots around.
-    std::vector<glm::vec3> world_positions(positions.size());
-    glm::vec2 horizontal_center(0.0f);
-    for (std::size_t i = 0; i < positions.size(); ++i) {
-        world_positions[i] = glm::vec3(positions[i].x,
-                                       positions[i].y + ground_offset,
-                                       positions[i].z);
-        horizontal_center += glm::vec2(world_positions[i].x, world_positions[i].z);
-    }
-    if (!world_positions.empty()) {
-        horizontal_center /= static_cast<float>(world_positions.size());
-    }
-
-    // Pass 2: two distinct scales with different pivots.
-    //   display_scale_  (native -> display): applies to the WHOLE world about the
-    //     origin, so the root translation scales together with the skeleton.
-    //     Pivoting this on the per-frame centroid is what made locomotion look
-    //     like a treadmill -- the body was display-sized while the root motion
-    //     stayed native-sized, pinning the character at the centre.
-    //   skeleton_scale_ (user size tweak): pivots on the horizontal centroid and
-    //     anchors vertically at y = 0, so resizing the body neither slides it
-    //     across the floor nor lifts the feet.
-    const float render_scale = display_scale_ * skeleton_scale_;
-    for (glm::vec3& world_position : world_positions) {
-        world_position.x = display_scale_ *
-            (horizontal_center.x + (world_position.x - horizontal_center.x) * skeleton_scale_);
-        world_position.z = display_scale_ *
-            (horizontal_center.y + (world_position.z - horizontal_center.y) * skeleton_scale_);
-        world_position.y *= render_scale;
+    std::vector<glm::vec3> world_positions;
+    world_positions.reserve(positions.size());
+    for (const auto& position : positions) {
+        world_positions.push_back(ToGlm(Coordinates().ToDisplay(
+            {position.x, position.y + ground_offset, position.z})));
     }
     return world_positions;
 }
@@ -624,7 +588,7 @@ void PmgViewerWorkspace::AppendPathPreview() {
     const int ghost_count = std::clamp(path_preview_count_, 2, 12);
     // Roughly two-thirds of the live bone radius: clearly visible as a trail
     // while staying thinner than the active skeleton.
-    const float ghost_radius = 0.065f * display_scale_;
+    const float ghost_radius = 0.065f * RenderScale();
     // Translucent, but solid enough to read clearly against the floor; per-ghost
     // alpha falls with the count so a dense trail does not saturate to a wall.
     const float ghost_alpha =
@@ -676,7 +640,7 @@ void PmgViewerWorkspace::AppendOriginMarker() {
     const pmg::Vec3& start = clip->frames.front().root_position;
     scene_.has_floor_origin = true;
     scene_.floor_origin =
-        glm::vec3(start.x * display_scale_, 0.0f, start.z * display_scale_);
+        DisplayFloorPoint(start.x, start.z);
 }
 
 void PmgViewerWorkspace::AppendParamSweepPaths() {
@@ -685,15 +649,13 @@ void PmgViewerWorkspace::AppendParamSweepPaths() {
     }
     // Just above the floor and the per-anchor trajectories so the fan of paths
     // reads clearly; translucent so overlapping segments blend.
-    const float y = 0.045f * display_scale_;
-    const float radius = 0.03f * display_scale_;
+    const float y = 0.045f * RenderScale();
+    const float radius = 0.03f * RenderScale();
     for (const auto& [color, path] : param_sweep_paths_) {
         for (std::size_t i = 1; i < path.size(); ++i) {
             scene_.diagnostic_lines.push_back({
-                glm::vec3(path[i - 1].x * display_scale_, y,
-                          path[i - 1].z * display_scale_),
-                glm::vec3(path[i].x * display_scale_, y,
-                          path[i].z * display_scale_),
+                DisplayFloorPoint(path[i - 1].x, path[i - 1].z, y),
+                DisplayFloorPoint(path[i].x, path[i].z, y),
                 color,
                 radius,
                 0.55f,
@@ -871,8 +833,8 @@ bool PmgViewerWorkspace::HandleGroundClick(const glm::vec3& ray_origin,
     }
     const glm::vec3 hit = ray_origin + t * ray_direction;
     // The scene is rendered at display scale; steering runs in native units.
-    const glm::vec2 target =
-        glm::vec2(hit.x, hit.z) / std::max(display_scale_, kEpsilon);
+    const auto native_hit = Coordinates().ToNative({hit.x, 0.0f, hit.z});
+    const glm::vec2 target(native_hit.x, native_hit.z);
     if (path_following_active_) {
         path_waypoints_.push_back(target);
         if (path_waypoints_.size() == 1) {
@@ -1433,9 +1395,11 @@ void PmgViewerWorkspace::ApplyUiCommand(const ViewerUiCommand& command) {
         pmg_preview_in_place_ = command.index != 0;
         break;
     case ViewerUiCommandType::SetMotionSpaceFootLock:
-        // Foot-lock rewrites the preview clip's stance legs, so the cached clip
+        // Foot-lock updates the live runtime and rewrites preview stance legs;
+        // the cached clip
         // must be regenerated when the toggle changes.
         pmg_foot_lock_enabled_ = command.index != 0;
+        runtime_.SetFootLocking(pmg_foot_lock_enabled_, ResolveContactJointIndices());
         pmg_preview_dirty_ = true;
         break;
     case ViewerUiCommandType::SetShowJointNames:

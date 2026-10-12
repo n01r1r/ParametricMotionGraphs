@@ -93,7 +93,7 @@ std::vector<CandidateMotionWindow> ExtractCandidateMotionWindows(
             const float root_displacement =
                 std::sqrt(root_delta.x * root_delta.x + root_delta.z * root_delta.z);
             if (config.min_window_speed > 0.0f && clip.frames_per_second > 0.0f) {
-                const float duration = static_cast<float>(length) / clip.frames_per_second;
+                const float duration = static_cast<float>(length - 1) / clip.frames_per_second;
                 if (duration <= 0.0f || root_displacement / duration < config.min_window_speed) {
                     continue;
                 }

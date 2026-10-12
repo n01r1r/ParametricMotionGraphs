@@ -5,6 +5,8 @@
 #include "pmg/PoseBlend.h"
 #include "pmg/RigidTransform2D.h"
 #include "pmg/TransitionWindow.h"
+#include "pmg/StreamingFootLock.h"
+#include "pmg/ContactDetection.h"
 
 #include <optional>
 #include <vector>
@@ -112,6 +114,12 @@ public:
 
     void Update(float delta_seconds, const RuntimeControlRequest& request);
 
+    // Optional contact cleanup on the final world-space stream. Owns its
+    // skeleton, and resets anchors on Start/disable. Default remains raw.
+    void EnableFootLocking(const Skeleton& skeleton, const std::vector<int>& ankle_joints);
+    void DisableFootLocking();
+    FootPlantDiagnostics FootLockDiagnostics() const;
+
     Pose CurrentPose() const;   // world space
     int CurrentNode() const;
     const ParameterVector& CurrentParameter() const;
@@ -123,6 +131,16 @@ public:
     ActiveTransitionDiagnostics() const;
 
 private:
+    void Advance(float delta_seconds, const RuntimeControlRequest& request);
+    Pose RawPose() const;
+    std::vector<ContactInterval> PrepareFootContacts(const MotionClip& clip,
+        const ParametricMotionSpace& space, const ParameterVector& parameter) const;
+    void RefreshFootPose(float dt);
+    std::optional<StreamingFootLock> foot_lock_;
+    std::optional<Pose> corrected_pose_;
+    std::vector<ContactInterval> current_contacts_;
+    std::vector<ContactInterval> next_contacts_;
+
     float ClipPhase(const MotionClip& clip, float time_seconds) const;
     Pose SampleWorld(const MotionClip& clip, float time_seconds,
                      const RigidTransform2D& transform) const;

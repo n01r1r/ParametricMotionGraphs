@@ -1,6 +1,7 @@
 #include "pmg/ContactDetection.h"
 
 #include "pmg/ForwardKinematics.h"
+#include "Validation.h"
 
 #include <algorithm>
 #include <limits>
@@ -50,6 +51,7 @@ void RequireContactInputs(
     const std::vector<int>& contact_joints,
     const char* context) {
     clip.RequireNotEmpty(context);
+    detail::RequirePositive(clip.frames_per_second, context);
     if (clip.NumJoints() != skeleton.NumJoints()) {
         throw std::runtime_error(std::string(context) + ": clip/skeleton joint count mismatch");
     }
@@ -116,6 +118,11 @@ std::vector<ContactInterval> DetectContacts(
     const std::vector<int>& contact_joints,
     const ContactDetectionSettings& settings) {
     RequireContactInputs(skeleton, clip, contact_joints, "DetectContacts");
+    detail::RequireFinite(settings.height_threshold, "DetectContacts height");
+    detail::RequireFinite(settings.speed_threshold, "DetectContacts speed");
+    if (settings.speed_threshold < 0.0f || settings.min_contact_frames < 1) {
+        throw std::runtime_error("DetectContacts: speed must be non-negative and minimum frames positive");
+    }
 
     std::vector<ContactInterval> intervals;
     const int frame_count = clip.NumFrames();

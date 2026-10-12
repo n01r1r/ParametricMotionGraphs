@@ -1,5 +1,7 @@
 #include "ViewerRuntimeModule.h"
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 
@@ -33,21 +35,35 @@ void ViewerRuntimeModule::Install(
     if (graph.NumNodes() == 0) {
         throw std::invalid_argument("ViewerRuntimeModule requires a non-empty graph");
     }
+    Clear();
+    skeleton_ = skeleton;
     graph_ = std::move(graph);
     config_ = config;
     frames_per_second_ = frames_per_second;
-    alignment_.emplace(skeleton, config.transition_blend_frames);
+    alignment_.emplace(skeleton_, config.transition_blend_frames);
     controller_.emplace(graph_, *alignment_, config);
-    controller_->Start(0, initial_parameter, frames_per_second);
+    try {
+        controller_->Start(0, initial_parameter, frames_per_second);
+    } catch (...) {
+        Clear();
+        throw;
+    }
     desired_node_ = 0;
     status_ = ViewerRuntimeStatus::kIdle;
     ClearTrace();
+}
+
+void ViewerRuntimeModule::SetFootLocking(bool enabled, const std::vector<int>& joints) {
+    if (!controller_) return;
+    if (enabled && !joints.empty()) controller_->EnableFootLocking(skeleton_, joints);
+    else controller_->DisableFootLocking();
 }
 
 void ViewerRuntimeModule::Clear() {
     controller_.reset();
     alignment_.reset();
     graph_ = {};
+    skeleton_ = {};
     path_points_.clear();
     transition_markers_.clear();
     requested_raw_.reset();
@@ -78,6 +94,16 @@ void ViewerRuntimeModule::Update(
     }
     if (!request.desired_parameter_raw.has_value()) {
         requested_raw_.reset();
+        requested_projected_.reset();
+        transition_preview_.reset();
+        status_ = ViewerRuntimeStatus::kInvalidRequest;
+        return;
+    }
+    const auto& parameter = *request.desired_parameter_raw;
+    if (request.desired_node < 0 || request.desired_node >= graph_.NumNodes() ||
+        static_cast<int>(parameter.size()) != graph_.Node(request.desired_node).motion_space.ParameterDimension() ||
+        !std::all_of(parameter.begin(), parameter.end(), [](float x) { return std::isfinite(x); })) {
+        requested_raw_ = parameter;
         requested_projected_.reset();
         transition_preview_.reset();
         status_ = ViewerRuntimeStatus::kInvalidRequest;
@@ -192,6 +218,7 @@ ViewerRuntimeSnapshot ViewerRuntimeModule::Snapshot() const {
     if (!controller_.has_value()) {
         return snapshot;
     }
+    snapshot.foot_plants = controller_->FootLockDiagnostics();
     snapshot.current_node = controller_->CurrentNode();
     snapshot.current_phase = controller_->CurrentPhase();
     snapshot.completed_transitions = controller_->CompletedTransitions();

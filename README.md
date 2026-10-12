@@ -5,9 +5,9 @@ Graph (PMG)** system: a real-time OpenGL viewer built on the `pmg_core` library.
 Load a motion spec, then drive a character with sliders and a click-to-go target
 while the graph blends and stitches motion clips together live.
 
-This branch is the **viewer-only distribution** — the `pmg_core` library plus the
-viewer. The CLI, test suite, audit docs, and paper source are kept off this
-branch to keep the tree small; they live on the `dev/core` development branch.
+This branch contains the `pmg_core` library, viewer, and regression tests.
+The legacy CLI and paper source remain on the `dev/core` development branch.
+Tests use synthetic fixtures and the bundled CMU clips; no private corpus is required.
 
 > It is a faithful **PMG-core demo**, not a full paper reproduction. It
 > implements the core pipeline on single-family and small multi-node locomotion
@@ -73,6 +73,23 @@ Once the window is open (the bundled `cmu_gait_graph` walk/run space):
 The 2-D steerable space (`demo_walk_2d`, with **curvature** + **speed** sliders
 and **Param-sweep paths**) uses four "Center" walk clips that are **not bundled**
 — see [Data provenance](#data-provenance) to supply them locally.
+
+## Regression tests
+
+The core suite is dependency-free and runs without an OpenGL installation:
+
+```sh
+cmake -S . -B build-core -DPMG_BUILD_VIEWER=OFF -DPMG_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build-core --config Release
+ctest --test-dir build-core -C Release --output-on-failure
+```
+
+Assertions remain enabled for tests in Release builds. With the viewer enabled,
+CTest also checks its playback adapter. CI covers Linux Debug/Release,
+AddressSanitizer/UndefinedBehaviorSanitizer, and the Windows viewer build.
+
+For the skating fix, measured results, and remaining animation limitations,
+see [contact cleanup validation](docs/contact_cleanup_validation.md).
 
 ## Dependencies
 
@@ -150,8 +167,11 @@ required for the CMU demos above.
 ## Known limitations
 
 - Demo support is sparse; missing 2-D corners are projected, not synthesized.
-- Runtime traversal renders a raw pose stream; foot-lock is applied to the
-  parametric-blend preview clip, not the live graph-traversal stream.
+- Foot-lock now applies to both the preview and live graph traversal. Runtime
+  contacts come from the source examples through their synthesis time warps and
+  blend weights. Contact inference is heuristic; ankle constraints do not model
+  toe roll, terrain collision, friction, or dynamic balance. Conflicting or
+  unreachable constraints can leave residual error, shown in the runtime UI.
 - Five-frame blending is the demo default.
 - Reader compatibility covers V2–V13; writer emits V13 only.
 - Viewer requires the OpenGL dependencies pulled by `PMG_BUILD_VIEWER`.

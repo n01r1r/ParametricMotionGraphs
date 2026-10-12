@@ -1,6 +1,7 @@
 #include "pmg/RuntimeController.h"
 
 #include "pmg/CyclicContinuity.h"
+#include "Validation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -73,7 +74,7 @@ void RuntimeController::Start(
     int node_index,
     const ParameterVector& initial_parameter,
     float frames_per_second) {
-    if (frames_per_second <= 0.0f) {
+    if (!std::isfinite(frames_per_second) || frames_per_second <= 0.0f) {
         throw std::runtime_error(
             "RuntimeController::Start: frames_per_second must be positive");
     }
@@ -85,12 +86,14 @@ void RuntimeController::Start(
             "RuntimeController::Start: initial parameter dimension mismatch");
     }
 
+    // Generate before committing state: a rejected restart must leave the
+    // existing controller usable, with the actual projected parameter stored.
+    ParameterVector parameter = node.motion_space.ProjectToSupport(initial_parameter);
+    MotionClip clip = node.motion_space.GenerateClip(parameter, frames_per_second);
     current_node_ = node_index;
-    current_parameter_ = initial_parameter;
+    current_parameter_ = std::move(parameter);
     frames_per_second_ = frames_per_second;
-    current_clip_ = node.motion_space.GenerateClip(
-        initial_parameter,
-        frames_per_second_);
+    current_clip_ = std::move(clip);
 
     current_time_seconds_ = 0.0f;
     world_transform_ = RigidTransform2D{};
@@ -106,19 +109,30 @@ void RuntimeController::Start(
     transition_diagnostics_.reset();
 
     completed_transitions_ = 0;
+    corrected_pose_.reset();
+    next_contacts_.clear();
+    if (foot_lock_) {
+        foot_lock_->Reset();
+        current_contacts_ = PrepareFootContacts(current_clip_, node.motion_space, current_parameter_);
+        RefreshFootPose(0.0f);
+    }
 }
 
-void RuntimeController::Update(float delta_seconds,
+void RuntimeController::Advance(float delta_seconds,
                                const RuntimeControlRequest& request) {
     if (current_node_ < 0) {
         throw std::runtime_error(
             "RuntimeController::Update: controller has not been started");
     }
-    if (delta_seconds < 0.0f) {
+    if (!std::isfinite(delta_seconds) || delta_seconds < 0.0f) {
         throw std::runtime_error(
             "RuntimeController::Update: delta_seconds must be non-negative");
     }
 
+    if (request.desired_node >= 0) {
+        RequireFiniteParameter(request.desired_parameter, "RuntimeController::Update");
+    }
+    detail::RequireFinite(current_time_seconds_ + delta_seconds, "RuntimeController::Update time");
     const float previous_phase = CurrentPhase();
     const float phase_advance = PhaseAdvance(current_clip_, delta_seconds);
 
@@ -144,7 +158,8 @@ void RuntimeController::Update(float delta_seconds,
     if (transition_elapsed_seconds_ >= transition_duration_seconds_) {
         current_node_ = next_node_;
         current_parameter_ = next_parameter_;
-        current_clip_ = next_clip_;
+        current_clip_ = std::move(next_clip_);
+        current_contacts_ = std::move(next_contacts_);
         current_time_seconds_ = next_time_seconds_;
         world_transform_ = next_world_transform_;
 
@@ -168,17 +183,32 @@ void RuntimeController::FoldCompletedCycles(
         return;
     }
 
-    while (time_seconds >= duration) {
-        time_seconds -= duration;
-        transform =
-            RigidTransform2D::Compose(transform, ComputeCycleDelta(clip));
-    }
+    detail::RequireFinite(time_seconds, "FoldCompletedCycles");
+    if (time_seconds >= 0.0f && time_seconds < duration) return;
 
-    while (time_seconds < 0.0f) {
-        time_seconds += duration;
-        transform = RigidTransform2D::Compose(
-            transform, ComputeCycleDelta(clip).Inverse());
+    // Compose whole cycles by squaring, not once per cycle. A long frame gap
+    // must not make the UI spend millions of iterations folding the same clip.
+    double cycles = std::floor(static_cast<double>(time_seconds) / duration);
+    RigidTransform2D power = ComputeCycleDelta(clip);
+    if (cycles < 0.0) {
+        power = power.Inverse();
+        cycles = -cycles;
     }
+    RigidTransform2D folded = transform;
+    while (cycles >= 1.0) {
+        if (std::fmod(cycles, 2.0) >= 1.0) {
+            folded = RigidTransform2D::Compose(folded, power);
+        }
+        cycles = std::floor(cycles / 2.0);
+        if (cycles >= 1.0) power = RigidTransform2D::Compose(power, power);
+    }
+    detail::RequireFinite(folded.yaw, "FoldCompletedCycles yaw");
+    detail::RequireFinite(folded.dx, "FoldCompletedCycles x");
+    detail::RequireFinite(folded.dz, "FoldCompletedCycles z");
+    float remainder = std::fmod(time_seconds, duration);
+    if (remainder < 0.0f) remainder += duration;
+    time_seconds = remainder;
+    transform = folded;
 }
 
 float RuntimeController::ClipPhase(
@@ -205,7 +235,7 @@ Pose RuntimeController::SampleWorld(
     return transform.Apply(local_pose);
 }
 
-Pose RuntimeController::CurrentPose() const {
+Pose RuntimeController::RawPose() const {
     if (current_node_ < 0) {
         throw std::runtime_error(
             "RuntimeController::CurrentPose: controller has not been started");
@@ -407,6 +437,7 @@ void RuntimeController::TryScheduleTransition(
         next_clip_ = target_node.motion_space.GenerateClip(
             target_parameter,
             frames_per_second_);
+        next_contacts_ = PrepareFootContacts(next_clip_, target_node.motion_space, target_parameter);
         next_node_ = edge.target_node;
         next_parameter_ = target_parameter;
 
