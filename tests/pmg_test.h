@@ -1,6 +1,6 @@
 #pragma once
 
-// Test prelude: on Windows debug builds, route failed assert()/abort() to
+// Test prelude: on MSVC builds, route failed assert()/abort() to
 // stderr instead of opening a modal dialog, so the test suite fails fast and
 // non-interactively. Include this first in every test translation unit.
 #ifdef _MSC_VER
@@ -12,7 +12,8 @@ namespace {
 
 struct CrtDialogSilencer {
     CrtDialogSilencer() {
-        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTDLG);
+        _set_error_mode(_OUT_TO_STDERR);
+        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
         for (int report_type : {_CRT_ASSERT, _CRT_ERROR, _CRT_WARN}) {
             _CrtSetReportMode(report_type, _CRTDBG_MODE_FILE);
             _CrtSetReportFile(report_type, _CRTDBG_FILE_STDERR);
@@ -24,4 +25,4 @@ struct CrtDialogSilencer {
 const CrtDialogSilencer g_crt_dialog_silencer;
 
 }  // namespace
-#endif  // _WIN32
+#endif  // _MSC_VER
